@@ -1,0 +1,5 @@
+odoo.conf
+private/
+data/
+logs/
+addons/
