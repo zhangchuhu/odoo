@@ -1,0 +1,17 @@
+<odoo>
+  <record id="access_store_manager" model="ir.model.access">
+    <field name="name">Independent store manager</field><field name="model_id" ref="model_meli_independent_store"/>
+    <field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/>
+    <field name="perm_read" eval="True"/><field name="perm_write" eval="True"/>
+    <field name="perm_create" eval="True"/><field name="perm_unlink" eval="False"/>
+  </record>
+  <record id="store_company_rule" model="ir.rule">
+    <field name="name">Independent stores by company</field><field name="model_id" ref="model_meli_independent_store"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+<record id="access_publication_manager" model="ir.model.access"><field name="name">publication manager</field><field name="model_id" ref="model_meli_store_publication"/><field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/><field name="perm_read" eval="True"/><field name="perm_write" eval="True"/><field name="perm_create" eval="True"/><field name="perm_unlink" eval="False"/></record>
+<record id="publication_company_rule" model="ir.rule"><field name="name">publication company isolation</field><field name="model_id" ref="model_meli_store_publication"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="access_attribute_manager" model="ir.model.access"><field name="name">attribute manager</field><field name="model_id" ref="model_meli_store_publication_attribute"/><field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/><field name="perm_read" eval="True"/><field name="perm_write" eval="True"/><field name="perm_create" eval="True"/><field name="perm_unlink" eval="False"/></record>
+<record id="attribute_company_rule" model="ir.rule"><field name="name">attribute company isolation</field><field name="model_id" ref="model_meli_store_publication_attribute"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="access_prepare_manager" model="ir.model.access"><field name="name">prepare manager</field><field name="model_id" ref="model_meli_store_prepare"/><field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/><field name="perm_read" eval="True"/><field name="perm_write" eval="True"/><field name="perm_create" eval="True"/><field name="perm_unlink" eval="False"/></record>
+</odoo>

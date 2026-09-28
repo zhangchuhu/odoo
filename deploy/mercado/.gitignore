@@ -2,4 +2,9 @@ odoo.conf
 private/
 data/
 logs/
-addons/
+addons/*
+!addons/meli_accounts/
+!addons/meli_bff/
+backups/
+__pycache__/
+*.py[cod]

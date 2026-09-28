@@ -1,0 +1,71 @@
+<odoo>
+  <record id="access_store_import_manager" model="ir.model.access">
+    <field name="name">Store imports</field><field name="model_id" ref="model_meli_store_import"/>
+    <field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/>
+    <field name="perm_read" eval="True"/><field name="perm_write" eval="True"/><field name="perm_create" eval="True"/>
+  </record>
+  <record id="access_store_import_line_manager" model="ir.model.access">
+    <field name="name">Store import lines</field><field name="model_id" ref="model_meli_store_import_line"/>
+    <field name="group_id" ref="meli_oerp.group_mercadolibre_manager"/>
+    <field name="perm_read" eval="True"/><field name="perm_write" eval="True"/>
+  </record>
+  <record id="store_import_company_rule" model="ir.rule">
+    <field name="name">Store imports by company</field><field name="model_id" ref="model_meli_store_import"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="store_import_line_company_rule" model="ir.rule">
+    <field name="name">Store import lines by company</field><field name="model_id" ref="model_meli_store_import_line"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="store_import_form" model="ir.ui.view">
+    <field name="name">meli.store.import.form</field><field name="model">meli.store.import</field>
+    <field name="arch" type="xml">
+      <form create="false" edit="false" delete="false">
+        <header>
+          <button name="action_refresh" type="object" string="刷新进度" class="oe_highlight"/>
+          <button name="action_retry" type="object" string="重试未完成商品" invisible="state not in ['failed','partial','cancelled']"/>
+          <button name="action_cancel" type="object" string="取消导入" invisible="state not in ['queued','running']"/>
+          <field name="state" widget="statusbar"/>
+        </header>
+        <sheet>
+          <group><field name="store_id"/><field name="requested_by"/><field name="create_date"/><field name="finished_at"/></group>
+          <group><field name="total_count"/><field name="created_count"/><field name="updated_count"/><field name="failed_count"/></group>
+          <p>按所选店铺的授权导入商品资料、首张图片和平台可售数量。重复导入更新已有刊登；不会调整 Odoo 实物库存。数量按刊登统计，一个刊登可能有多个商品变体。</p>
+          <field name="message"/>
+          <field name="line_ids"><list create="false" edit="false" delete="false" decoration-danger="state == 'failed'">
+            <field name="item_id"/><field name="state"/><field name="product_ids" widget="many2many_tags"/><field name="message"/>
+          </list></field>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="store_import_list" model="ir.ui.view">
+    <field name="name">meli.store.import.list</field><field name="model">meli.store.import</field>
+    <field name="arch" type="xml"><list create="false" edit="false" delete="false">
+      <field name="create_date"/><field name="store_id"/><field name="state"/><field name="total_count"/>
+      <field name="created_count"/><field name="updated_count"/><field name="failed_count"/>
+    </list></field>
+  </record>
+  <record id="store_import_action" model="ir.actions.act_window">
+    <field name="name">商品导入记录</field><field name="res_model">meli.store.import</field>
+    <field name="view_mode">list,form</field><field name="path">meli-store-imports</field>
+  </record>
+  <menuitem id="store_import_menu" name="商品导入记录" parent="store_root" action="store_import_action" sequence="15"/>
+  <record id="store_import_entry_form" model="ir.ui.view">
+    <field name="name">store.import.entry</field><field name="model">meli.independent.store</field>
+    <field name="inherit_id" ref="store_form"/><field name="arch" type="xml">
+      <xpath expr="//header" position="inside">
+        <button name="action_import_products" type="object" string="导入商品" class="oe_highlight" invisible="state != 'connected'"/>
+        <button name="action_view_imports" type="object" string="查看导入记录"/>
+      </xpath>
+    </field>
+  </record>
+  <record id="import_variation_attribute" model="product.attribute">
+    <field name="name">美客多变体</field><field name="create_variant">always</field>
+  </record>
+  <record id="cron_store_import" model="ir.cron">
+    <field name="name">美客多：分店铺导入商品</field><field name="model_id" ref="model_meli_store_import"/>
+    <field name="state">code</field><field name="code">model._cron_import()</field>
+    <field name="interval_number">1</field><field name="interval_type">minutes</field><field name="active" eval="True"/>
+  </record>
+</odoo>

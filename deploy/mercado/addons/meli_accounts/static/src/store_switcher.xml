@@ -1,0 +1,21 @@
+<templates xml:space="preserve">
+  <t t-name="meli_accounts.StoreSwitcher">
+    <div t-if="store.enabled" class="o_meli_store_switcher">
+      <Dropdown>
+        <button t-att-title="'当前店铺：' + store.label" aria-label="切换当前店铺">
+          <i class="fa fa-shopping-bag me-1"/>
+          <span class="d-none d-md-inline">当前店铺：</span>
+          <span class="text-truncate" style="max-width: 220px" t-esc="store.label"/>
+        </button>
+        <t t-set-slot="content">
+          <DropdownItem t-foreach="store.stores" t-as="shop" t-key="shop.id" onSelected="() => store.select(shop.id)">
+            <i t-att-class="shop.id === store.selection ? 'fa fa-check me-2' : 'fa fa-fw me-2'"/>
+            <t t-esc="shop.name"/>
+          </DropdownItem>
+          <div class="dropdown-divider"/>
+          <DropdownItem onSelected="() => store.select('unassigned')">待归属商品</DropdownItem>
+        </t>
+      </Dropdown>
+    </div>
+  </t>
+</templates>
