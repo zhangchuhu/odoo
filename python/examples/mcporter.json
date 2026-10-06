@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "odoo_bff": {
+      "command": "/absolute/path/odoo/python/.venv/bin/python",
+      "args": ["-m", "odoo_bff_mcp", "--env-file", "/absolute/path/odoo/python/.env"],
+      "description": "Odoo Mercado Libre BFF: shops, items, descriptions and pictures"
+    }
+  }
+}

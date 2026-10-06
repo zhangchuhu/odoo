@@ -53,4 +53,4 @@ package.json
 /src/
 
 # deployment files
-/deploy/
+#/deploy/
