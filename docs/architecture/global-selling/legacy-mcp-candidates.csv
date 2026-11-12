@@ -1,0 +1,127 @@
+legacy_operation_id,legacy_module,legacy_title,status,notes
+listing_advertising_advertisers,ml_native,List Product Ads advertisers (PADS),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_answer_question,ml_native,Answer a buyer question,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_append_item_pictures,ml_native,Append pictures to existing item,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_billing_full_monthly_periods,ml_native,List Billing Full monthly periods,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_billing_full_period_key_details,ml_native,Read Billing Full details by period key,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_add_variation,ml_cbt,CBT add one variation,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_answer_question,ml_cbt,CBT answer marketplace question,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_append_item_pictures,ml_cbt,CBT append item pictures,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_create_item,ml_cbt,CBT create global item,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_delete_item_clip,ml_cbt,CBT delete item clip,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_domain_discovery,ml_cbt,CBT domain discovery,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_domain_technical_specs,ml_cbt,CBT domain technical specs,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_domain_technical_specs_grids,ml_cbt,CBT domain technical specs grids,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_get_category,ml_cbt,CBT get category,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_get_category_attributes,ml_cbt,CBT get category attributes,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_get_item,ml_cbt,CBT marketplace item detail,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_get_item_clips,ml_cbt,CBT get item clips,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_get_item_description,ml_cbt,CBT get global item marketplace description,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_items_multiget,ml_cbt,CBT item details multiget,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_marketplace_items,ml_cbt,CBT parent to marketplace child items,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_marketplaces,ml_cbt,CBT child sellers,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_marketplaces_refresh,ml_cbt,Refresh CBT child sellers,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_orders_search,ml_cbt,CBT orders search,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_pack_messages_get,ml_cbt,CBT pack messages get,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_post_sale_message_send,ml_cbt,CBT send pack post-sale message,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_group_ads_metrics,ml_cbt,CBT ads inside one Ad Group,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_group_delete,ml_cbt,CBT delete one Ad Group from campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_group_get,ml_cbt,CBT Product Ads Ad Group detail,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_group_update,ml_cbt,CBT update one Product Ads Ad Group,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_groups_bulk_delete,ml_cbt,CBT bulk delete Ad Groups from campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_groups_bulk_update,ml_cbt,CBT bulk update Product Ads Ad Groups,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_groups_search,ml_cbt,CBT Product Ads Ad Groups and metrics,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ad_update,ml_cbt,DEPRECATED CBT update one Product Ads ad,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_ads_bulk_update,ml_cbt,DEPRECATED CBT bulk update Product Ads ads,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_advertisers,ml_cbt,CBT Product Ads advertisers,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_campaign_ad_groups_metrics,ml_cbt,CBT campaign Ad Group metrics,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_campaign_create,ml_cbt,CBT create Product Ads campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_campaign_get,ml_cbt,CBT Product Ads campaign detail and metrics,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_campaign_update,ml_cbt,CBT update Product Ads campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_product_ads_campaigns_search,ml_cbt,CBT Product Ads campaigns and metrics,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_publish_item_marketplace,ml_cbt,CBT publish existing item to marketplace,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_search_items,ml_cbt,CBT marketplace child item search,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_search_questions,ml_cbt,CBT marketplace questions search,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_me,ml_cbt,CBT verify merchant token,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_item_delete,ml_cbt,CBT seller-promotions item delete,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_item_price_discount,ml_cbt,CBT seller-promotions item deal price,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_item_update,ml_cbt,CBT seller-promotions item update,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_promotion,ml_cbt,CBT seller-promotions detail,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_promotion_items,ml_cbt,CBT seller-promotions items,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_seller_promotions_users,ml_cbt,CBT seller-promotions list,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_active_domains,ml_cbt,CBT size chart active domains,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_add_row,ml_cbt,CBT add size chart row,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_create,ml_cbt,CBT create size chart,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_get,ml_cbt,CBT get size chart,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_update,ml_cbt,CBT update size chart,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_size_chart_update_row,ml_cbt,CBT update size chart row,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_update_description,ml_cbt,CBT update global item description,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_update_item,ml_cbt,CBT update global item,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_update_title,ml_cbt,CBT update global item title,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_upload_item_clip,ml_cbt,CBT upload item clip,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_upload_picture,ml_cbt,CBT upload item picture,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_visits_item_time_window,ml_cbt,CBT single item visits time window,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_visits_items_range,ml_cbt,CBT item visits range,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_visits_items_totals,ml_cbt,CBT item visits totals,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_visits_user,ml_cbt,CBT child seller visits,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_cbt_visits_user_time_window,ml_cbt,CBT child seller visits time window,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_create_item,ml_native,Create Mercado Libre item (proxy POST /items),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_delete_item_clip,ml_native,Delete native item clip,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_domain_discovery,ml_native,Category/domain discovery (domain_discovery/search),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_domain_technical_specs,ml_native,"Get domain technical_specs (grid_template_required, etc.)",candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_domain_technical_specs_grids,ml_native,POST domain technical_specs section=grids (size-chart template structure),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_category,ml_native,Get category (GET /categories/:id),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_category_attributes,ml_native,Get category attributes (GET /categories/:id/attributes),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_item,ml_native,Get item details (includes permalink),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_item_clips,ml_native,Get native item clips,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_item_description,ml_native,Get item description resource (GET description),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_user_product,ml_native,Get User Product,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_get_user_products_family,ml_native,Get User Product family,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_items_multiget,ml_native,Items multiget (batch GET items),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_operator_orders_buyer_other_product_titles,ml_native,List other product titles for buyer (this shop),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_operator_orders_pending_review_requests,ml_native,List delivered-but-unsent operator_orders,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_operator_orders_review_update,ml_native,Patch operator_orders review request fields,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_orders_search,ml_native,Search seller orders (ML /orders/search),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_pack_action_guide_caps_available,ml_native,Get post-sale action guide caps (ML GET),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_pack_action_guide_get,ml_native,Get post-sale action guide options (ML GET),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_pack_action_guide_option_send,ml_native,Send post-sale action guide option (ML POST),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_pack_messages_get,ml_native,Get post-sale messages for a pack (ML GET),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_post_sale_message_send,ml_native,Send post-sale message to buyer (ML POST),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_ad_get,ml_native,Get one Product Ads ad,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_ad_update,ml_native,Update one Product Ads ad,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_ads_bulk_update,ml_native,Bulk update Product Ads ads,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_ads_search,ml_native,Search Product Ads ads,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_campaign_create,ml_native,Create Product Ads campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_campaign_get,ml_native,Get one Product Ads campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_campaign_update,ml_native,Update Product Ads campaign,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_product_ads_campaigns_search,ml_native,Search Product Ads campaigns,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_search_items,ml_native,"Seller item search (items/search, quality filters)",candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_search_questions,ml_native,Search received buyer questions,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_me,ml_native,Verify seller token (platform-proxy → ML /users/me),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_candidates,ml_native,Seller promotion candidates (invited items),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_item,ml_native,Get native item seller promotion state,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_item_delete,ml_native,Remove native item from seller promotion,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_item_price_discount,ml_native,Apply native item PRICE_DISCOUNT (promotional / deal price),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_item_update,ml_native,Update native item inside seller promotion,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_promotion,ml_native,Get one seller promotion detail,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_promotion_items,ml_native,List items in a seller promotion,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_seller_campaign_create,ml_native,Create SELLER_CAMPAIGN (seller-campaign),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_seller_promotions_users,ml_native,List native seller promotions,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_active_domains,ml_native,Get active size-chart domains for site,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_add_row,ml_native,Add row to size chart,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_create,ml_native,Create size chart (POST /catalog/charts),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_get,ml_native,Get size chart details,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_update,ml_native,Update size chart (e.g. name),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_size_chart_update_row,ml_native,Update one size-chart row,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_update_description,ml_native,Update item plain-text description,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_update_item,ml_native,Partial update item (PUT /items/:id),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_update_item_family_name,ml_native,Update item family_name (User Products),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_update_title,ml_native,Update item title,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_upload_item_clip,ml_native,Upload native item clip video,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_upload_picture,ml_native,Upload one picture to Mercado Libre (proxy multipart),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_validate_item,ml_native,Validate item payload before create (ML POST /items/validate),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_visits_item_time_window,ml_native,Single-item visits (time_window),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_visits_items_range,ml_native,Visits range for multiple items,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_visits_items_totals,ml_native,Visits totals for multiple items,candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_visits_user,ml_native,User-level item visits (daily range),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对
+listing_visits_user_time_window,ml_native,User-level visits (time_window),candidate,仅旧实现线索；上游method/path、账号模式、参数、店铺归属均待官方文档核对

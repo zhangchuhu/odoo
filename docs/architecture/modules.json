@@ -1,0 +1,6744 @@
+{
+  "l10n_bg": {
+    "path": "addons/l10n_bg/__manifest__.py",
+    "name": "Bulgaria - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_kz": {
+    "path": "addons/l10n_kz/__manifest__.py",
+    "name": "Kazakhstan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_mc": {
+    "path": "addons/l10n_mc/__manifest__.py",
+    "name": "Monaco - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "auth_totp_mail": {
+    "path": "addons/auth_totp_mail/__manifest__.py",
+    "name": "2FA Invite mail",
+    "category": "Extra Tools",
+    "depends": [
+      "auth_totp",
+      "mail"
+    ],
+    "installable": true
+  },
+  "sale_stock_product_expiry": {
+    "path": "addons/sale_stock_product_expiry/__manifest__.py",
+    "name": "Sale Stock Product Expiry",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_stock",
+      "product_expiry"
+    ],
+    "installable": true
+  },
+  "auth_signup": {
+    "path": "addons/auth_signup/__manifest__.py",
+    "name": "Signup",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup",
+      "mail",
+      "web"
+    ],
+    "installable": true
+  },
+  "website_timesheet": {
+    "path": "addons/website_timesheet/__manifest__.py",
+    "name": "Hide Portal Timesheet Information",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "hr_timesheet"
+    ],
+    "installable": true
+  },
+  "l10n_gq": {
+    "path": "addons/l10n_gq/__manifest__.py",
+    "name": "Guinea Equatorial - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "website_sale_loyalty": {
+    "path": "addons/website_sale_loyalty/__manifest__.py",
+    "name": "Coupons, Promotions, Gift Card and Loyalty for eCommerce",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale",
+      "website_links",
+      "sale_loyalty"
+    ],
+    "installable": true
+  },
+  "l10n_nl": {
+    "path": "addons/l10n_nl/__manifest__.py",
+    "name": "Netherlands - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_hu": {
+    "path": "addons/l10n_hu/__manifest__.py",
+    "name": "Hungary - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_in_hr_holidays": {
+    "path": "addons/l10n_in_hr_holidays/__manifest__.py",
+    "name": "India - Time Off",
+    "category": "Human Resources/Time Off",
+    "depends": [
+      "hr_holidays"
+    ],
+    "installable": true
+  },
+  "l10n_hr": {
+    "path": "addons/l10n_hr/__manifest__.py",
+    "name": "Croatia - Accounting (Euro)",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "account_fleet": {
+    "path": "addons/account_fleet/__manifest__.py",
+    "name": "Accounting/Fleet bridge",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "fleet",
+      "account"
+    ],
+    "installable": true
+  },
+  "project_mrp_sale": {
+    "path": "addons/project_mrp_sale/__manifest__.py",
+    "name": "MRP Project Sale",
+    "category": "Services/Project",
+    "depends": [
+      "project_mrp",
+      "sale_mrp",
+      "sale_project"
+    ],
+    "installable": true
+  },
+  "website_event_track_live": {
+    "path": "addons/website_event_track_live/__manifest__.py",
+    "name": "Live Event Tracks",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event_track"
+    ],
+    "installable": true
+  },
+  "l10n_rs_edi": {
+    "path": "addons/l10n_rs_edi/__manifest__.py",
+    "name": "Serbia - eFaktura E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii",
+      "l10n_rs"
+    ],
+    "installable": true
+  },
+  "l10n_pl_edi": {
+    "path": "addons/l10n_pl_edi/__manifest__.py",
+    "name": "Polish E-Invoicing FA(3)",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_pl",
+      "certificate"
+    ],
+    "installable": true
+  },
+  "resource_mail": {
+    "path": "addons/resource_mail/__manifest__.py",
+    "name": "Resource Mail",
+    "category": "Hidden",
+    "depends": [
+      "resource",
+      "mail"
+    ],
+    "installable": true
+  },
+  "project_stock_landed_costs": {
+    "path": "addons/project_stock_landed_costs/__manifest__.py",
+    "name": "Project Stock Landed Costs",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "project_stock_account",
+      "stock_landed_costs"
+    ],
+    "installable": true
+  },
+  "website_event_track": {
+    "path": "addons/website_event_track/__manifest__.py",
+    "name": "Advanced Events",
+    "category": "Marketing",
+    "depends": [
+      "website_event"
+    ],
+    "installable": true
+  },
+  "l10n_gr_edi": {
+    "path": "addons/l10n_gr_edi/__manifest__.py",
+    "name": "Greece - myDATA",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_gr"
+    ],
+    "installable": true
+  },
+  "website_slides_forum": {
+    "path": "addons/website_slides_forum/__manifest__.py",
+    "name": "Forum on Courses",
+    "category": "Website/eLearning",
+    "depends": [
+      "website_slides",
+      "website_forum"
+    ],
+    "installable": true
+  },
+  "l10n_ne": {
+    "path": "addons/l10n_ne/__manifest__.py",
+    "name": "Niger - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_in_edi": {
+    "path": "addons/l10n_in_edi/__manifest__.py",
+    "name": "Indian - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi",
+      "l10n_in"
+    ],
+    "installable": true
+  },
+  "website_event_exhibitor": {
+    "path": "addons/website_event_exhibitor/__manifest__.py",
+    "name": "Event Exhibitors",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event"
+    ],
+    "installable": true
+  },
+  "sale": {
+    "path": "addons/sale/__manifest__.py",
+    "name": "Sales",
+    "category": "Sales/Sales",
+    "depends": [
+      "sales_team",
+      "account_payment",
+      "utm"
+    ],
+    "installable": true
+  },
+  "l10n_hn": {
+    "path": "addons/l10n_hn/__manifest__.py",
+    "name": "Honduras - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account"
+    ],
+    "installable": true
+  },
+  "account_qr_code_emv": {
+    "path": "addons/account_qr_code_emv/__manifest__.py",
+    "name": "account_qr_code_emv",
+    "category": "Accounting/Payment",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_de": {
+    "path": "addons/l10n_de/__manifest__.py",
+    "name": "Germany - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "l10n_din5008",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "stock_picking_batch": {
+    "path": "addons/stock_picking_batch/__manifest__.py",
+    "name": "Warehouse Management: Batch Transfer",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock"
+    ],
+    "installable": true
+  },
+  "l10n_mx": {
+    "path": "addons/l10n_mx/__manifest__.py",
+    "name": "Mexico - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "im_livechat": {
+    "path": "addons/im_livechat/__manifest__.py",
+    "name": "Live Chat",
+    "category": "Website/Live Chat",
+    "depends": [
+      "mail",
+      "rating",
+      "digest",
+      "utm"
+    ],
+    "installable": true
+  },
+  "l10n_sa_edi": {
+    "path": "addons/l10n_sa_edi/__manifest__.py",
+    "name": "Saudi Arabia - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi",
+      "account_edi_ubl_cii",
+      "l10n_sa",
+      "base_vat",
+      "certificate"
+    ],
+    "installable": true
+  },
+  "hr_recruitment_skills": {
+    "path": "addons/hr_recruitment_skills/__manifest__.py",
+    "name": "Recruitment - Skills Management",
+    "category": "Human Resources/Recruitment",
+    "depends": [
+      "hr_skills",
+      "hr_recruitment"
+    ],
+    "installable": true
+  },
+  "l10n_at": {
+    "path": "addons/l10n_at/__manifest__.py",
+    "name": "Austria - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "base_iban",
+      "base_vat",
+      "l10n_din5008"
+    ],
+    "installable": true
+  },
+  "website_event_booth": {
+    "path": "addons/website_event_booth/__manifest__.py",
+    "name": "Online Event Booths",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event",
+      "event_booth"
+    ],
+    "installable": true
+  },
+  "hr_org_chart": {
+    "path": "addons/hr_org_chart/__manifest__.py",
+    "name": "HR Org Chart",
+    "category": "Human Resources",
+    "depends": [
+      "hr",
+      "web_hierarchy"
+    ],
+    "installable": true
+  },
+  "website_sale_gelato": {
+    "path": "addons/website_sale_gelato/__manifest__.py",
+    "name": "eCommerce/Gelato bridge",
+    "category": "Website/Website",
+    "depends": [
+      "sale_gelato",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "l10n_br": {
+    "path": "addons/l10n_br/__manifest__.py",
+    "name": "Brazilian - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_qr_code_emv",
+      "base_address_extended",
+      "l10n_latam_base",
+      "l10n_latam_invoice_document"
+    ],
+    "installable": true
+  },
+  "l10n_dk": {
+    "path": "addons/l10n_dk/__manifest__.py",
+    "name": "Denmark - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_sii": {
+    "path": "addons/l10n_es_edi_sii/__manifest__.py",
+    "name": "Spain - SII EDI Suministro de Libros",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "certificate",
+      "l10n_es",
+      "account_edi"
+    ],
+    "installable": true
+  },
+  "hr_skills_survey": {
+    "path": "addons/hr_skills_survey/__manifest__.py",
+    "name": "Skills Certification",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "hr_skills",
+      "survey"
+    ],
+    "installable": true
+  },
+  "pos_restaurant_stripe": {
+    "path": "addons/pos_restaurant_stripe/__manifest__.py",
+    "name": "POS Restaurant Stripe",
+    "category": "Point of Sale",
+    "depends": [
+      "pos_stripe",
+      "pos_restaurant",
+      "payment_stripe"
+    ],
+    "installable": true
+  },
+  "delivery_mondialrelay": {
+    "path": "addons/delivery_mondialrelay/__manifest__.py",
+    "name": "delivery_mondialrelay",
+    "category": "Shipping Connectors",
+    "depends": [
+      "stock_delivery"
+    ],
+    "installable": true
+  },
+  "l10n_kh": {
+    "path": "addons/l10n_kh/__manifest__.py",
+    "name": "Cambodia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_qr_code_emv",
+      "l10n_account_withholding_tax"
+    ],
+    "installable": true
+  },
+  "l10n_mq": {
+    "path": "addons/l10n_mq/__manifest__.py",
+    "name": "Martinique - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "sale_expense": {
+    "path": "addons/sale_expense/__manifest__.py",
+    "name": "Sales Expense",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_management",
+      "hr_expense"
+    ],
+    "installable": true
+  },
+  "hr_work_entry": {
+    "path": "addons/hr_work_entry/__manifest__.py",
+    "name": "Work Entries",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "hr"
+    ],
+    "installable": true
+  },
+  "mass_mailing_event_track": {
+    "path": "addons/mass_mailing_event_track/__manifest__.py",
+    "name": "Mass mailing on track speakers",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "website_event_track",
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "calendar_sms": {
+    "path": "addons/calendar_sms/__manifest__.py",
+    "name": "Calendar - SMS",
+    "category": "Productivity/Calendar",
+    "depends": [
+      "calendar",
+      "sms"
+    ],
+    "installable": true
+  },
+  "google_calendar": {
+    "path": "addons/google_calendar/__manifest__.py",
+    "name": "Google Calendar",
+    "category": "Productivity",
+    "depends": [
+      "google_account",
+      "calendar"
+    ],
+    "installable": true
+  },
+  "l10n_kr": {
+    "path": "addons/l10n_kr/__manifest__.py",
+    "name": "Republic of Korea - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "website_sale_mass_mailing": {
+    "path": "addons/website_sale_mass_mailing/__manifest__.py",
+    "name": "Checkout Newsletter",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale",
+      "website_mass_mailing"
+    ],
+    "installable": true
+  },
+  "mail_bot": {
+    "path": "addons/mail_bot/__manifest__.py",
+    "name": "OdooBot",
+    "category": "Productivity/Discuss",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_bo": {
+    "path": "addons/l10n_bo/__manifest__.py",
+    "name": "Bolivia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "event_booth": {
+    "path": "addons/event_booth/__manifest__.py",
+    "name": "Events Booths",
+    "category": "Marketing/Events",
+    "depends": [
+      "event"
+    ],
+    "installable": true
+  },
+  "pos_self_order_stripe": {
+    "path": "addons/pos_self_order_stripe/__manifest__.py",
+    "name": "POS Self Order Stripe",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_stripe",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "l10n_bh": {
+    "path": "addons/l10n_bh/__manifest__.py",
+    "name": "Bahrain - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "stock_delivery": {
+    "path": "addons/stock_delivery/__manifest__.py",
+    "name": "Delivery - Stock",
+    "category": "Shipping Connectors",
+    "depends": [
+      "sale_stock",
+      "delivery"
+    ],
+    "installable": true
+  },
+  "account_payment_interco": {
+    "path": "addons/account_payment_interco/__manifest__.py",
+    "name": "Intercompany Payment - Account",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account_payment"
+    ],
+    "installable": true
+  },
+  "l10n_ml": {
+    "path": "addons/l10n_ml/__manifest__.py",
+    "name": "Mali - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "pos_hr": {
+    "path": "addons/pos_hr/__manifest__.py",
+    "name": "POS - HR",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "hr"
+    ],
+    "installable": true
+  },
+  "link_tracker": {
+    "path": "addons/link_tracker/__manifest__.py",
+    "name": "Link Tracker",
+    "category": "Marketing",
+    "depends": [
+      "utm",
+      "mail"
+    ],
+    "installable": true
+  },
+  "website_sale_comparison_wishlist": {
+    "path": "addons/website_sale_comparison_wishlist/__manifest__.py",
+    "name": "Product Availability Notifications",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale_comparison",
+      "website_sale_wishlist"
+    ],
+    "installable": true
+  },
+  "sale_gelato": {
+    "path": "addons/sale_gelato/__manifest__.py",
+    "name": "Gelato",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "delivery"
+    ],
+    "installable": true
+  },
+  "l10n_gw": {
+    "path": "addons/l10n_gw/__manifest__.py",
+    "name": "Guinea-Bissau - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "hr_recruitment_survey": {
+    "path": "addons/hr_recruitment_survey/__manifest__.py",
+    "name": "Hr Recruitment Interview Forms",
+    "category": "Human Resources",
+    "depends": [
+      "survey",
+      "hr_recruitment"
+    ],
+    "installable": true
+  },
+  "sale_mrp_margin": {
+    "path": "addons/sale_mrp_margin/__manifest__.py",
+    "name": "Sale Mrp Margin",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_mrp",
+      "sale_stock_margin"
+    ],
+    "installable": true
+  },
+  "test_sale_product_configurators": {
+    "path": "addons/test_sale_product_configurators/__manifest__.py",
+    "name": "Sale Product Configurators Tests",
+    "category": "Hidden",
+    "depends": [
+      "event_sale",
+      "sale_management",
+      "sale_product_matrix"
+    ],
+    "installable": true
+  },
+  "l10n_bf": {
+    "path": "addons/l10n_bf/__manifest__.py",
+    "name": "Burkina Faso - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_gp": {
+    "path": "addons/l10n_gp/__manifest__.py",
+    "name": "Guadeloupe - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "website_customer": {
+    "path": "addons/website_customer/__manifest__.py",
+    "name": "Customer References",
+    "category": "Website/Website",
+    "depends": [
+      "website_crm_partner_assign",
+      "website_partner",
+      "website_google_map"
+    ],
+    "installable": true
+  },
+  "payment_redsys": {
+    "path": "addons/payment_redsys/__manifest__.py",
+    "name": "Payment Provider: Redsys",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "test_mail_sms": {
+    "path": "addons/test_mail_sms/__manifest__.py",
+    "name": "SMS Tests",
+    "category": "Hidden",
+    "depends": [
+      "mail",
+      "sms",
+      "sms_twilio",
+      "test_orm"
+    ],
+    "installable": true
+  },
+  "pos_self_order_qfpay": {
+    "path": "addons/pos_self_order_qfpay/__manifest__.py",
+    "name": "POS Self Order QFPay",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_qfpay",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "hr_holidays_attendance": {
+    "path": "addons/hr_holidays_attendance/__manifest__.py",
+    "name": "HR Attendance Holidays",
+    "category": "Human Resources",
+    "depends": [
+      "hr_attendance",
+      "hr_holidays"
+    ],
+    "installable": true
+  },
+  "l10n_in_purchase_stock": {
+    "path": "addons/l10n_in_purchase_stock/__manifest__.py",
+    "name": "India Purchase and Warehouse Management",
+    "category": "Accounting/Localizations/Purchase",
+    "depends": [
+      "l10n_in_stock",
+      "purchase_stock"
+    ],
+    "installable": true
+  },
+  "l10n_din5008_purchase": {
+    "path": "addons/l10n_din5008_purchase/__manifest__.py",
+    "name": "DIN 5008 - Purchase",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_din5008",
+      "purchase"
+    ],
+    "installable": true
+  },
+  "l10n_ge": {
+    "path": "addons/l10n_ge/__manifest__.py",
+    "name": "Georgia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_jo_edi_pos": {
+    "path": "addons/l10n_jo_edi_pos/__manifest__.py",
+    "name": "Jordan Accounting EDI for POS",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_jo_edi",
+      "pos_edi_ubl"
+    ],
+    "installable": true
+  },
+  "l10n_au": {
+    "path": "addons/l10n_au/__manifest__.py",
+    "name": "Australia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_ar": {
+    "path": "addons/l10n_ar/__manifest__.py",
+    "name": "Argentina - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_latam_invoice_document",
+      "l10n_latam_base",
+      "account"
+    ],
+    "installable": true
+  },
+  "pos_sms": {
+    "path": "addons/pos_sms/__manifest__.py",
+    "name": "POS - SMS",
+    "category": "Send sms to customer for order confirmation",
+    "depends": [
+      "point_of_sale",
+      "sms"
+    ],
+    "installable": true
+  },
+  "l10n_my": {
+    "path": "addons/l10n_my/__manifest__.py",
+    "name": "Malaysia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_tax_python"
+    ],
+    "installable": true
+  },
+  "portal_rating": {
+    "path": "addons/portal_rating/__manifest__.py",
+    "name": "Portal Rating",
+    "category": "Services",
+    "depends": [
+      "portal",
+      "rating"
+    ],
+    "installable": true
+  },
+  "pos_self_order_viva_com": {
+    "path": "addons/pos_self_order_viva_com/__manifest__.py",
+    "name": "POS Self Order Viva.com",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_viva_com",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "l10n_za": {
+    "path": "addons/l10n_za/__manifest__.py",
+    "name": "South Africa - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "purchase_requisition_sale": {
+    "path": "addons/purchase_requisition_sale/__manifest__.py",
+    "name": "Purchase Requisition Sale",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "purchase_requisition",
+      "sale_purchase"
+    ],
+    "installable": true
+  },
+  "base_install_request": {
+    "path": "addons/base_install_request/__manifest__.py",
+    "name": "Base - Module Install Request",
+    "category": "Hidden",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "pos_viva_com": {
+    "path": "addons/pos_viva_com/__manifest__.py",
+    "name": "PoS Viva.com",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "attachment_indexation": {
+    "path": "addons/attachment_indexation/__manifest__.py",
+    "name": "Attachments List and Document Indexation",
+    "category": "Hidden/Tools",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "website_sale_mrp": {
+    "path": "addons/website_sale_mrp/__manifest__.py",
+    "name": "Kit Availability",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale_stock",
+      "sale_mrp"
+    ],
+    "installable": true
+  },
+  "portal": {
+    "path": "addons/portal/__manifest__.py",
+    "name": "Customer Portal",
+    "category": "Hidden",
+    "depends": [
+      "web",
+      "html_editor",
+      "http_routing",
+      "mail",
+      "auth_signup"
+    ],
+    "installable": true
+  },
+  "l10n_tw_edi_ecpay_website_sale": {
+    "path": "addons/l10n_tw_edi_ecpay_website_sale/__manifest__.py",
+    "name": "Taiwan - E-invoicing Ecommerce",
+    "category": "Website Sale/Localizations/EDI",
+    "depends": [
+      "website_sale",
+      "l10n_tw_edi_ecpay"
+    ],
+    "installable": true
+  },
+  "l10n_pt": {
+    "path": "addons/l10n_pt/__manifest__.py",
+    "name": "Portugal - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_tz_account": {
+    "path": "addons/l10n_tz_account/__manifest__.py",
+    "name": "Tanzania - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "website_event_booth_sale": {
+    "path": "addons/website_event_booth_sale/__manifest__.py",
+    "name": "Online Event Booth Sale",
+    "category": "Marketing/Events",
+    "depends": [
+      "event_booth_sale",
+      "website_event_booth",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "rating": {
+    "path": "addons/rating/__manifest__.py",
+    "name": "Customer Rating",
+    "category": "Productivity",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_din5008_sale": {
+    "path": "addons/l10n_din5008_sale/__manifest__.py",
+    "name": "DIN 5008 - Sale",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_din5008",
+      "sale"
+    ],
+    "installable": true
+  },
+  "l10n_uk": {
+    "path": "addons/l10n_uk/__manifest__.py",
+    "name": "United Kingdom - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "mail_plugin": {
+    "path": "addons/mail_plugin/__manifest__.py",
+    "name": "Mail Plugin",
+    "category": "Sales/CRM",
+    "depends": [
+      "web",
+      "contacts",
+      "iap"
+    ],
+    "installable": true
+  },
+  "account_update_tax_tags": {
+    "path": "addons/account_update_tax_tags/__manifest__.py",
+    "name": "Account - Allow updating tax grids",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "website_sale_slides": {
+    "path": "addons/website_sale_slides/__manifest__.py",
+    "name": "Sell Courses",
+    "category": "Website/eLearning",
+    "depends": [
+      "website_slides",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "calendar": {
+    "path": "addons/calendar/__manifest__.py",
+    "name": "Calendar",
+    "category": "Productivity/Calendar",
+    "depends": [
+      "base",
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_uy_pos": {
+    "path": "addons/l10n_uy_pos/__manifest__.py",
+    "name": "Uruguayan - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_uy",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "website_sale_mondialrelay": {
+    "path": "addons/website_sale_mondialrelay/__manifest__.py",
+    "name": "eCommerce Mondialrelay Delivery",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale",
+      "delivery_mondialrelay"
+    ],
+    "installable": true
+  },
+  "iap_mail": {
+    "path": "addons/iap_mail/__manifest__.py",
+    "name": "IAP / Mail",
+    "category": "Hidden/Tools",
+    "depends": [
+      "iap",
+      "mail"
+    ],
+    "installable": true
+  },
+  "pos_self_order": {
+    "path": "addons/pos_self_order/__manifest__.py",
+    "name": "POS Self Order",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_restaurant",
+      "http_routing",
+      "link_tracker"
+    ],
+    "installable": true
+  },
+  "sale_project_stock_account": {
+    "path": "addons/sale_project_stock_account/__manifest__.py",
+    "name": "Sale Project Stock Account",
+    "category": "Services/Project",
+    "depends": [
+      "sale_project",
+      "project_stock_account"
+    ],
+    "installable": true
+  },
+  "purchase_requisition_stock": {
+    "path": "addons/purchase_requisition_stock/__manifest__.py",
+    "name": "Purchase Requisition Stock",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "purchase_requisition",
+      "purchase_stock"
+    ],
+    "installable": true
+  },
+  "mrp_product_expiry": {
+    "path": "addons/mrp_product_expiry/__manifest__.py",
+    "name": "Manufacturing Expiry",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "mrp",
+      "product_expiry"
+    ],
+    "installable": true
+  },
+  "l10n_ph": {
+    "path": "addons/l10n_ph/__manifest__.py",
+    "name": "Philippines - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "l10n_account_withholding_tax"
+    ],
+    "installable": true
+  },
+  "website_sale_stock": {
+    "path": "addons/website_sale_stock/__manifest__.py",
+    "name": "Product Availability",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale",
+      "sale_stock",
+      "stock_delivery"
+    ],
+    "installable": true
+  },
+  "l10n_sg": {
+    "path": "addons/l10n_sg/__manifest__.py",
+    "name": "Singapore - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_qr_code_emv",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_fr_pdp_penalty_rate": {
+    "path": "addons/l10n_fr_pdp_penalty_rate/__manifest__.py",
+    "name": "France - PDP Late Payment Penalty Rate",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_fr_pdp"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_sale_timesheet": {
+    "path": "addons/spreadsheet_dashboard_sale_timesheet/__manifest__.py",
+    "name": "Spreadsheet dashboard for time sheets",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "sale_timesheet"
+    ],
+    "installable": true
+  },
+  "l10n_latam_base": {
+    "path": "addons/l10n_latam_base/__manifest__.py",
+    "name": "LATAM Localization Base",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "contacts",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_uy": {
+    "path": "addons/l10n_uy/__manifest__.py",
+    "name": "Uruguay - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_latam_invoice_document",
+      "l10n_latam_base"
+    ],
+    "installable": true
+  },
+  "spreadsheet_account": {
+    "path": "addons/spreadsheet_account/__manifest__.py",
+    "name": "Spreadsheet Accounting Formulas",
+    "category": "Accounting",
+    "depends": [
+      "spreadsheet",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_my_edi_pos": {
+    "path": "addons/l10n_my_edi_pos/__manifest__.py",
+    "name": "Malaysia - E-invoicing (POS)",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_my_edi",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "website_sale_collect_wishlist": {
+    "path": "addons/website_sale_collect_wishlist/__manifest__.py",
+    "name": "Collect & Wishlist",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale_wishlist",
+      "website_sale_collect"
+    ],
+    "installable": true
+  },
+  "google_address_autocomplete": {
+    "path": "addons/google_address_autocomplete/__manifest__.py",
+    "name": "Google Address Autocomplete",
+    "category": "Hidden/Tools",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "pos_restaurant": {
+    "path": "addons/pos_restaurant/__manifest__.py",
+    "name": "Restaurant",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_fr_pos_cert": {
+    "path": "addons/l10n_fr_pos_cert/__manifest__.py",
+    "name": "France - VAT Anti-Fraud Certification for Point of Sale (CGI 286 I-3 bis)",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_fr_account",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_si": {
+    "path": "addons/l10n_si/__manifest__.py",
+    "name": "Slovenian - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "pos_restaurant_adyen": {
+    "path": "addons/pos_restaurant_adyen/__manifest__.py",
+    "name": "POS Restaurant Adyen",
+    "category": "Point of Sale",
+    "depends": [
+      "pos_adyen",
+      "pos_restaurant",
+      "payment_adyen"
+    ],
+    "installable": true
+  },
+  "l10n_gcc_invoice": {
+    "path": "addons/l10n_gcc_invoice/__manifest__.py",
+    "name": "Gulf Cooperation Council - Invoice",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_sn": {
+    "path": "addons/l10n_sn/__manifest__.py",
+    "name": "Sénégal - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "mass_mailing_slides": {
+    "path": "addons/mass_mailing_slides/__manifest__.py",
+    "name": "Mass mailing on course members",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "website_slides",
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "l10n_pa": {
+    "path": "addons/l10n_pa/__manifest__.py",
+    "name": "Panama - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "crm_iap_enrich": {
+    "path": "addons/crm_iap_enrich/__manifest__.py",
+    "name": "Lead Enrichment",
+    "category": "Sales/CRM",
+    "depends": [
+      "iap_crm",
+      "iap_mail"
+    ],
+    "installable": true
+  },
+  "payment_authorize": {
+    "path": "addons/payment_authorize/__manifest__.py",
+    "name": "Payment Provider: Authorize.Net",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "cloud_storage_google": {
+    "path": "addons/cloud_storage_google/__manifest__.py",
+    "name": "Cloud Storage Google",
+    "category": "Technical Settings",
+    "depends": [
+      "cloud_storage"
+    ],
+    "installable": true
+  },
+  "certificate": {
+    "path": "addons/certificate/__manifest__.py",
+    "name": "Certificate",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "website_sale_comparison": {
+    "path": "addons/website_sale_comparison/__manifest__.py",
+    "name": "Product Comparison",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "base_address_extended": {
+    "path": "addons/base_address_extended/__manifest__.py",
+    "name": "Extended Addresses",
+    "category": "Sales/Sales",
+    "depends": [
+      "base",
+      "contacts"
+    ],
+    "installable": true
+  },
+  "l10n_ve": {
+    "path": "addons/l10n_ve/__manifest__.py",
+    "name": "Venezuela - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "website_hr_recruitment": {
+    "path": "addons/website_hr_recruitment/__manifest__.py",
+    "name": "Online Jobs",
+    "category": "Website/Website",
+    "depends": [
+      "hr_recruitment",
+      "website_mail"
+    ],
+    "installable": true
+  },
+  "project_sms": {
+    "path": "addons/project_sms/__manifest__.py",
+    "name": "Project - SMS",
+    "category": "Services/Project",
+    "depends": [
+      "project",
+      "sms"
+    ],
+    "installable": true
+  },
+  "l10n_in_sale_stock": {
+    "path": "addons/l10n_in_sale_stock/__manifest__.py",
+    "name": "India Sales and Warehouse Management",
+    "category": "Accounting/Localizations/Sale",
+    "depends": [
+      "l10n_in_sale",
+      "l10n_in_stock",
+      "sale_stock"
+    ],
+    "installable": true
+  },
+  "test_mass_mailing": {
+    "path": "addons/test_mass_mailing/__manifest__.py",
+    "name": "Mass Mail Tests",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "mass_mailing",
+      "mass_mailing_sms",
+      "sms_twilio",
+      "test_mail",
+      "test_mail_sms"
+    ],
+    "installable": true
+  },
+  "payment_xendit": {
+    "path": "addons/payment_xendit/__manifest__.py",
+    "name": "Payment Provider: Xendit",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "hr_attendance": {
+    "path": "addons/hr_attendance/__manifest__.py",
+    "name": "Attendances",
+    "category": "Human Resources/Attendances",
+    "depends": [
+      "hr",
+      "barcodes",
+      "base_geolocalize"
+    ],
+    "installable": true
+  },
+  "pos_safaricom": {
+    "path": "addons/pos_safaricom/__manifest__.py",
+    "name": "POS Safaricom",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "auth_timeout": {
+    "path": "addons/auth_timeout/__manifest__.py",
+    "name": "Auth Timeout",
+    "category": "Hidden/Tools",
+    "depends": [
+      "auth_totp",
+      "auth_totp_mail",
+      "auth_passkey",
+      "bus"
+    ],
+    "installable": true
+  },
+  "payment_mollie": {
+    "path": "addons/payment_mollie/__manifest__.py",
+    "name": "Payment Provider: Mollie",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "pos_discount": {
+    "path": "addons/pos_discount/__manifest__.py",
+    "name": "Point of Sale Discounts",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_us_account": {
+    "path": "addons/l10n_us_account/__manifest__.py",
+    "name": "United States - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_us",
+      "account"
+    ],
+    "installable": true
+  },
+  "pos_account_tax_python": {
+    "path": "addons/pos_account_tax_python/__manifest__.py",
+    "name": "Allow custom taxes in POS",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account_tax_python",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "board": {
+    "path": "addons/board/__manifest__.py",
+    "name": "Dashboards",
+    "category": "Productivity",
+    "depends": [
+      "spreadsheet_dashboard"
+    ],
+    "installable": true
+  },
+  "project_sale_expense": {
+    "path": "addons/project_sale_expense/__manifest__.py",
+    "name": "Project - Sale - Expense",
+    "category": "Services/Project",
+    "depends": [
+      "sale_project",
+      "sale_expense",
+      "project_hr_expense"
+    ],
+    "installable": true
+  },
+  "sale_purchase_project": {
+    "path": "addons/sale_purchase_project/__manifest__.py",
+    "name": "Sale Purchase Project",
+    "category": "Sales",
+    "depends": [
+      "sale_purchase",
+      "project_purchase",
+      "sale_project"
+    ],
+    "installable": true
+  },
+  "payment_paypal": {
+    "path": "addons/payment_paypal/__manifest__.py",
+    "name": "Payment Provider: Paypal",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_bg_ledger": {
+    "path": "addons/l10n_bg_ledger/__manifest__.py",
+    "name": "Bulgaria - Report ledger",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_bg"
+    ],
+    "installable": true
+  },
+  "payment_toss_payments": {
+    "path": "addons/payment_toss_payments/__manifest__.py",
+    "name": "Payment Provider: Toss Payments",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "mass_mailing_crm_sms": {
+    "path": "addons/mass_mailing_crm_sms/__manifest__.py",
+    "name": "Mass mailing sms on lead / opportunities",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "mass_mailing_crm",
+      "mass_mailing_sms"
+    ],
+    "installable": true
+  },
+  "sms": {
+    "path": "addons/sms/__manifest__.py",
+    "name": "SMS gateway",
+    "category": "Sales/Sales",
+    "depends": [
+      "base",
+      "iap_mail",
+      "mail",
+      "phone_validation"
+    ],
+    "installable": true
+  },
+  "project_mail_plugin": {
+    "path": "addons/project_mail_plugin/__manifest__.py",
+    "name": "Project Mail Plugin",
+    "category": "Services/Project",
+    "depends": [
+      "project",
+      "mail_plugin"
+    ],
+    "installable": true
+  },
+  "l10n_ec_stock": {
+    "path": "addons/l10n_ec_stock/__manifest__.py",
+    "name": "Ecuador - Stock",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_ec",
+      "stock"
+    ],
+    "installable": true
+  },
+  "spreadsheet": {
+    "path": "addons/spreadsheet/__manifest__.py",
+    "name": "Spreadsheet",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "bus",
+      "web",
+      "portal"
+    ],
+    "installable": true
+  },
+  "website_mass_mailing_sms": {
+    "path": "addons/website_mass_mailing_sms/__manifest__.py",
+    "name": "Newsletter Subscribe SMS Template",
+    "category": "Website/Website",
+    "depends": [
+      "website_mass_mailing",
+      "mass_mailing_sms"
+    ],
+    "installable": true
+  },
+  "l10n_dk_oioubl": {
+    "path": "addons/l10n_dk_oioubl/__manifest__.py",
+    "name": "Denmark - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii",
+      "l10n_dk"
+    ],
+    "installable": true
+  },
+  "l10n_sa": {
+    "path": "addons/l10n_sa/__manifest__.py",
+    "name": "Saudi Arabia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_gcc_invoice",
+      "account",
+      "account_debit_note"
+    ],
+    "installable": true
+  },
+  "l10n_yt": {
+    "path": "addons/l10n_yt/__manifest__.py",
+    "name": "Mayotte - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "barcodes_gs1_nomenclature": {
+    "path": "addons/barcodes_gs1_nomenclature/__manifest__.py",
+    "name": "Barcode - GS1 Nomenclature",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "barcodes",
+      "uom"
+    ],
+    "installable": true
+  },
+  "l10n_fr_pdp_pos": {
+    "path": "addons/l10n_fr_pdp_pos/__manifest__.py",
+    "name": "France - E-reporting for POS",
+    "category": "Accounting/Localizations/Reporting",
+    "depends": [
+      "l10n_fr_pdp",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_eu_oss": {
+    "path": "addons/l10n_eu_oss/__manifest__.py",
+    "name": "EU One Stop Shop (OSS)",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_tr": {
+    "path": "addons/l10n_tr/__manifest__.py",
+    "name": "Türkiye - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_custom": {
+    "path": "addons/payment_custom/__manifest__.py",
+    "name": "Payment Provider: Custom Payment Modes",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_latam_invoice_document": {
+    "path": "addons/l10n_latam_invoice_document/__manifest__.py",
+    "name": "LATAM Document",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account",
+      "account_debit_note"
+    ],
+    "installable": true
+  },
+  "hr_timesheet_attendance": {
+    "path": "addons/hr_timesheet_attendance/__manifest__.py",
+    "name": "Timesheets/attendances reporting",
+    "category": "Human Resources/Attendances",
+    "depends": [
+      "hr_timesheet",
+      "hr_attendance"
+    ],
+    "installable": true
+  },
+  "website_hr_recruitment_livechat": {
+    "path": "addons/website_hr_recruitment_livechat/__manifest__.py",
+    "name": "Website IM Livechat HR Recruitment",
+    "category": "Website/Live Chat",
+    "depends": [
+      "website_hr_recruitment",
+      "im_livechat"
+    ],
+    "installable": true
+  },
+  "l10n_pl_edi_jst": {
+    "path": "addons/l10n_pl_edi_jst/__manifest__.py",
+    "name": "Polish E-Invoicing FA(3) LGU support",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_pl",
+      "l10n_pl_edi"
+    ],
+    "installable": true
+  },
+  "l10n_re": {
+    "path": "addons/l10n_re/__manifest__.py",
+    "name": "Reunion - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting": {
+    "path": "addons/mrp_subcontracting/__manifest__.py",
+    "name": "MRP Subcontracting",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "mrp"
+    ],
+    "installable": true
+  },
+  "gamification": {
+    "path": "addons/gamification/__manifest__.py",
+    "name": "Gamification",
+    "category": "Human Resources",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "pos_online_payment_self_order": {
+    "path": "addons/pos_online_payment_self_order/__manifest__.py",
+    "name": "POS Self-Order / Online Payment",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_online_payment",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "l10n_gcc_pos": {
+    "path": "addons/l10n_gcc_pos/__manifest__.py",
+    "name": "Gulf Cooperation Council - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "stock_maintenance": {
+    "path": "addons/stock_maintenance/__manifest__.py",
+    "name": "Stock - Maintenance",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock",
+      "maintenance"
+    ],
+    "installable": true
+  },
+  "mail": {
+    "path": "addons/mail/__manifest__.py",
+    "name": "Discuss",
+    "category": "Productivity/Discuss",
+    "depends": [
+      "base",
+      "base_setup",
+      "bus",
+      "web_tour",
+      "html_editor"
+    ],
+    "installable": true
+  },
+  "sale_stock": {
+    "path": "addons/sale_stock/__manifest__.py",
+    "name": "Sales and Warehouse Management",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "pos_sale_margin": {
+    "path": "addons/pos_sale_margin/__manifest__.py",
+    "name": "POS - Sale Margin",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_sale",
+      "sale_margin"
+    ],
+    "installable": true
+  },
+  "hr_hourly_cost": {
+    "path": "addons/hr_hourly_cost/__manifest__.py",
+    "name": "Employee Hourly Wage",
+    "category": "Services/Employee Hourly Cost",
+    "depends": [
+      "hr"
+    ],
+    "installable": true
+  },
+  "base_geolocalize": {
+    "path": "addons/base_geolocalize/__manifest__.py",
+    "name": "Partners Geolocation",
+    "category": "Sales/Sales",
+    "depends": [
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "mrp_landed_costs": {
+    "path": "addons/mrp_landed_costs/__manifest__.py",
+    "name": "Landed Costs On MO",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "stock_landed_costs",
+      "mrp"
+    ],
+    "installable": true
+  },
+  "l10n_fr_account": {
+    "path": "addons/l10n_fr_account/__manifest__.py",
+    "name": "France - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii",
+      "l10n_fr"
+    ],
+    "installable": true
+  },
+  "web": {
+    "path": "addons/web/__manifest__.py",
+    "name": "Web",
+    "category": "Hidden",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "l10n_in_sale": {
+    "path": "addons/l10n_in_sale/__manifest__.py",
+    "name": "Indian - Sale Report(GST)",
+    "category": "Accounting/Localizations/Sale",
+    "depends": [
+      "l10n_in",
+      "sale"
+    ],
+    "installable": true
+  },
+  "data_recycle": {
+    "path": "addons/data_recycle/__manifest__.py",
+    "name": "Data Recycle",
+    "category": "Productivity/Data Cleaning",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "test_website_slides_full": {
+    "path": "addons/test_website_slides_full/__manifest__.py",
+    "name": "Test Full eLearning Flow",
+    "category": "Hidden/Tests",
+    "depends": [
+      "website_sale_slides",
+      "website_slides_forum",
+      "website_slides_survey"
+    ],
+    "installable": true
+  },
+  "l10n_tn": {
+    "path": "addons/l10n_tn/__manifest__.py",
+    "name": "Tunisia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_rw": {
+    "path": "addons/l10n_rw/__manifest__.py",
+    "name": "Rwanda - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "base_iban": {
+    "path": "addons/base_iban/__manifest__.py",
+    "name": "IBAN Bank Accounts",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account",
+      "web"
+    ],
+    "installable": true
+  },
+  "l10n_id_pos": {
+    "path": "addons/l10n_id_pos/__manifest__.py",
+    "name": "Indonesia - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_id",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "hr_recruitment": {
+    "path": "addons/hr_recruitment/__manifest__.py",
+    "name": "Recruitment",
+    "category": "Human Resources/Recruitment",
+    "depends": [
+      "hr",
+      "calendar",
+      "utm",
+      "attachment_indexation",
+      "web_tour",
+      "digest"
+    ],
+    "installable": true
+  },
+  "social_media": {
+    "path": "addons/social_media/__manifest__.py",
+    "name": "Social Media",
+    "category": "Marketing/Social Marketing",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "pos_sale_loyalty": {
+    "path": "addons/pos_sale_loyalty/__manifest__.py",
+    "name": "POS - Sales Loyalty",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_sale",
+      "pos_loyalty"
+    ],
+    "installable": true
+  },
+  "payment": {
+    "path": "addons/payment/__manifest__.py",
+    "name": "Payment Engine",
+    "category": "Hidden",
+    "depends": [
+      "onboarding",
+      "portal"
+    ],
+    "installable": true
+  },
+  "l10n_tg": {
+    "path": "addons/l10n_tg/__manifest__.py",
+    "name": "Togo - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "pos_self_order_adyen": {
+    "path": "addons/pos_self_order_adyen/__manifest__.py",
+    "name": "POS Self Order Adyen",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_adyen",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "event_product": {
+    "path": "addons/event_product/__manifest__.py",
+    "name": "Events Product",
+    "category": "Marketing/Events",
+    "depends": [
+      "event",
+      "product",
+      "account"
+    ],
+    "installable": true
+  },
+  "account_check_printing": {
+    "path": "addons/account_check_printing/__manifest__.py",
+    "name": "Check Printing Base",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_it_stock_ddt": {
+    "path": "addons/l10n_it_stock_ddt/__manifest__.py",
+    "name": "Italy - Stock DDT",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_it_edi",
+      "stock_delivery",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "website_slides": {
+    "path": "addons/website_slides/__manifest__.py",
+    "name": "eLearning",
+    "category": "Website/eLearning",
+    "depends": [
+      "portal_rating",
+      "website",
+      "website_mail",
+      "website_profile"
+    ],
+    "installable": true
+  },
+  "payment_demo": {
+    "path": "addons/payment_demo/__manifest__.py",
+    "name": "Payment Provider: Demo",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "pos_mercado_pago": {
+    "path": "addons/pos_mercado_pago/__manifest__.py",
+    "name": "POS Mercado Pago",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "sale_gelato_stock": {
+    "path": "addons/sale_gelato_stock/__manifest__.py",
+    "name": "Gelato/Stock bridge",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_gelato",
+      "sale_stock"
+    ],
+    "installable": true
+  },
+  "contacts": {
+    "path": "addons/contacts/__manifest__.py",
+    "name": "Contacts",
+    "category": "Sales/CRM",
+    "depends": [
+      "base",
+      "mail"
+    ],
+    "installable": true
+  },
+  "account_test": {
+    "path": "addons/account_test/__manifest__.py",
+    "name": "Accounting Consistency Tests",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "auth_passkey": {
+    "path": "addons/auth_passkey/__manifest__.py",
+    "name": "Passkeys",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup",
+      "web"
+    ],
+    "installable": true
+  },
+  "digest": {
+    "path": "addons/digest/__manifest__.py",
+    "name": "KPI Digests",
+    "category": "Marketing",
+    "depends": [
+      "mail",
+      "portal",
+      "resource"
+    ],
+    "installable": true
+  },
+  "google_recaptcha": {
+    "path": "addons/google_recaptcha/__manifest__.py",
+    "name": "Google reCAPTCHA integration",
+    "category": "Hidden",
+    "depends": [
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "l10n_in_ewaybill_stock": {
+    "path": "addons/l10n_in_ewaybill_stock/__manifest__.py",
+    "name": "Indian - E-waybill Stock",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_in_stock",
+      "l10n_in_ewaybill"
+    ],
+    "installable": true
+  },
+  "base_vat": {
+    "path": "addons/base_vat/__manifest__.py",
+    "name": "VAT Number Validation",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "account_peppol": {
+    "path": "addons/account_peppol/__manifest__.py",
+    "name": "Peppol",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account_edi_proxy_client",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "project_mrp": {
+    "path": "addons/project_mrp/__manifest__.py",
+    "name": "MRP Project",
+    "category": "Services/Project",
+    "depends": [
+      "mrp",
+      "project"
+    ],
+    "installable": true
+  },
+  "l10n_tw_edi_ecpay": {
+    "path": "addons/l10n_tw_edi_ecpay/__manifest__.py",
+    "name": "Taiwan - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_tw",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "website_slides_survey": {
+    "path": "addons/website_slides_survey/__manifest__.py",
+    "name": "Course Certifications",
+    "category": "Website/eLearning",
+    "depends": [
+      "website_slides",
+      "survey"
+    ],
+    "installable": true
+  },
+  "base_automation": {
+    "path": "addons/base_automation/__manifest__.py",
+    "name": "Automation Rules",
+    "category": "Sales/Sales",
+    "depends": [
+      "base",
+      "digest",
+      "resource",
+      "mail",
+      "sms"
+    ],
+    "installable": true
+  },
+  "project_todo": {
+    "path": "addons/project_todo/__manifest__.py",
+    "name": "To-Do",
+    "category": "Productivity/To-Do",
+    "depends": [
+      "project"
+    ],
+    "installable": true
+  },
+  "l10n_account_edi_ubl_cii_tests": {
+    "path": "addons/l10n_account_edi_ubl_cii_tests/__manifest__.py",
+    "name": "Testing the Import/Export invoices with UBL/CII",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account_edi_ubl_cii",
+      "l10n_fr_account",
+      "l10n_be",
+      "l10n_de",
+      "l10n_nl",
+      "l10n_au"
+    ],
+    "installable": true
+  },
+  "web_hierarchy": {
+    "path": "addons/web_hierarchy/__manifest__.py",
+    "name": "Web Hierarchy",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "website_event_booth_exhibitor": {
+    "path": "addons/website_event_booth_exhibitor/__manifest__.py",
+    "name": "Booths/Exhibitors Bridge",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event_exhibitor",
+      "website_event_booth"
+    ],
+    "installable": true
+  },
+  "l10n_pe_pos": {
+    "path": "addons/l10n_pe_pos/__manifest__.py",
+    "name": "Peruvian - Point of Sale with Pe Doc",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_pe",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "website": {
+    "path": "addons/website/__manifest__.py",
+    "name": "Website",
+    "category": "Website/Website",
+    "depends": [
+      "digest",
+      "web",
+      "html_editor",
+      "http_routing",
+      "portal",
+      "social_media",
+      "auth_signup",
+      "mail",
+      "google_recaptcha",
+      "utm",
+      "html_builder"
+    ],
+    "installable": true
+  },
+  "payment_aps": {
+    "path": "addons/payment_aps/__manifest__.py",
+    "name": "Payment Provider: Amazon Payment Services",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "mrp": {
+    "path": "addons/mrp/__manifest__.py",
+    "name": "Manufacturing",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "product",
+      "stock",
+      "resource"
+    ],
+    "installable": true
+  },
+  "l10n_es_pos": {
+    "path": "addons/l10n_es_pos/__manifest__.py",
+    "name": "[Deprecated] Spain - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "l10n_es"
+    ],
+    "installable": true
+  },
+  "l10n_be_pos_restaurant": {
+    "path": "addons/l10n_be_pos_restaurant/__manifest__.py",
+    "name": "Belgian POS Restaurant Localization",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_restaurant",
+      "l10n_be"
+    ],
+    "installable": true
+  },
+  "l10n_fr_hr_work_entry_holidays": {
+    "path": "addons/l10n_fr_hr_work_entry_holidays/__manifest__.py",
+    "name": "France - Work Entries Time Off",
+    "category": "Uncategorized",
+    "depends": [
+      "l10n_fr_hr_holidays",
+      "hr_work_entry_holidays"
+    ],
+    "installable": true
+  },
+  "crm": {
+    "path": "addons/crm/__manifest__.py",
+    "name": "CRM",
+    "category": "Sales/CRM",
+    "depends": [
+      "base_setup",
+      "sales_team",
+      "mail",
+      "calendar",
+      "resource",
+      "utm",
+      "web_tour",
+      "contacts",
+      "digest",
+      "phone_validation"
+    ],
+    "installable": true
+  },
+  "sale_timesheet_margin": {
+    "path": "addons/sale_timesheet_margin/__manifest__.py",
+    "name": "Service Margins in Sales Orders",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_margin",
+      "sale_timesheet"
+    ],
+    "installable": true
+  },
+  "sale_project_stock": {
+    "path": "addons/sale_project_stock/__manifest__.py",
+    "name": "Sale Project - Sale Stock",
+    "category": "Sales",
+    "depends": [
+      "sale_project",
+      "sale_stock",
+      "project_stock_account"
+    ],
+    "installable": true
+  },
+  "l10n_th": {
+    "path": "addons/l10n_th/__manifest__.py",
+    "name": "Thailand - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_qr_code_emv",
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_worldline": {
+    "path": "addons/payment_worldline/__manifest__.py",
+    "name": "Payment Provider: Worldline",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "project_stock": {
+    "path": "addons/project_stock/__manifest__.py",
+    "name": "Project Stock",
+    "category": "Services/Project",
+    "depends": [
+      "stock",
+      "project"
+    ],
+    "installable": true
+  },
+  "test_resource": {
+    "path": "addons/test_resource/__manifest__.py",
+    "name": "Test - Resource",
+    "category": "Hidden",
+    "depends": [
+      "resource"
+    ],
+    "installable": true
+  },
+  "website_sale_collect": {
+    "path": "addons/website_sale_collect/__manifest__.py",
+    "name": "Click & Collect",
+    "category": "Website/Website",
+    "depends": [
+      "base_geolocalize",
+      "payment_custom",
+      "website_sale_stock"
+    ],
+    "installable": true
+  },
+  "iot_drivers": {
+    "path": "addons/iot_drivers/__manifest__.py",
+    "name": "Hardware Proxy",
+    "category": "Hidden",
+    "depends": [],
+    "installable": false
+  },
+  "l10n_ar_withholding": {
+    "path": "addons/l10n_ar_withholding/__manifest__.py",
+    "name": "Argentina - Payment Withholdings",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_ar",
+      "l10n_latam_check"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_hr_timesheet": {
+    "path": "addons/spreadsheet_dashboard_hr_timesheet/__manifest__.py",
+    "name": "Spreadsheet dashboard for time sheets",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "hr_timesheet"
+    ],
+    "installable": true
+  },
+  "l10n_lt": {
+    "path": "addons/l10n_lt/__manifest__.py",
+    "name": "Lithuania - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "pos_edi_ubl": {
+    "path": "addons/pos_edi_ubl/__manifest__.py",
+    "name": "Point of Sale UBL",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_ie": {
+    "path": "addons/l10n_ie/__manifest__.py",
+    "name": "Ireland - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "lunch": {
+    "path": "addons/lunch/__manifest__.py",
+    "name": "Lunch",
+    "category": "Human Resources/Lunch",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_eg": {
+    "path": "addons/l10n_eg/__manifest__.py",
+    "name": "Egypt - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_stripe": {
+    "path": "addons/payment_stripe/__manifest__.py",
+    "name": "Payment Provider: Stripe",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_ro_edi_stock": {
+    "path": "addons/l10n_ro_edi_stock/__manifest__.py",
+    "name": "Romania - E-Transport",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "stock_delivery",
+      "l10n_ro_edi",
+      "stock_picking_batch"
+    ],
+    "installable": true
+  },
+  "partner_autocomplete": {
+    "path": "addons/partner_autocomplete/__manifest__.py",
+    "name": "Partner Autocomplete",
+    "category": "Hidden/Tools",
+    "depends": [
+      "iap_mail"
+    ],
+    "installable": true
+  },
+  "l10n_il": {
+    "path": "addons/l10n_il/__manifest__.py",
+    "name": "Israel - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "sms_twilio": {
+    "path": "addons/sms_twilio/__manifest__.py",
+    "name": "Twilio SMS",
+    "category": "Hidden/Tools",
+    "depends": [
+      "sms"
+    ],
+    "installable": true
+  },
+  "l10n_cy": {
+    "path": "addons/l10n_cy/__manifest__.py",
+    "name": "Cyprus - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "base_import_module": {
+    "path": "addons/base_import_module/__manifest__.py",
+    "name": "Base import module",
+    "category": "Hidden/Tools",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "payment_mercado_pago": {
+    "path": "addons/payment_mercado_pago/__manifest__.py",
+    "name": "Payment Provider: Mercado Pago",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "bus": {
+    "path": "addons/bus/__manifest__.py",
+    "name": "IM Bus",
+    "category": "Hidden",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "website_crm_sms": {
+    "path": "addons/website_crm_sms/__manifest__.py",
+    "name": "Send SMS to Visitor with leads",
+    "category": "Website/Website",
+    "depends": [
+      "website_sms",
+      "crm"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_im_livechat": {
+    "path": "addons/spreadsheet_dashboard_im_livechat/__manifest__.py",
+    "name": "Spreadsheet dashboard for live chat",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "im_livechat"
+    ],
+    "installable": true
+  },
+  "l10n_cl": {
+    "path": "addons/l10n_cl/__manifest__.py",
+    "name": "Chile - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "contacts",
+      "base_vat",
+      "l10n_latam_base",
+      "l10n_latam_invoice_document",
+      "uom",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_din5008": {
+    "path": "addons/l10n_din5008/__manifest__.py",
+    "name": "DIN 5008",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "auth_oauth": {
+    "path": "addons/auth_oauth/__manifest__.py",
+    "name": "OAuth2 Authentication",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base",
+      "web",
+      "base_setup",
+      "auth_signup"
+    ],
+    "installable": true
+  },
+  "website_profile": {
+    "path": "addons/website_profile/__manifest__.py",
+    "name": "Website profile",
+    "category": "Website/Website",
+    "depends": [
+      "html_editor",
+      "website_partner",
+      "gamification"
+    ],
+    "installable": true
+  },
+  "project_mrp_account": {
+    "path": "addons/project_mrp_account/__manifest__.py",
+    "name": "MRP Account Project",
+    "category": "Services/Project",
+    "depends": [
+      "mrp_account",
+      "project_mrp"
+    ],
+    "installable": true
+  },
+  "pos_restaurant_loyalty": {
+    "path": "addons/pos_restaurant_loyalty/__manifest__.py",
+    "name": "POS - Restaurant Loyalty",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_restaurant",
+      "pos_loyalty"
+    ],
+    "installable": true
+  },
+  "test_website": {
+    "path": "addons/test_website/__manifest__.py",
+    "name": "Website Test",
+    "category": "Hidden",
+    "depends": [
+      "web_unsplash",
+      "website",
+      "theme_default"
+    ],
+    "installable": true
+  },
+  "sale_loyalty": {
+    "path": "addons/sale_loyalty/__manifest__.py",
+    "name": "Sale Loyalty",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "loyalty"
+    ],
+    "installable": true
+  },
+  "auth_ldap": {
+    "path": "addons/auth_ldap/__manifest__.py",
+    "name": "Authentication via LDAP",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base",
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "privacy_lookup": {
+    "path": "addons/privacy_lookup/__manifest__.py",
+    "name": "Privacy",
+    "category": "Hidden",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "base_import": {
+    "path": "addons/base_import/__manifest__.py",
+    "name": "Base import",
+    "category": "Hidden/Tools",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "gamification_sale_crm": {
+    "path": "addons/gamification_sale_crm/__manifest__.py",
+    "name": "CRM Gamification",
+    "category": "Sales/CRM",
+    "depends": [
+      "gamification",
+      "sale_crm"
+    ],
+    "installable": true
+  },
+  "website_livechat": {
+    "path": "addons/website_livechat/__manifest__.py",
+    "name": "Website Live Chat",
+    "category": "Website/Live Chat",
+    "depends": [
+      "website",
+      "im_livechat"
+    ],
+    "installable": true
+  },
+  "website_event_track_live_quiz": {
+    "path": "addons/website_event_track_live_quiz/__manifest__.py",
+    "name": "Quiz on Live Event Tracks",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event_track_live",
+      "website_event_track_quiz"
+    ],
+    "installable": true
+  },
+  "loyalty": {
+    "path": "addons/loyalty/__manifest__.py",
+    "name": "Coupons & Loyalty",
+    "category": "Sales",
+    "depends": [
+      "product",
+      "portal",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_fi": {
+    "path": "addons/l10n_fi/__manifest__.py",
+    "name": "Finland - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "hr_presence": {
+    "path": "addons/hr_presence/__manifest__.py",
+    "name": "Employee Presence Control",
+    "category": "Human Resources",
+    "depends": [
+      "hr",
+      "hr_holidays",
+      "sms"
+    ],
+    "installable": true
+  },
+  "pos_cashdro": {
+    "path": "addons/pos_cashdro/__manifest__.py",
+    "name": "POS Cashdro Cash Machines",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "test_spreadsheet": {
+    "path": "addons/test_spreadsheet/__manifest__.py",
+    "name": "Spreadsheet Test",
+    "category": "Hidden",
+    "depends": [
+      "spreadsheet"
+    ],
+    "installable": true
+  },
+  "hr_livechat": {
+    "path": "addons/hr_livechat/__manifest__.py",
+    "name": "HR - Livechat",
+    "category": "Human Resources",
+    "depends": [
+      "hr",
+      "im_livechat"
+    ],
+    "installable": true
+  },
+  "website_event_crm": {
+    "path": "addons/website_event_crm/__manifest__.py",
+    "name": "Website Events CRM",
+    "category": "Website/Website",
+    "depends": [
+      "event_crm",
+      "website_event"
+    ],
+    "installable": true
+  },
+  "l10n_id": {
+    "path": "addons/l10n_id/__manifest__.py",
+    "name": "Indonesian - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_jp_ubl_pint": {
+    "path": "addons/l10n_jp_ubl_pint/__manifest__.py",
+    "name": "Japan - UBL PINT",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "mrp_account": {
+    "path": "addons/mrp_account/__manifest__.py",
+    "name": "Accounting - MRP",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "mrp",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "l10n_ro_cpv_code": {
+    "path": "addons/l10n_ro_cpv_code/__manifest__.py",
+    "name": "Romania - CPV Code",
+    "category": "Hidden",
+    "depends": [
+      "l10n_ro_edi"
+    ],
+    "installable": true
+  },
+  "sale_stock_margin": {
+    "path": "addons/sale_stock_margin/__manifest__.py",
+    "name": "Sale Stock Margin",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_stock",
+      "sale_margin"
+    ],
+    "installable": true
+  },
+  "payment_payu": {
+    "path": "addons/payment_payu/__manifest__.py",
+    "name": "Payment Provider: PayU",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "product": {
+    "path": "addons/product/__manifest__.py",
+    "name": "Products & Pricelists",
+    "category": "Sales/Sales",
+    "depends": [
+      "base",
+      "mail",
+      "uom"
+    ],
+    "installable": true
+  },
+  "website_partner": {
+    "path": "addons/website_partner/__manifest__.py",
+    "name": "Website Partner",
+    "category": "Website/Website",
+    "depends": [
+      "website"
+    ],
+    "installable": true
+  },
+  "website_project": {
+    "path": "addons/website_project/__manifest__.py",
+    "name": "Online Task Submission",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "project"
+    ],
+    "installable": true
+  },
+  "l10n_lu": {
+    "path": "addons/l10n_lu/__manifest__.py",
+    "name": "Luxembourg - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "hr_timesheet": {
+    "path": "addons/hr_timesheet/__manifest__.py",
+    "name": "Task Logs",
+    "category": "Services/Timesheets",
+    "depends": [
+      "hr",
+      "hr_hourly_cost",
+      "analytic",
+      "project",
+      "uom"
+    ],
+    "installable": true
+  },
+  "l10n_iq": {
+    "path": "addons/l10n_iq/__manifest__.py",
+    "name": "Iraq - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "product_email_template": {
+    "path": "addons/product_email_template/__manifest__.py",
+    "name": "Product Email Template",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "project_purchase": {
+    "path": "addons/project_purchase/__manifest__.py",
+    "name": "Project Purchase",
+    "category": "Services/Project",
+    "depends": [
+      "purchase",
+      "project_account"
+    ],
+    "installable": true
+  },
+  "hr_homeworking_calendar": {
+    "path": "addons/hr_homeworking_calendar/__manifest__.py",
+    "name": "Remote Work with calendar",
+    "category": "Human Resources/Remote Work",
+    "depends": [
+      "hr_homeworking",
+      "calendar"
+    ],
+    "installable": true
+  },
+  "hr_skills_event": {
+    "path": "addons/hr_skills_event/__manifest__.py",
+    "name": "Skills Events",
+    "category": "Hidden",
+    "depends": [
+      "hr_skills",
+      "event"
+    ],
+    "installable": true
+  },
+  "l10n_fr": {
+    "path": "addons/l10n_fr/__manifest__.py",
+    "name": "France - Localizations",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "pos_mrp": {
+    "path": "addons/pos_mrp/__manifest__.py",
+    "name": "pos_mrp",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "mrp"
+    ],
+    "installable": true
+  },
+  "pos_event": {
+    "path": "addons/pos_event/__manifest__.py",
+    "name": "POS - Event",
+    "category": "Technical",
+    "depends": [
+      "point_of_sale",
+      "event_product"
+    ],
+    "installable": true
+  },
+  "stock_fleet": {
+    "path": "addons/stock_fleet/__manifest__.py",
+    "name": "Stock Transport",
+    "category": "Uncategorized",
+    "depends": [
+      "stock_picking_batch",
+      "fleet"
+    ],
+    "installable": true
+  },
+  "project_account": {
+    "path": "addons/project_account/__manifest__.py",
+    "name": "Project - Account",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account",
+      "project"
+    ],
+    "installable": true
+  },
+  "l10n_cd": {
+    "path": "addons/l10n_cd/__manifest__.py",
+    "name": "Democratic Republic of the Congo - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "hr_work_entry_holidays": {
+    "path": "addons/hr_work_entry_holidays/__manifest__.py",
+    "name": "Time Off in Payslips",
+    "category": "Human Resources/Payroll",
+    "depends": [
+      "hr_holidays",
+      "hr_work_entry"
+    ],
+    "installable": true
+  },
+  "l10n_in_ewaybill": {
+    "path": "addons/l10n_in_ewaybill/__manifest__.py",
+    "name": "Indian - E-waybill",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_in"
+    ],
+    "installable": true
+  },
+  "l10n_jp": {
+    "path": "addons/l10n_jp/__manifest__.py",
+    "name": "Japan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_cm": {
+    "path": "addons/l10n_cm/__manifest__.py",
+    "name": "Cameroon - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_et": {
+    "path": "addons/l10n_et/__manifest__.py",
+    "name": "Ethiopia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_gcc_invoice_stock_account": {
+    "path": "addons/l10n_gcc_invoice_stock_account/__manifest__.py",
+    "name": "Gulf Cooperation Council WMS Accounting",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_gcc_invoice",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "transifex": {
+    "path": "addons/transifex/__manifest__.py",
+    "name": "Transifex integration",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "payment_buckaroo": {
+    "path": "addons/payment_buckaroo/__manifest__.py",
+    "name": "Payment Provider: Buckaroo",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "crm_mail_plugin": {
+    "path": "addons/crm_mail_plugin/__manifest__.py",
+    "name": "CRM Mail Plugin",
+    "category": "Sales/CRM",
+    "depends": [
+      "crm",
+      "mail_plugin"
+    ],
+    "installable": true
+  },
+  "mass_mailing_sale": {
+    "path": "addons/mass_mailing_sale/__manifest__.py",
+    "name": "Mass mailing on sale orders",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "sale",
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "pos_self_order_razorpay": {
+    "path": "addons/pos_self_order_razorpay/__manifest__.py",
+    "name": "POS Self Order Razorpay",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_razorpay",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "l10n_es": {
+    "path": "addons/l10n_es/__manifest__.py",
+    "name": "Spain - Accounting (PGCE 2008)",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "account_add_gln": {
+    "path": "addons/account_add_gln/__manifest__.py",
+    "name": "Add Partner GLN",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_nuvei": {
+    "path": "addons/payment_nuvei/__manifest__.py",
+    "name": "Payment Provider: Nuvei",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "pos_razorpay": {
+    "path": "addons/pos_razorpay/__manifest__.py",
+    "name": "POS Razorpay",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_hr_kuna": {
+    "path": "addons/l10n_hr_kuna/__manifest__.py",
+    "name": "Croatia - Accounting (Kuna)",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_gn": {
+    "path": "addons/l10n_gn/__manifest__.py",
+    "name": "Guinea - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_ke": {
+    "path": "addons/l10n_ke/__manifest__.py",
+    "name": "Kenya - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "iot_box_image": {
+    "path": "addons/iot_box_image/__manifest__.py",
+    "name": "IoT Box Image Build Tools",
+    "category": "Hidden/Tools",
+    "depends": [],
+    "installable": false
+  },
+  "mass_mailing_event": {
+    "path": "addons/mass_mailing_event/__manifest__.py",
+    "name": "Mass mailing on attendees",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "event",
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "test_sale_purchase_edi_ubl": {
+    "path": "addons/test_sale_purchase_edi_ubl/__manifest__.py",
+    "name": "Test - Sale & Purchase Order EDI",
+    "category": "Hidden",
+    "depends": [
+      "purchase_edi_ubl_bis3",
+      "sale_edi_ubl"
+    ],
+    "installable": true
+  },
+  "mass_mailing": {
+    "path": "addons/mass_mailing/__manifest__.py",
+    "name": "Email Marketing",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "contacts",
+      "mail",
+      "html_builder",
+      "utm",
+      "link_tracker",
+      "social_media",
+      "web_tour",
+      "digest"
+    ],
+    "installable": true
+  },
+  "l10n_vn_edi_viettel": {
+    "path": "addons/l10n_vn_edi_viettel/__manifest__.py",
+    "name": "Vietnam - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_vn"
+    ],
+    "installable": true
+  },
+  "l10n_it_edi_doi": {
+    "path": "addons/l10n_it_edi_doi/__manifest__.py",
+    "name": "Italy - Declaration of Intent",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_it_edi",
+      "sale"
+    ],
+    "installable": true
+  },
+  "sale_expense_margin": {
+    "path": "addons/sale_expense_margin/__manifest__.py",
+    "name": "Sales Expense Margin",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_expense",
+      "sale_margin"
+    ],
+    "installable": true
+  },
+  "hr_gamification": {
+    "path": "addons/hr_gamification/__manifest__.py",
+    "name": "HR Gamification",
+    "category": "Human Resources",
+    "depends": [
+      "gamification",
+      "hr"
+    ],
+    "installable": true
+  },
+  "l10n_do": {
+    "path": "addons/l10n_do/__manifest__.py",
+    "name": "Dominican Republic - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban"
+    ],
+    "installable": true
+  },
+  "purchase_edi_ubl_bis3": {
+    "path": "addons/purchase_edi_ubl_bis3/__manifest__.py",
+    "name": "Import/Export electronic orders with UBL",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "purchase",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_mr": {
+    "path": "addons/l10n_mr/__manifest__.py",
+    "name": "Mauritania - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "payment_razorpay": {
+    "path": "addons/payment_razorpay/__manifest__.py",
+    "name": "Payment Provider: Razorpay",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_ro_edi_stock_batch": {
+    "path": "addons/l10n_ro_edi_stock_batch/__manifest__.py",
+    "name": "Romania - E-Transport Batch Pickings",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_ro_edi_stock",
+      "stock_picking_batch"
+    ],
+    "installable": true
+  },
+  "l10n_dk_nemhandel_response": {
+    "path": "addons/l10n_dk_nemhandel_response/__manifest__.py",
+    "name": "Nemhandel Business Response",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_dk_nemhandel"
+    ],
+    "installable": true
+  },
+  "cloud_storage_azure": {
+    "path": "addons/cloud_storage_azure/__manifest__.py",
+    "name": "Cloud Storage Azure",
+    "category": "Technical Settings",
+    "depends": [
+      "cloud_storage"
+    ],
+    "installable": true
+  },
+  "l10n_nz": {
+    "path": "addons/l10n_nz/__manifest__.py",
+    "name": "New Zealand - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_zm_account": {
+    "path": "addons/l10n_zm_account/__manifest__.py",
+    "name": "Zambia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_sa_withholding_tax": {
+    "path": "addons/l10n_sa_withholding_tax/__manifest__.py",
+    "name": "Saudi Arabia - Withholding Tax",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_account_withholding_tax",
+      "l10n_sa"
+    ],
+    "installable": true
+  },
+  "project": {
+    "path": "addons/project/__manifest__.py",
+    "name": "Project",
+    "category": "Services/Project",
+    "depends": [
+      "analytic",
+      "base_setup",
+      "mail",
+      "portal",
+      "rating",
+      "resource",
+      "web",
+      "web_tour",
+      "digest"
+    ],
+    "installable": true
+  },
+  "l10n_in_ewaybill_irn": {
+    "path": "addons/l10n_in_ewaybill_irn/__manifest__.py",
+    "name": "Indian - E-waybill thru IRN",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_in_ewaybill",
+      "l10n_in_edi"
+    ],
+    "installable": true
+  },
+  "l10n_it_edi_sale": {
+    "path": "addons/l10n_it_edi_sale/__manifest__.py",
+    "name": "Italy - Sale E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_it_edi",
+      "sale"
+    ],
+    "installable": true
+  },
+  "payment_dpo": {
+    "path": "addons/payment_dpo/__manifest__.py",
+    "name": "Payment Provider: DPO",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_ar_stock": {
+    "path": "addons/l10n_ar_stock/__manifest__.py",
+    "name": "Argentinean - Stock",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_ar",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "l10n_dz": {
+    "path": "addons/l10n_dz/__manifest__.py",
+    "name": "Algeria - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_vat",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_test_pos_qr_payment": {
+    "path": "addons/l10n_test_pos_qr_payment/__manifest__.py",
+    "name": "POS QR Tests",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "account_qr_code_sepa",
+      "l10n_be",
+      "l10n_ch",
+      "l10n_hk",
+      "l10n_br"
+    ],
+    "installable": true
+  },
+  "pos_qfpay": {
+    "path": "addons/pos_qfpay/__manifest__.py",
+    "name": "POS QFPay",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_bd": {
+    "path": "addons/l10n_bd/__manifest__.py",
+    "name": "Bangladesh - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "project_timesheet_holidays": {
+    "path": "addons/project_timesheet_holidays/__manifest__.py",
+    "name": "Timesheet when on Time Off",
+    "category": "Human Resources",
+    "depends": [
+      "hr_timesheet",
+      "hr_holidays"
+    ],
+    "installable": true
+  },
+  "test_base_automation": {
+    "path": "addons/test_base_automation/__manifest__.py",
+    "name": "Test - Base Automation",
+    "category": "Hidden",
+    "depends": [
+      "base_automation"
+    ],
+    "installable": true
+  },
+  "html_editor": {
+    "path": "addons/html_editor/__manifest__.py",
+    "name": "HTML Editor",
+    "category": "Hidden",
+    "depends": [
+      "base",
+      "bus",
+      "web"
+    ],
+    "installable": true
+  },
+  "l10n_gr": {
+    "path": "addons/l10n_gr/__manifest__.py",
+    "name": "Greece - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "pos_self_order_sale": {
+    "path": "addons/pos_self_order_sale/__manifest__.py",
+    "name": "POS Self Order Sale",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_sale",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "l10n_no": {
+    "path": "addons/l10n_no/__manifest__.py",
+    "name": "Norway - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_account_withholding_tax": {
+    "path": "addons/l10n_account_withholding_tax/__manifest__.py",
+    "name": "Withholding Tax on Payment",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_ecpay": {
+    "path": "addons/payment_ecpay/__manifest__.py",
+    "name": "Payment Provider: ECPay",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_syscohada": {
+    "path": "addons/l10n_syscohada/__manifest__.py",
+    "name": "OHADA - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "mail_group": {
+    "path": "addons/mail_group/__manifest__.py",
+    "name": "Mail Group",
+    "category": "Uncategorized",
+    "depends": [
+      "mail",
+      "portal"
+    ],
+    "installable": true
+  },
+  "iap": {
+    "path": "addons/iap/__manifest__.py",
+    "name": "In-App Purchases",
+    "category": "Hidden/Tools",
+    "depends": [
+      "web",
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "l10n_ae": {
+    "path": "addons/l10n_ae/__manifest__.py",
+    "name": "United Arab Emirates - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "auth_totp_portal": {
+    "path": "addons/auth_totp_portal/__manifest__.py",
+    "name": "TOTPortal",
+    "category": "Hidden",
+    "depends": [
+      "portal",
+      "auth_totp"
+    ],
+    "installable": true
+  },
+  "l10n_kw": {
+    "path": "addons/l10n_kw/__manifest__.py",
+    "name": "Kuwait - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "l10n_mn": {
+    "path": "addons/l10n_mn/__manifest__.py",
+    "name": "Mongolia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_bj": {
+    "path": "addons/l10n_bj/__manifest__.py",
+    "name": "Benin - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_mt": {
+    "path": "addons/l10n_mt/__manifest__.py",
+    "name": "Malta - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_km": {
+    "path": "addons/l10n_km/__manifest__.py",
+    "name": "Comoros - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_in_stock": {
+    "path": "addons/l10n_in_stock/__manifest__.py",
+    "name": "Indian - Stock Report(GST)",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_in",
+      "stock",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "l10n_gf": {
+    "path": "addons/l10n_gf/__manifest__.py",
+    "name": "Guyana - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_fr_account",
+      "account"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_event_sale": {
+    "path": "addons/spreadsheet_dashboard_event_sale/__manifest__.py",
+    "name": "Spreadsheet dashboard for events",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "event_sale"
+    ],
+    "installable": true
+  },
+  "l10n_fi_sale": {
+    "path": "addons/l10n_fi_sale/__manifest__.py",
+    "name": "Finland - Sale",
+    "category": "Sales/Sales",
+    "depends": [
+      "l10n_fi",
+      "sale"
+    ],
+    "installable": true
+  },
+  "l10n_din5008_repair": {
+    "path": "addons/l10n_din5008_repair/__manifest__.py",
+    "name": "DIN 5008 - Repair",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_din5008",
+      "repair"
+    ],
+    "installable": true
+  },
+  "phone_validation": {
+    "path": "addons/phone_validation/__manifest__.py",
+    "name": "Phone Numbers Validation",
+    "category": "Hidden",
+    "depends": [
+      "base",
+      "mail"
+    ],
+    "installable": true
+  },
+  "website_event_booth_sale_exhibitor": {
+    "path": "addons/website_event_booth_sale_exhibitor/__manifest__.py",
+    "name": "Booths Sale/Exhibitors Bridge",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_event_exhibitor",
+      "website_event_booth_sale"
+    ],
+    "installable": true
+  },
+  "snailmail_account": {
+    "path": "addons/snailmail_account/__manifest__.py",
+    "name": "Snail Mail - Account",
+    "category": "Hidden/Tools",
+    "depends": [
+      "account",
+      "snailmail"
+    ],
+    "installable": true
+  },
+  "sale_margin": {
+    "path": "addons/sale_margin/__manifest__.py",
+    "name": "Margins in Sales Orders",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "l10n_ga": {
+    "path": "addons/l10n_ga/__manifest__.py",
+    "name": "Gabon - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "hr_expense": {
+    "path": "addons/hr_expense/__manifest__.py",
+    "name": "Expenses",
+    "category": "Human Resources/Expenses",
+    "depends": [
+      "account",
+      "web_tour",
+      "hr"
+    ],
+    "installable": true
+  },
+  "website_sms": {
+    "path": "addons/website_sms/__manifest__.py",
+    "name": "Send SMS to Visitor",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "sms"
+    ],
+    "installable": true
+  },
+  "website_mail": {
+    "path": "addons/website_mail/__manifest__.py",
+    "name": "Website Mail",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "mail"
+    ],
+    "installable": true
+  },
+  "website_crm_livechat": {
+    "path": "addons/website_crm_livechat/__manifest__.py",
+    "name": "Lead Livechat Sessions",
+    "category": "Website/Website",
+    "depends": [
+      "website_crm",
+      "website_livechat"
+    ],
+    "installable": true
+  },
+  "account_qr_code_sepa": {
+    "path": "addons/account_qr_code_sepa/__manifest__.py",
+    "name": "Account SEPA QR Code",
+    "category": "Accounting/Payment",
+    "depends": [
+      "account",
+      "base_iban"
+    ],
+    "installable": true
+  },
+  "l10n_mz": {
+    "path": "addons/l10n_mz/__manifest__.py",
+    "name": "Mozambique - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account"
+    ],
+    "installable": true
+  },
+  "marketing_card": {
+    "path": "addons/marketing_card/__manifest__.py",
+    "name": "Marketing Card",
+    "category": "Marketing/Marketing Card",
+    "depends": [
+      "link_tracker",
+      "mass_mailing",
+      "website"
+    ],
+    "installable": true
+  },
+  "l10n_sa_pos": {
+    "path": "addons/l10n_sa_pos/__manifest__.py",
+    "name": "Saudi Arabia - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_gcc_pos",
+      "l10n_sa"
+    ],
+    "installable": true
+  },
+  "l10n_hk": {
+    "path": "addons/l10n_hk/__manifest__.py",
+    "name": "Hong Kong - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_qr_code_emv",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_my_edi": {
+    "path": "addons/l10n_my_edi/__manifest__.py",
+    "name": "Malaysia - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_my",
+      "l10n_my_ubl_pint",
+      "account_edi_proxy_client"
+    ],
+    "installable": true
+  },
+  "crm_sms": {
+    "path": "addons/crm_sms/__manifest__.py",
+    "name": "SMS in CRM",
+    "category": "Sales/CRM",
+    "depends": [
+      "crm",
+      "sms"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting_purchase": {
+    "path": "addons/mrp_subcontracting_purchase/__manifest__.py",
+    "name": "Purchase and Subcontracting Management",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "mrp_subcontracting",
+      "purchase_mrp"
+    ],
+    "installable": true
+  },
+  "web_unsplash": {
+    "path": "addons/web_unsplash/__manifest__.py",
+    "name": "Unsplash Image Library",
+    "category": "Hidden",
+    "depends": [
+      "base_setup",
+      "html_editor"
+    ],
+    "installable": true
+  },
+  "l10n_ng": {
+    "path": "addons/l10n_ng/__manifest__.py",
+    "name": "Nigeria - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_vat",
+      "account"
+    ],
+    "installable": true
+  },
+  "event_sale": {
+    "path": "addons/event_sale/__manifest__.py",
+    "name": "Events Sales",
+    "category": "Marketing/Events",
+    "depends": [
+      "event_product",
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "sale_project": {
+    "path": "addons/sale_project/__manifest__.py",
+    "name": "Sales - Project",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_management",
+      "sale_service",
+      "project_account"
+    ],
+    "installable": true
+  },
+  "l10n_ec_sale": {
+    "path": "addons/l10n_ec_sale/__manifest__.py",
+    "name": "Ecuador - Sale",
+    "category": "Accounting/Localizations/Sale",
+    "depends": [
+      "l10n_ec",
+      "sale"
+    ],
+    "installable": true
+  },
+  "l10n_in_pos": {
+    "path": "addons/l10n_in_pos/__manifest__.py",
+    "name": "Indian - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_in",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_ma": {
+    "path": "addons/l10n_ma/__manifest__.py",
+    "name": "Morocco - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account"
+    ],
+    "installable": true
+  },
+  "payment_flutterwave": {
+    "path": "addons/payment_flutterwave/__manifest__.py",
+    "name": "Payment Provider: Flutterwave",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_be": {
+    "path": "addons/l10n_be/__manifest__.py",
+    "name": "Belgium - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "base_iban",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "account_tax_python": {
+    "path": "addons/account_tax_python/__manifest__.py",
+    "name": "Define Taxes as Python Code",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "website_sale_wishlist": {
+    "path": "addons/website_sale_wishlist/__manifest__.py",
+    "name": "Shopper's Wishlist",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "microsoft_outlook": {
+    "path": "addons/microsoft_outlook/__manifest__.py",
+    "name": "Microsoft Outlook",
+    "category": "Hidden",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_lk_invoice": {
+    "path": "addons/l10n_lk_invoice/__manifest__.py",
+    "name": "Sri Lanka - Tax Invoice",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_lk"
+    ],
+    "installable": true
+  },
+  "l10n_gt": {
+    "path": "addons/l10n_gt/__manifest__.py",
+    "name": "Guatemala - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_hr_expense": {
+    "path": "addons/spreadsheet_dashboard_hr_expense/__manifest__.py",
+    "name": "Spreadsheet dashboard for expenses",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "sale_expense"
+    ],
+    "installable": true
+  },
+  "l10n_pl": {
+    "path": "addons/l10n_pl/__manifest__.py",
+    "name": "Poland - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "website_forum": {
+    "path": "addons/website_forum/__manifest__.py",
+    "name": "Forum",
+    "category": "Website/Website",
+    "depends": [
+      "auth_signup",
+      "website_mail",
+      "website_profile"
+    ],
+    "installable": true
+  },
+  "pos_repair": {
+    "path": "addons/pos_repair/__manifest__.py",
+    "name": "POS - Repair",
+    "category": "Technical",
+    "depends": [
+      "point_of_sale",
+      "repair"
+    ],
+    "installable": true
+  },
+  "pos_cashmatic": {
+    "path": "addons/pos_cashmatic/__manifest__.py",
+    "name": "POS Cashmatic Cash Machines",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_uz": {
+    "path": "addons/l10n_uz/__manifest__.py",
+    "name": "Uzbekistan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_stock_account": {
+    "path": "addons/spreadsheet_dashboard_stock_account/__manifest__.py",
+    "name": "Spreadsheet dashboard for stock",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "pos_pine_labs": {
+    "path": "addons/pos_pine_labs/__manifest__.py",
+    "name": "POS Pine Labs",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_lb_account": {
+    "path": "addons/l10n_lb_account/__manifest__.py",
+    "name": "Lebanon - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_pk": {
+    "path": "addons/l10n_pk/__manifest__.py",
+    "name": "Pakistan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_gr_edi_e_invoo": {
+    "path": "addons/l10n_gr_edi_e_invoo/__manifest__.py",
+    "name": "Greece - myDATA E-invoicing through e-invoo",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_proxy_client",
+      "l10n_gr_edi"
+    ],
+    "installable": true
+  },
+  "l10n_hu_edi_receive": {
+    "path": "addons/l10n_hu_edi_receive/__manifest__.py",
+    "name": "Hungary - E-invoicing Receive Vendor Bills",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_hu_edi"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_verifactu_pos": {
+    "path": "addons/l10n_es_edi_verifactu_pos/__manifest__.py",
+    "name": "Spain - Veri*Factu for Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_es_edi_verifactu",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "project_stock_account": {
+    "path": "addons/project_stock_account/__manifest__.py",
+    "name": "Project Stock Account",
+    "category": "Services/Project",
+    "depends": [
+      "stock_account",
+      "project_stock"
+    ],
+    "installable": true
+  },
+  "payment_iyzico": {
+    "path": "addons/payment_iyzico/__manifest__.py",
+    "name": "Payment Provider: Iyzico",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "pos_event_sale": {
+    "path": "addons/pos_event_sale/__manifest__.py",
+    "name": "PoS - Event Sale",
+    "category": "Technical",
+    "depends": [
+      "pos_event",
+      "pos_sale"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting_dropshipping": {
+    "path": "addons/mrp_subcontracting_dropshipping/__manifest__.py",
+    "name": "Dropship and Subcontracting Management",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "mrp_subcontracting",
+      "stock_dropshipping"
+    ],
+    "installable": true
+  },
+  "l10n_gr_edi_e_invoo_bridge": {
+    "path": "addons/l10n_gr_edi_e_invoo_bridge/__manifest__.py",
+    "name": "Greece - myDATA E-invoicing through e-invoo (direct API)",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_gr_edi",
+      "l10n_gr_edi_e_invoo"
+    ],
+    "installable": true
+  },
+  "website_google_map": {
+    "path": "addons/website_google_map/__manifest__.py",
+    "name": "Google Maps",
+    "category": "Website/Website",
+    "depends": [
+      "base_geolocalize",
+      "website_partner"
+    ],
+    "installable": true
+  },
+  "l10n_us": {
+    "path": "addons/l10n_us/__manifest__.py",
+    "name": "United States - Localizations",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "crm_iap_mine": {
+    "path": "addons/crm_iap_mine/__manifest__.py",
+    "name": "Lead Generation",
+    "category": "Sales/CRM",
+    "depends": [
+      "iap_crm",
+      "iap_mail"
+    ],
+    "installable": true
+  },
+  "sale_sms": {
+    "path": "addons/sale_sms/__manifest__.py",
+    "name": "Sale - SMS",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "sms"
+    ],
+    "installable": true
+  },
+  "purchase_stock": {
+    "path": "addons/purchase_stock/__manifest__.py",
+    "name": "Purchase Stock",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "stock_account",
+      "purchase"
+    ],
+    "installable": true
+  },
+  "l10n_pe": {
+    "path": "addons/l10n_pe/__manifest__.py",
+    "name": "Peru - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_vat",
+      "base_address_extended",
+      "l10n_latam_base",
+      "l10n_latam_invoice_document",
+      "account_debit_note",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_dk_fik": {
+    "path": "addons/l10n_dk_fik/__manifest__.py",
+    "name": "Denmark - FIK Number",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_dk"
+    ],
+    "installable": true
+  },
+  "mrp_repair": {
+    "path": "addons/mrp_repair/__manifest__.py",
+    "name": "Mrp Repairs",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "repair",
+      "mrp"
+    ],
+    "installable": true
+  },
+  "l10n_ua": {
+    "path": "addons/l10n_ua/__manifest__.py",
+    "name": "Ukraine - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_vn": {
+    "path": "addons/l10n_vn/__manifest__.py",
+    "name": "Vietnam - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_qr_code_emv",
+      "base_iban",
+      "account"
+    ],
+    "installable": true
+  },
+  "event_sms": {
+    "path": "addons/event_sms/__manifest__.py",
+    "name": "SMS on Events",
+    "category": "Marketing/Events",
+    "depends": [
+      "event",
+      "sms"
+    ],
+    "installable": true
+  },
+  "l10n_dk_nemhandel": {
+    "path": "addons/l10n_dk_nemhandel/__manifest__.py",
+    "name": "Denmark EDI - Nemhandel",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_proxy_client",
+      "account_edi_ubl_cii",
+      "l10n_dk"
+    ],
+    "installable": true
+  },
+  "base_sparse_field": {
+    "path": "addons/base_sparse_field/__manifest__.py",
+    "name": "Sparse Fields",
+    "category": "Hidden",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "pos_dpopay": {
+    "path": "addons/pos_dpopay/__manifest__.py",
+    "name": "PoS DPO Pay",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "delivery_stock_picking_batch": {
+    "path": "addons/delivery_stock_picking_batch/__manifest__.py",
+    "name": "Delivery Stock Picking Batch",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock_delivery",
+      "stock_picking_batch"
+    ],
+    "installable": true
+  },
+  "hr_holidays": {
+    "path": "addons/hr_holidays/__manifest__.py",
+    "name": "Time Off",
+    "category": "Human Resources/Time Off",
+    "depends": [
+      "hr",
+      "calendar",
+      "resource"
+    ],
+    "installable": true
+  },
+  "hr_skills_slides": {
+    "path": "addons/hr_skills_slides/__manifest__.py",
+    "name": "Skills e-learning",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "hr_skills",
+      "website_slides"
+    ],
+    "installable": true
+  },
+  "project_hr_expense": {
+    "path": "addons/project_hr_expense/__manifest__.py",
+    "name": "Project Expenses",
+    "category": "Services/expenses",
+    "depends": [
+      "project_account",
+      "hr_expense"
+    ],
+    "installable": true
+  },
+  "point_of_sale": {
+    "path": "addons/point_of_sale/__manifest__.py",
+    "name": "Point of Sale",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "resource",
+      "stock_account",
+      "barcodes",
+      "html_editor",
+      "digest",
+      "phone_validation",
+      "partner_autocomplete",
+      "iot_base",
+      "google_address_autocomplete"
+    ],
+    "installable": true
+  },
+  "website_blog": {
+    "path": "addons/website_blog/__manifest__.py",
+    "name": "Blog",
+    "category": "Website/Website",
+    "depends": [
+      "website_mail",
+      "website_partner",
+      "html_builder"
+    ],
+    "installable": true
+  },
+  "event_booth_sale": {
+    "path": "addons/event_booth_sale/__manifest__.py",
+    "name": "Events Booths Sales",
+    "category": "Marketing/Events",
+    "depends": [
+      "event_booth",
+      "event_sale"
+    ],
+    "installable": true
+  },
+  "l10n_eg_edi_eta": {
+    "path": "addons/l10n_eg_edi_eta/__manifest__.py",
+    "name": "Egypt E-Invoicing",
+    "category": "account",
+    "depends": [
+      "account_edi",
+      "l10n_eg"
+    ],
+    "installable": true
+  },
+  "project_mrp_stock_landed_costs": {
+    "path": "addons/project_mrp_stock_landed_costs/__manifest__.py",
+    "name": "Project MRP Landed Costs",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "project_mrp_account",
+      "mrp_landed_costs"
+    ],
+    "installable": true
+  },
+  "website_cf_turnstile": {
+    "path": "addons/website_cf_turnstile/__manifest__.py",
+    "name": "Cloudflare Turnstile",
+    "category": "Website/Website",
+    "depends": [
+      "website"
+    ],
+    "installable": true
+  },
+  "l10n_tw_edi_ecpay_pos": {
+    "path": "addons/l10n_tw_edi_ecpay_pos/__manifest__.py",
+    "name": "Taiwan - E-invoicing Pos",
+    "category": "Point of sale/Localizations/EDI",
+    "depends": [
+      "point_of_sale",
+      "l10n_tw_edi_ecpay"
+    ],
+    "installable": true
+  },
+  "iap_crm": {
+    "path": "addons/iap_crm/__manifest__.py",
+    "name": "IAP / CRM",
+    "category": "Hidden/Tools",
+    "depends": [
+      "crm",
+      "iap_mail"
+    ],
+    "installable": true
+  },
+  "l10n_account_withholding_tax_pos": {
+    "path": "addons/l10n_account_withholding_tax_pos/__manifest__.py",
+    "name": "Withholding Tax on Payment - PoS",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_account_withholding_tax",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_pos_restaurant": {
+    "path": "addons/spreadsheet_dashboard_pos_restaurant/__manifest__.py",
+    "name": "Spreadsheet dashboard for restaurants",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "pos_hr",
+      "pos_restaurant"
+    ],
+    "installable": true
+  },
+  "microsoft_account": {
+    "path": "addons/microsoft_account/__manifest__.py",
+    "name": "Microsoft Users",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "payment_paymob": {
+    "path": "addons/payment_paymob/__manifest__.py",
+    "name": "Payment Provider: Paymob",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_be_pos_sale": {
+    "path": "addons/l10n_be_pos_sale/__manifest__.py",
+    "name": "l10n_be_pos_sale",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_sale",
+      "l10n_be"
+    ],
+    "installable": true
+  },
+  "l10n_sk": {
+    "path": "addons/l10n_sk/__manifest__.py",
+    "name": "Slovak - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base_iban",
+      "base_vat",
+      "account"
+    ],
+    "installable": true
+  },
+  "hr": {
+    "path": "addons/hr/__manifest__.py",
+    "name": "Employees",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "base_setup",
+      "digest",
+      "phone_validation",
+      "resource_mail",
+      "web"
+    ],
+    "installable": true
+  },
+  "pos_stripe": {
+    "path": "addons/pos_stripe/__manifest__.py",
+    "name": "POS Stripe",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "payment_stripe"
+    ],
+    "installable": true
+  },
+  "sale_pdf_quote_builder": {
+    "path": "addons/sale_pdf_quote_builder/__manifest__.py",
+    "name": "Sales PDF Quotation Builder",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "stock_dropshipping": {
+    "path": "addons/stock_dropshipping/__manifest__.py",
+    "name": "Drop Shipping",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "sale_purchase_stock"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_account": {
+    "path": "addons/spreadsheet_dashboard_account/__manifest__.py",
+    "name": "Spreadsheet dashboard for accounting",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "account"
+    ],
+    "installable": true
+  },
+  "mass_mailing_sms": {
+    "path": "addons/mass_mailing_sms/__manifest__.py",
+    "name": "SMS Marketing",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "portal",
+      "mass_mailing",
+      "sms"
+    ],
+    "installable": true
+  },
+  "l10n_sg_ubl_pint": {
+    "path": "addons/l10n_sg_ubl_pint/__manifest__.py",
+    "name": "Singapore - UBL PINT",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "website_links": {
+    "path": "addons/website_links/__manifest__.py",
+    "name": "Link Tracker",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "link_tracker"
+    ],
+    "installable": true
+  },
+  "microsoft_calendar": {
+    "path": "addons/microsoft_calendar/__manifest__.py",
+    "name": "Outlook Calendar",
+    "category": "Productivity",
+    "depends": [
+      "microsoft_account",
+      "calendar"
+    ],
+    "installable": true
+  },
+  "l10n_se": {
+    "path": "addons/l10n_se/__manifest__.py",
+    "name": "Sweden - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "auth_password_policy": {
+    "path": "addons/auth_password_policy/__manifest__.py",
+    "name": "Password Policy",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup",
+      "web"
+    ],
+    "installable": true
+  },
+  "mass_mailing_themes": {
+    "path": "addons/mass_mailing_themes/__manifest__.py",
+    "name": "Mass Mailing Themes",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "sale_timesheet": {
+    "path": "addons/sale_timesheet/__manifest__.py",
+    "name": "Sales Timesheet",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_project",
+      "hr_timesheet"
+    ],
+    "installable": true
+  },
+  "mass_mailing_event_track_sms": {
+    "path": "addons/mass_mailing_event_track_sms/__manifest__.py",
+    "name": "Track Speakers SMS Marketing",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "mass_mailing",
+      "mass_mailing_sms",
+      "sms",
+      "website_event_track"
+    ],
+    "installable": true
+  },
+  "delivery": {
+    "path": "addons/delivery/__manifest__.py",
+    "name": "Delivery Costs",
+    "category": "Sales/Delivery",
+    "depends": [
+      "sale",
+      "payment_custom"
+    ],
+    "installable": true
+  },
+  "project_purchase_stock": {
+    "path": "addons/project_purchase_stock/__manifest__.py",
+    "name": "Project - Purchase - Stock",
+    "category": "Services/Project",
+    "depends": [
+      "project_purchase",
+      "project_stock"
+    ],
+    "installable": true
+  },
+  "purchase": {
+    "path": "addons/purchase/__manifest__.py",
+    "name": "Purchase",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "pos_imin": {
+    "path": "addons/pos_imin/__manifest__.py",
+    "name": "POS iMin",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "test_event_full": {
+    "path": "addons/test_event_full/__manifest__.py",
+    "name": "Test Full Event Flow",
+    "category": "Hidden/Tests",
+    "depends": [
+      "event",
+      "event_booth",
+      "event_crm",
+      "event_crm_sale",
+      "event_sale",
+      "event_sms",
+      "payment_demo",
+      "website_event_booth_sale_exhibitor",
+      "website_event_exhibitor",
+      "website_event_sale",
+      "website_event_track",
+      "website_event_track_live",
+      "website_event_track_quiz"
+    ],
+    "installable": true
+  },
+  "project_hr_skills": {
+    "path": "addons/project_hr_skills/__manifest__.py",
+    "name": "Project - Skills",
+    "category": "Services/Project",
+    "depends": [
+      "project",
+      "hr_skills"
+    ],
+    "installable": true
+  },
+  "purchase_requisition": {
+    "path": "addons/purchase_requisition/__manifest__.py",
+    "name": "Purchase Agreements",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "purchase"
+    ],
+    "installable": true
+  },
+  "website_crm_iap_reveal": {
+    "path": "addons/website_crm_iap_reveal/__manifest__.py",
+    "name": "Lead Generation From Website Visits",
+    "category": "Sales/CRM",
+    "depends": [
+      "iap_crm",
+      "iap_mail",
+      "crm_iap_mine",
+      "website_crm"
+    ],
+    "installable": true
+  },
+  "l10n_ug": {
+    "path": "addons/l10n_ug/__manifest__.py",
+    "name": "Uganda - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_my_ubl_pint": {
+    "path": "addons/l10n_my_ubl_pint/__manifest__.py",
+    "name": "Malaysia - UBL PINT",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "purchase_repair": {
+    "path": "addons/purchase_repair/__manifest__.py",
+    "name": "Purchase Repair",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "repair",
+      "purchase_stock"
+    ],
+    "installable": true
+  },
+  "website_payment": {
+    "path": "addons/website_payment/__manifest__.py",
+    "name": "Website Payment",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "account_payment",
+      "portal"
+    ],
+    "installable": true
+  },
+  "auth_password_policy_portal": {
+    "path": "addons/auth_password_policy_portal/__manifest__.py",
+    "name": "Password Policy support for Signup",
+    "category": "Tools",
+    "depends": [
+      "auth_password_policy",
+      "portal"
+    ],
+    "installable": true
+  },
+  "website_sale_autocomplete": {
+    "path": "addons/website_sale_autocomplete/__manifest__.py",
+    "name": "Google places autocompletion",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale",
+      "google_address_autocomplete"
+    ],
+    "installable": true
+  },
+  "http_routing": {
+    "path": "addons/http_routing/__manifest__.py",
+    "name": "Web Routing",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "sale_product_matrix": {
+    "path": "addons/sale_product_matrix/__manifest__.py",
+    "name": "Sale Matrix",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "product_matrix"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_verifactu": {
+    "path": "addons/l10n_es_edi_verifactu/__manifest__.py",
+    "name": "Spain - Veri*Factu",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_es",
+      "certificate"
+    ],
+    "installable": true
+  },
+  "barcodes": {
+    "path": "addons/barcodes/__manifest__.py",
+    "name": "Barcode",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "l10n_cn_city": {
+    "path": "addons/l10n_cn_city/__manifest__.py",
+    "name": "China - City Data",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_cn",
+      "base_address_extended"
+    ],
+    "installable": true
+  },
+  "l10n_br_sales": {
+    "path": "addons/l10n_br_sales/__manifest__.py",
+    "name": "Brazil - Sale",
+    "category": "Sales/Sales",
+    "depends": [
+      "l10n_br",
+      "sale"
+    ],
+    "installable": true
+  },
+  "l10n_fr_facturx_chorus_pro": {
+    "path": "addons/l10n_fr_facturx_chorus_pro/__manifest__.py",
+    "name": "France - BIS3 integration for Chorus Pro",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "l10n_fr_account"
+    ],
+    "installable": true
+  },
+  "l10n_ke_edi_tremol": {
+    "path": "addons/l10n_ke_edi_tremol/__manifest__.py",
+    "name": "Kenya Tremol Device EDI Integration",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_ke"
+    ],
+    "installable": true
+  },
+  "maintenance": {
+    "path": "addons/maintenance/__manifest__.py",
+    "name": "Maintenance",
+    "category": "Supply Chain/Maintenance",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "hr_calendar": {
+    "path": "addons/hr_calendar/__manifest__.py",
+    "name": "Display Working Hours in Calendar",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "hr",
+      "calendar"
+    ],
+    "installable": true
+  },
+  "product_expiry": {
+    "path": "addons/product_expiry/__manifest__.py",
+    "name": "Products Expiration Date",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock"
+    ],
+    "installable": true
+  },
+  "l10n_rs": {
+    "path": "addons/l10n_rs/__manifest__.py",
+    "name": "Serbia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_mu_account": {
+    "path": "addons/l10n_mu_account/__manifest__.py",
+    "name": "Mauritius - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "sale_mrp": {
+    "path": "addons/sale_mrp/__manifest__.py",
+    "name": "Sales and MRP Management",
+    "category": "Sales/Sales",
+    "depends": [
+      "mrp",
+      "sale_stock"
+    ],
+    "installable": true
+  },
+  "website_crm_partner_assign": {
+    "path": "addons/website_crm_partner_assign/__manifest__.py",
+    "name": "Resellers",
+    "category": "Website/Website",
+    "depends": [
+      "base_geolocalize",
+      "crm",
+      "account",
+      "partnership",
+      "website_partner",
+      "website_google_map",
+      "portal"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting_account": {
+    "path": "addons/mrp_subcontracting_account/__manifest__.py",
+    "name": "Subcontracting Management with Stock Valuation",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "mrp_subcontracting",
+      "mrp_account"
+    ],
+    "installable": true
+  },
+  "l10n_bh_pos": {
+    "path": "addons/l10n_bh_pos/__manifest__.py",
+    "name": "Bahrain - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_gcc_pos",
+      "l10n_bh"
+    ],
+    "installable": true
+  },
+  "sale_crm": {
+    "path": "addons/sale_crm/__manifest__.py",
+    "name": "Opportunity to Quotation",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "crm"
+    ],
+    "installable": true
+  },
+  "l10n_tr_nilvera": {
+    "path": "addons/l10n_tr_nilvera/__manifest__.py",
+    "name": "Türkiye - Nilvera",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "l10n_tr",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_td": {
+    "path": "addons/l10n_td/__manifest__.py",
+    "name": "Tchad - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "hr_homeworking": {
+    "path": "addons/hr_homeworking/__manifest__.py",
+    "name": "Remote Work",
+    "category": "Human Resources/Remote Work",
+    "depends": [
+      "hr"
+    ],
+    "installable": true
+  },
+  "test_discuss_full": {
+    "path": "addons/test_discuss_full/__manifest__.py",
+    "name": "Test Discuss (full)",
+    "category": "Productivity/Discuss",
+    "depends": [
+      "calendar",
+      "crm",
+      "crm_livechat",
+      "hr_attendance",
+      "hr_fleet",
+      "hr_holidays",
+      "hr_homeworking",
+      "im_livechat",
+      "mail",
+      "mail_bot",
+      "project_todo",
+      "website_livechat",
+      "website_sale",
+      "website_slides"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_sale": {
+    "path": "addons/spreadsheet_dashboard_sale/__manifest__.py",
+    "name": "Spreadsheet dashboard for sales",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "sale"
+    ],
+    "installable": true
+  },
+  "l10n_sa_edi_pos": {
+    "path": "addons/l10n_sa_edi_pos/__manifest__.py",
+    "name": "Saudi Arabia - E-invoicing (Simplified)",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_sa_pos",
+      "l10n_sa_edi"
+    ],
+    "installable": true
+  },
+  "l10n_hu_edi": {
+    "path": "addons/l10n_hu_edi/__manifest__.py",
+    "name": "Hungary - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_debit_note",
+      "base_iban",
+      "l10n_hu"
+    ],
+    "installable": true
+  },
+  "mass_mailing_sale_sms": {
+    "path": "addons/mass_mailing_sale_sms/__manifest__.py",
+    "name": "Mass mailing sms on sale orders",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "mass_mailing_sale",
+      "mass_mailing_sms"
+    ],
+    "installable": true
+  },
+  "sale_loyalty_delivery": {
+    "path": "addons/sale_loyalty_delivery/__manifest__.py",
+    "name": "Sale Loyalty - Delivery",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_loyalty",
+      "delivery"
+    ],
+    "installable": true
+  },
+  "l10n_ro": {
+    "path": "addons/l10n_ro/__manifest__.py",
+    "name": "Romania - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_ae_pos": {
+    "path": "addons/l10n_ae_pos/__manifest__.py",
+    "name": "United Arab Emirates - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_gcc_pos",
+      "l10n_ae"
+    ],
+    "installable": true
+  },
+  "website_event_track_quiz": {
+    "path": "addons/website_event_track_quiz/__manifest__.py",
+    "name": "Quizzes on Tracks",
+    "category": "Marketing/Events",
+    "depends": [
+      "website_profile",
+      "website_event_track"
+    ],
+    "installable": true
+  },
+  "event_crm": {
+    "path": "addons/event_crm/__manifest__.py",
+    "name": "Event CRM",
+    "category": "Marketing/Events",
+    "depends": [
+      "event",
+      "crm"
+    ],
+    "installable": true
+  },
+  "l10n_ar_pos": {
+    "path": "addons/l10n_ar_pos/__manifest__.py",
+    "name": "Argentinean - Point of Sale with AR Doc",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_ar",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "purchase_product_matrix": {
+    "path": "addons/purchase_product_matrix/__manifest__.py",
+    "name": "Purchase Matrix",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "purchase",
+      "product_matrix"
+    ],
+    "installable": true
+  },
+  "google_gmail": {
+    "path": "addons/google_gmail/__manifest__.py",
+    "name": "Google Gmail",
+    "category": "Hidden",
+    "depends": [
+      "mail"
+    ],
+    "installable": true
+  },
+  "theme_default": {
+    "path": "addons/theme_default/__manifest__.py",
+    "name": "Default Theme",
+    "category": "Theme",
+    "depends": [
+      "website"
+    ],
+    "installable": true
+  },
+  "website_event": {
+    "path": "addons/website_event/__manifest__.py",
+    "name": "Events",
+    "category": "Marketing/Events",
+    "depends": [
+      "event",
+      "website",
+      "website_partner",
+      "website_mail",
+      "html_builder"
+    ],
+    "installable": true
+  },
+  "l10n_id_efaktur_coretax": {
+    "path": "addons/l10n_id_efaktur_coretax/__manifest__.py",
+    "name": "Indonesia E-faktur (Coretax)",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_id"
+    ],
+    "installable": true
+  },
+  "auth_passkey_portal": {
+    "path": "addons/auth_passkey_portal/__manifest__.py",
+    "name": "Passkeys Portal",
+    "category": "Hidden/Tools",
+    "depends": [
+      "auth_passkey",
+      "portal"
+    ],
+    "installable": true
+  },
+  "test_mail": {
+    "path": "addons/test_mail/__manifest__.py",
+    "name": "Mail Tests",
+    "category": "Hidden",
+    "depends": [
+      "mail",
+      "test_orm"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_website_sale": {
+    "path": "addons/spreadsheet_dashboard_website_sale/__manifest__.py",
+    "name": "Spreadsheet dashboard for eCommerce",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "sale_service": {
+    "path": "addons/sale_service/__manifest__.py",
+    "name": "Sales - Service",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "account_edi_ubl_cii": {
+    "path": "addons/account_edi_ubl_cii/__manifest__.py",
+    "name": "Import/Export electronic invoices with UBL/CII",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "account_edi_proxy_client": {
+    "path": "addons/account_edi_proxy_client/__manifest__.py",
+    "name": "Proxy features for account_edi",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account",
+      "certificate"
+    ],
+    "installable": true
+  },
+  "auth_password_policy_signup": {
+    "path": "addons/auth_password_policy_signup/__manifest__.py",
+    "name": "Password Policy support for Signup",
+    "category": "Hidden/Tools",
+    "depends": [
+      "auth_password_policy",
+      "auth_signup"
+    ],
+    "installable": true
+  },
+  "l10n_fr_pdp": {
+    "path": "addons/l10n_fr_pdp/__manifest__.py",
+    "name": "France - E-Invoicing (Approved Platform)",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_fr_account",
+      "account_peppol_response",
+      "auth_totp_mail",
+      "iap"
+    ],
+    "installable": true
+  },
+  "hr_holidays_homeworking": {
+    "path": "addons/hr_holidays_homeworking/__manifest__.py",
+    "name": "Holidays with Remote Work",
+    "category": "Human Resources",
+    "depends": [
+      "hr_holidays",
+      "hr_homeworking"
+    ],
+    "installable": true
+  },
+  "l10n_latam_check": {
+    "path": "addons/l10n_latam_check/__manifest__.py",
+    "name": "Third Party and Deferred/Electronic Checks Management",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "account",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "account": {
+    "path": "addons/account/__manifest__.py",
+    "name": "Invoicing",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "base_setup",
+      "onboarding",
+      "product",
+      "analytic",
+      "portal",
+      "digest"
+    ],
+    "installable": true
+  },
+  "fleet": {
+    "path": "addons/fleet/__manifest__.py",
+    "name": "Fleet",
+    "category": "Human Resources/Fleet",
+    "depends": [
+      "base",
+      "mail"
+    ],
+    "installable": true
+  },
+  "mass_mailing_crm": {
+    "path": "addons/mass_mailing_crm/__manifest__.py",
+    "name": "Mass mailing on lead / opportunities",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "crm",
+      "mass_mailing"
+    ],
+    "installable": true
+  },
+  "l10n_br_website_sale": {
+    "path": "addons/l10n_br_website_sale/__manifest__.py",
+    "name": "Brazil - Website Sale",
+    "category": "Sales/Sales",
+    "depends": [
+      "l10n_br",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "l10n_co_pos": {
+    "path": "addons/l10n_co_pos/__manifest__.py",
+    "name": "Colombian - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_co",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_tr_nilvera_einvoice_extended": {
+    "path": "addons/l10n_tr_nilvera_einvoice_extended/__manifest__.py",
+    "name": "Türkiye - Nilvera E-Invoice Extended",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "l10n_tr_nilvera_einvoice",
+      "contacts"
+    ],
+    "installable": true
+  },
+  "google_account": {
+    "path": "addons/google_account/__manifest__.py",
+    "name": "Google Users",
+    "category": "Hidden/Tools",
+    "depends": [
+      "base_setup"
+    ],
+    "installable": true
+  },
+  "stock": {
+    "path": "addons/stock/__manifest__.py",
+    "name": "Inventory",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "product",
+      "barcodes_gs1_nomenclature",
+      "digest"
+    ],
+    "installable": true
+  },
+  "resource": {
+    "path": "addons/resource/__manifest__.py",
+    "name": "Resource",
+    "category": "Hidden",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "pos_hr_restaurant": {
+    "path": "addons/pos_hr_restaurant/__manifest__.py",
+    "name": "POS HR Restaurant",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "pos_hr",
+      "pos_restaurant"
+    ],
+    "installable": true
+  },
+  "partnership": {
+    "path": "addons/partnership/__manifest__.py",
+    "name": "Partnership / Membership",
+    "category": "Sales/CRM",
+    "depends": [
+      "crm",
+      "sale"
+    ],
+    "installable": true
+  },
+  "survey_crm": {
+    "path": "addons/survey_crm/__manifest__.py",
+    "name": "Survey CRM",
+    "category": "Marketing/Surveys",
+    "depends": [
+      "survey",
+      "crm"
+    ],
+    "installable": true
+  },
+  "sale_purchase": {
+    "path": "addons/sale_purchase/__manifest__.py",
+    "name": "Sale Purchase",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "purchase"
+    ],
+    "installable": true
+  },
+  "web_tour": {
+    "path": "addons/web_tour/__manifest__.py",
+    "name": "Tours",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "survey": {
+    "path": "addons/survey/__manifest__.py",
+    "name": "Surveys",
+    "category": "Marketing/Surveys",
+    "depends": [
+      "auth_signup",
+      "http_routing",
+      "mail",
+      "web_tour",
+      "gamification"
+    ],
+    "installable": true
+  },
+  "rpc": {
+    "path": "addons/rpc/__manifest__.py",
+    "name": "RPC endpoints",
+    "category": "Extra Tools",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "hr_maintenance": {
+    "path": "addons/hr_maintenance/__manifest__.py",
+    "name": "Maintenance - HR",
+    "category": "Human Resources",
+    "depends": [
+      "hr",
+      "maintenance"
+    ],
+    "installable": true
+  },
+  "l10n_ro_edi": {
+    "path": "addons/l10n_ro_edi/__manifest__.py",
+    "name": "Romania - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii",
+      "l10n_ro"
+    ],
+    "installable": true
+  },
+  "website_sale": {
+    "path": "addons/website_sale/__manifest__.py",
+    "name": "eCommerce",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "sale",
+      "website_payment",
+      "website_mail",
+      "portal_rating",
+      "digest",
+      "delivery",
+      "html_builder"
+    ],
+    "installable": true
+  },
+  "payment_asiapay": {
+    "path": "addons/payment_asiapay/__manifest__.py",
+    "name": "Payment Provider: AsiaPay",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "uom": {
+    "path": "addons/uom/__manifest__.py",
+    "name": "Units of measure",
+    "category": "Sales/Sales",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "product_margin": {
+    "path": "addons/product_margin/__manifest__.py",
+    "name": "Margins by Products",
+    "category": "Sales/Sales",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "account_payment": {
+    "path": "addons/account_payment/__manifest__.py",
+    "name": "Payment - Account",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account",
+      "payment"
+    ],
+    "installable": true
+  },
+  "l10n_tr_gib_invoice_scenarios": {
+    "path": "addons/l10n_tr_gib_invoice_scenarios/__manifest__.py",
+    "name": "Türkiye - Nilvera E-Invoice Commercial and Return",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "l10n_tr_nilvera_einvoice_extended"
+    ],
+    "installable": true
+  },
+  "pos_adyen": {
+    "path": "addons/pos_adyen/__manifest__.py",
+    "name": "POS Adyen",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "l10n_qa": {
+    "path": "addons/l10n_qa/__manifest__.py",
+    "name": "Qatar - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "l10n_pl_bank_verification": {
+    "path": "addons/l10n_pl_bank_verification/__manifest__.py",
+    "name": "Poland - Accounting - Bank Account Verification",
+    "category": "Uncategorized",
+    "depends": [
+      "l10n_pl"
+    ],
+    "installable": true
+  },
+  "l10n_tw": {
+    "path": "addons/l10n_tw/__manifest__.py",
+    "name": "Taiwan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_address_extended"
+    ],
+    "installable": true
+  },
+  "l10n_co": {
+    "path": "addons/l10n_co/__manifest__.py",
+    "name": "Colombia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_debit_note",
+      "l10n_latam_base",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_tbai_pos": {
+    "path": "addons/l10n_es_edi_tbai_pos/__manifest__.py",
+    "name": "Spain - Point of Sale + TicketBAI",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_es_edi_tbai",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "website_mail_group": {
+    "path": "addons/website_mail_group/__manifest__.py",
+    "name": "Website Mail Group",
+    "category": "Uncategorized",
+    "depends": [
+      "mail_group",
+      "website"
+    ],
+    "installable": true
+  },
+  "l10n_lk": {
+    "path": "addons/l10n_lk/__manifest__.py",
+    "name": "Sri Lanka - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_account_withholding_tax"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting_repair": {
+    "path": "addons/mrp_subcontracting_repair/__manifest__.py",
+    "name": "MRP Subcontracting Repair",
+    "category": "Supply Chain/Repair",
+    "depends": [
+      "mrp_subcontracting",
+      "repair"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_facturae": {
+    "path": "addons/l10n_es_edi_facturae/__manifest__.py",
+    "name": "Spain - Facturae EDI",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "certificate",
+      "l10n_es"
+    ],
+    "installable": true
+  },
+  "sales_team": {
+    "path": "addons/sales_team/__manifest__.py",
+    "name": "Sales Teams",
+    "category": "Sales/Sales",
+    "depends": [
+      "base",
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_ch": {
+    "path": "addons/l10n_ch/__manifest__.py",
+    "name": "Switzerland - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "base_iban",
+      "l10n_din5008"
+    ],
+    "installable": true
+  },
+  "purchase_mrp": {
+    "path": "addons/purchase_mrp/__manifest__.py",
+    "name": "Purchase and MRP Management",
+    "category": "Supply Chain/Purchase",
+    "depends": [
+      "mrp",
+      "purchase_stock"
+    ],
+    "installable": true
+  },
+  "pos_mollie": {
+    "path": "addons/pos_mollie/__manifest__.py",
+    "name": "POS Mollie",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "payment_mollie"
+    ],
+    "installable": true
+  },
+  "product_matrix": {
+    "path": "addons/product_matrix/__manifest__.py",
+    "name": "Product Matrix",
+    "category": "Sales/Sales",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "html_builder": {
+    "path": "addons/html_builder/__manifest__.py",
+    "name": "HTML Builder",
+    "category": "Uncategorized",
+    "depends": [
+      "base",
+      "html_editor",
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_anz_ubl_pint": {
+    "path": "addons/l10n_anz_ubl_pint/__manifest__.py",
+    "name": "Australia & New Zealand - UBL PINT",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_ca": {
+    "path": "addons/l10n_ca/__manifest__.py",
+    "name": "Canada - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban"
+    ],
+    "installable": true
+  },
+  "l10n_om": {
+    "path": "addons/l10n_om/__manifest__.py",
+    "name": "Oman - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "l10n_gcc_invoice"
+    ],
+    "installable": true
+  },
+  "l10n_it": {
+    "path": "addons/l10n_it/__manifest__.py",
+    "name": "Italy - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_iban",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_tr_nilvera_edispatch": {
+    "path": "addons/l10n_tr_nilvera_edispatch/__manifest__.py",
+    "name": "Türkiye - e-Irsaliye (e-Dispatch)",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_tr_nilvera",
+      "stock",
+      "stock_account"
+    ],
+    "installable": true
+  },
+  "l10n_ar_website_sale": {
+    "path": "addons/l10n_ar_website_sale/__manifest__.py",
+    "name": "Argentinean eCommerce",
+    "category": "Accounting/Localizations/Website",
+    "depends": [
+      "website_sale",
+      "l10n_ar"
+    ],
+    "installable": true
+  },
+  "l10n_cf": {
+    "path": "addons/l10n_cf/__manifest__.py",
+    "name": "Central African Republic - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "event": {
+    "path": "addons/event/__manifest__.py",
+    "name": "Events Organization",
+    "category": "Marketing/Events",
+    "depends": [
+      "barcodes",
+      "base_setup",
+      "mail",
+      "phone_validation",
+      "portal",
+      "utm"
+    ],
+    "installable": true
+  },
+  "snailmail": {
+    "path": "addons/snailmail/__manifest__.py",
+    "name": "Snail Mail",
+    "category": "Hidden/Tools",
+    "depends": [
+      "iap_mail",
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_hr_edi": {
+    "path": "addons/l10n_hr_edi/__manifest__.py",
+    "name": "Croatia - e-invoicing",
+    "category": "Accounting/Localizations/Reporting",
+    "depends": [
+      "l10n_hr",
+      "account_edi_ubl_cii",
+      "account_peppol"
+    ],
+    "installable": true
+  },
+  "account_peppol_response": {
+    "path": "addons/account_peppol_response/__manifest__.py",
+    "name": "Peppol Business Response",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account_peppol"
+    ],
+    "installable": true
+  },
+  "l10n_fr_hr_holidays": {
+    "path": "addons/l10n_fr_hr_holidays/__manifest__.py",
+    "name": "France - Time Off",
+    "category": "Human Resources/Time Off",
+    "depends": [
+      "hr_holidays"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_pos_hr": {
+    "path": "addons/spreadsheet_dashboard_pos_hr/__manifest__.py",
+    "name": "Spreadsheet dashboard for point of sale",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "pos_hr"
+    ],
+    "installable": true
+  },
+  "cloud_storage_migration": {
+    "path": "addons/cloud_storage_migration/__manifest__.py",
+    "name": "Cloud Storage Migration",
+    "category": "Technical Settings",
+    "depends": [
+      "cloud_storage"
+    ],
+    "installable": true
+  },
+  "mrp_subcontracting_landed_costs": {
+    "path": "addons/mrp_subcontracting_landed_costs/__manifest__.py",
+    "name": "Landed Costs With Subcontracting order",
+    "category": "Supply Chain/Manufacturing",
+    "depends": [
+      "mrp_landed_costs",
+      "mrp_subcontracting"
+    ],
+    "installable": true
+  },
+  "repair": {
+    "path": "addons/repair/__manifest__.py",
+    "name": "Repairs",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "sale_stock",
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "payment_adyen": {
+    "path": "addons/payment_adyen/__manifest__.py",
+    "name": "Payment Provider: Adyen",
+    "category": "Accounting/Payment Providers",
+    "depends": [
+      "payment"
+    ],
+    "installable": true
+  },
+  "website_sale_stock_wishlist": {
+    "path": "addons/website_sale_stock_wishlist/__manifest__.py",
+    "name": "Product Availability Notifications",
+    "category": "Website/Website",
+    "depends": [
+      "website_sale_stock",
+      "website_sale_wishlist"
+    ],
+    "installable": true
+  },
+  "account_edi": {
+    "path": "addons/account_edi/__manifest__.py",
+    "name": "Import/Export Invoices From XML/PDF",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_din5008_stock": {
+    "path": "addons/l10n_din5008_stock/__manifest__.py",
+    "name": "DIN 5008 - Stock",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_din5008",
+      "stock"
+    ],
+    "installable": true
+  },
+  "l10n_ec": {
+    "path": "addons/l10n_ec/__manifest__.py",
+    "name": "Ecuadorian Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "base_iban",
+      "account_debit_note",
+      "l10n_latam_invoice_document",
+      "l10n_latam_base",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_cz": {
+    "path": "addons/l10n_cz/__manifest__.py",
+    "name": "Czech - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii",
+      "base_iban",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "pos_glory_cash": {
+    "path": "addons/pos_glory_cash/__manifest__.py",
+    "name": "POS Glory Cash Machines",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "analytic": {
+    "path": "addons/analytic/__manifest__.py",
+    "name": "Analytic Accounting",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "base",
+      "mail",
+      "uom"
+    ],
+    "installable": true
+  },
+  "website_mass_mailing": {
+    "path": "addons/website_mass_mailing/__manifest__.py",
+    "name": "Newsletter Subscribe Button",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "mass_mailing",
+      "google_recaptcha"
+    ],
+    "installable": true
+  },
+  "pos_sale": {
+    "path": "addons/pos_sale/__manifest__.py",
+    "name": "POS - Sales",
+    "category": "Sales/Point of Sale",
+    "depends": [
+      "point_of_sale",
+      "sale_management"
+    ],
+    "installable": true
+  },
+  "sale_management": {
+    "path": "addons/sale_management/__manifest__.py",
+    "name": "Sales",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "digest"
+    ],
+    "installable": true
+  },
+  "iot_base": {
+    "path": "addons/iot_base/__manifest__.py",
+    "name": "IoT Base",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "pos_online_payment": {
+    "path": "addons/pos_online_payment/__manifest__.py",
+    "name": "Point of Sale online payment",
+    "category": "Uncategorized",
+    "depends": [
+      "point_of_sale",
+      "account_payment"
+    ],
+    "installable": true
+  },
+  "test_mail_full": {
+    "path": "addons/test_mail_full/__manifest__.py",
+    "name": "Mail Tests (Full)",
+    "category": "Hidden",
+    "depends": [
+      "mail",
+      "mail_bot",
+      "portal",
+      "rating",
+      "mass_mailing",
+      "mass_mailing_sms",
+      "phone_validation",
+      "sms",
+      "test_mail",
+      "test_mail_sms",
+      "test_mass_mailing"
+    ],
+    "installable": true
+  },
+  "l10n_cg": {
+    "path": "addons/l10n_cg/__manifest__.py",
+    "name": "Congo - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "account_debit_note": {
+    "path": "addons/account_debit_note/__manifest__.py",
+    "name": "Debit Notes",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard_website_sale_slides": {
+    "path": "addons/spreadsheet_dashboard_website_sale_slides/__manifest__.py",
+    "name": "Spreadsheet dashboard for eLearning",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet_dashboard",
+      "website_sale_slides"
+    ],
+    "installable": true
+  },
+  "event_crm_sale": {
+    "path": "addons/event_crm_sale/__manifest__.py",
+    "name": "Event CRM Sale",
+    "category": "Marketing/Events",
+    "depends": [
+      "event_crm",
+      "event_sale"
+    ],
+    "installable": true
+  },
+  "onboarding": {
+    "path": "addons/onboarding/__manifest__.py",
+    "name": "Onboarding Toolbox",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "l10n_vn_edi_viettel_pos": {
+    "path": "addons/l10n_vn_edi_viettel_pos/__manifest__.py",
+    "name": "Vietnam - POS E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_vn_edi_viettel",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "website_event_sale": {
+    "path": "addons/website_event_sale/__manifest__.py",
+    "name": "Online Event Ticketing",
+    "category": "Website/Website",
+    "depends": [
+      "website_event",
+      "event_sale",
+      "website_sale"
+    ],
+    "installable": true
+  },
+  "l10n_ci": {
+    "path": "addons/l10n_ci/__manifest__.py",
+    "name": "Ivory Coast - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "l10n_syscohada",
+      "account"
+    ],
+    "installable": true
+  },
+  "website_crm": {
+    "path": "addons/website_crm/__manifest__.py",
+    "name": "Contact Form",
+    "category": "Website/Website",
+    "depends": [
+      "website",
+      "crm"
+    ],
+    "installable": true
+  },
+  "stock_account": {
+    "path": "addons/stock_account/__manifest__.py",
+    "name": "WMS Accounting",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock",
+      "account"
+    ],
+    "installable": true
+  },
+  "l10n_din5008_expense": {
+    "path": "addons/l10n_din5008_expense/__manifest__.py",
+    "name": "DIN 5008 - Expenses",
+    "category": "Accounting/Localizations",
+    "depends": [
+      "l10n_din5008",
+      "hr_expense"
+    ],
+    "installable": true
+  },
+  "hr_fleet": {
+    "path": "addons/hr_fleet/__manifest__.py",
+    "name": "Fleet History",
+    "category": "Human Resources",
+    "depends": [
+      "hr",
+      "fleet"
+    ],
+    "installable": true
+  },
+  "stock_sms": {
+    "path": "addons/stock_sms/__manifest__.py",
+    "name": "Stock - SMS",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock",
+      "sms"
+    ],
+    "installable": true
+  },
+  "pos_loyalty": {
+    "path": "addons/pos_loyalty/__manifest__.py",
+    "name": "Point of Sale - Coupons & Loyalty",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "loyalty",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "test_website_modules": {
+    "path": "addons/test_website_modules/__manifest__.py",
+    "name": "Website Modules Test",
+    "category": "Hidden",
+    "depends": [
+      "theme_default",
+      "website",
+      "website_blog",
+      "website_event_sale",
+      "website_slides",
+      "website_livechat",
+      "website_crm_iap_reveal",
+      "website_sale_comparison",
+      "website_sale_wishlist"
+    ],
+    "installable": true
+  },
+  "l10n_tr_nilvera_base_vat": {
+    "path": "addons/l10n_tr_nilvera_base_vat/__manifest__.py",
+    "name": "Türkiye - Nilvera/Base VAT",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "l10n_tr_nilvera",
+      "base_vat"
+    ],
+    "installable": true
+  },
+  "l10n_cn": {
+    "path": "addons/l10n_cn/__manifest__.py",
+    "name": "China - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "base",
+      "account"
+    ],
+    "installable": true
+  },
+  "api_doc": {
+    "path": "addons/api_doc/__manifest__.py",
+    "name": "API Documentation",
+    "category": "Hidden",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "l10n_it_edi": {
+    "path": "addons/l10n_it_edi/__manifest__.py",
+    "name": "Italy - E-invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_it",
+      "account_edi_proxy_client",
+      "account_debit_note"
+    ],
+    "installable": true
+  },
+  "l10n_jo_edi": {
+    "path": "addons/l10n_jo_edi/__manifest__.py",
+    "name": "Jordan E-Invoicing",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "account_edi_ubl_cii",
+      "l10n_jo"
+    ],
+    "installable": true
+  },
+  "mass_mailing_event_sms": {
+    "path": "addons/mass_mailing_event_sms/__manifest__.py",
+    "name": "Event Attendees SMS Marketing",
+    "category": "Marketing/Email Marketing",
+    "depends": [
+      "event",
+      "mass_mailing",
+      "mass_mailing_event",
+      "mass_mailing_sms",
+      "sms"
+    ],
+    "installable": true
+  },
+  "cloud_storage": {
+    "path": "addons/cloud_storage/__manifest__.py",
+    "name": "Cloud Storage",
+    "category": "Technical Settings",
+    "depends": [
+      "base_setup",
+      "mail"
+    ],
+    "installable": true
+  },
+  "l10n_es_edi_tbai": {
+    "path": "addons/l10n_es_edi_tbai/__manifest__.py",
+    "name": "Spain - TicketBAI",
+    "category": "Accounting/Localizations/EDI",
+    "depends": [
+      "l10n_es",
+      "certificate"
+    ],
+    "installable": true
+  },
+  "l10n_ee": {
+    "path": "addons/l10n_ee/__manifest__.py",
+    "name": "Estonia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "spreadsheet_dashboard": {
+    "path": "addons/spreadsheet_dashboard/__manifest__.py",
+    "name": "Spreadsheet dashboard",
+    "category": "Productivity/Dashboard",
+    "depends": [
+      "spreadsheet"
+    ],
+    "installable": true
+  },
+  "l10n_in": {
+    "path": "addons/l10n_in/__manifest__.py",
+    "name": "Indian - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account_tax_python",
+      "base_vat",
+      "account_debit_note",
+      "account",
+      "iap"
+    ],
+    "installable": true
+  },
+  "l10n_ch_pos": {
+    "path": "addons/l10n_ch_pos/__manifest__.py",
+    "name": "Swiss - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "l10n_ch",
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "sale_edi_ubl": {
+    "path": "addons/sale_edi_ubl/__manifest__.py",
+    "name": "Import electronic orders with UBL",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_tr_nilvera_einvoice": {
+    "path": "addons/l10n_tr_nilvera_einvoice/__manifest__.py",
+    "name": "Türkiye - Nilvera E-Invoice",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "l10n_tr_nilvera",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_mt_pos": {
+    "path": "addons/l10n_mt_pos/__manifest__.py",
+    "name": "Malta - Point of Sale",
+    "category": "Accounting/Localizations/Point of Sale",
+    "depends": [
+      "point_of_sale"
+    ],
+    "installable": true
+  },
+  "account_peppol_advanced_fields": {
+    "path": "addons/account_peppol_advanced_fields/__manifest__.py",
+    "name": "[DEPRECATED] Account Peppol Advanced Fields",
+    "category": "Accounting/Accounting",
+    "depends": [
+      "account",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "crm_livechat": {
+    "path": "addons/crm_livechat/__manifest__.py",
+    "name": "CRM Livechat",
+    "category": "Sales/CRM",
+    "depends": [
+      "crm",
+      "im_livechat"
+    ],
+    "installable": true
+  },
+  "hr_recruitment_sms": {
+    "path": "addons/hr_recruitment_sms/__manifest__.py",
+    "name": "Recruitment - SMS",
+    "category": "Human Resources/Recruitment",
+    "depends": [
+      "hr_recruitment",
+      "sms"
+    ],
+    "installable": true
+  },
+  "hr_skills": {
+    "path": "addons/hr_skills/__manifest__.py",
+    "name": "Skills Management",
+    "category": "Human Resources/Employees",
+    "depends": [
+      "hr"
+    ],
+    "installable": true
+  },
+  "test_html_field_history": {
+    "path": "addons/test_html_field_history/__manifest__.py",
+    "name": "Test - html_field_history",
+    "category": "Hidden",
+    "depends": [
+      "html_editor"
+    ],
+    "installable": true
+  },
+  "sale_purchase_stock": {
+    "path": "addons/sale_purchase_stock/__manifest__.py",
+    "name": "MTO Sale <-> Purchase",
+    "category": "Sales/Sales",
+    "depends": [
+      "sale_stock",
+      "purchase_stock",
+      "sale_purchase"
+    ],
+    "installable": true
+  },
+  "stock_landed_costs": {
+    "path": "addons/stock_landed_costs/__manifest__.py",
+    "name": "WMS Landed Costs",
+    "category": "Supply Chain/Inventory",
+    "depends": [
+      "stock_account",
+      "purchase_stock"
+    ],
+    "installable": true
+  },
+  "l10n_cr": {
+    "path": "addons/l10n_cr/__manifest__.py",
+    "name": "Costa Rica - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "utm": {
+    "path": "addons/utm/__manifest__.py",
+    "name": "UTM Trackers",
+    "category": "Marketing",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "test_crm_full": {
+    "path": "addons/test_crm_full/__manifest__.py",
+    "name": "Test Full Crm Flow",
+    "category": "Hidden/Tests",
+    "depends": [
+      "crm",
+      "crm_iap_enrich",
+      "crm_iap_mine",
+      "crm_sms",
+      "event_crm",
+      "sale_crm",
+      "website_crm",
+      "website_crm_iap_reveal",
+      "website_crm_partner_assign",
+      "website_crm_livechat"
+    ],
+    "installable": true
+  },
+  "test_import_export": {
+    "path": "addons/test_import_export/__manifest__.py",
+    "name": "Test - Import & Export",
+    "category": "Hidden",
+    "depends": [
+      "web",
+      "base_import",
+      "website"
+    ],
+    "installable": true
+  },
+  "l10n_lv": {
+    "path": "addons/l10n_lv/__manifest__.py",
+    "name": "Latvia - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account",
+      "base_vat",
+      "account_edi_ubl_cii"
+    ],
+    "installable": true
+  },
+  "l10n_jo": {
+    "path": "addons/l10n_jo/__manifest__.py",
+    "name": "Jordan - Accounting",
+    "category": "Accounting/Localizations/Account Charts",
+    "depends": [
+      "account"
+    ],
+    "installable": true
+  },
+  "base_setup": {
+    "path": "addons/base_setup/__manifest__.py",
+    "name": "Initial Setup Tools",
+    "category": "Hidden",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "mail_bot_hr": {
+    "path": "addons/mail_bot_hr/__manifest__.py",
+    "name": "OdooBot - HR",
+    "category": "Productivity/Discuss",
+    "depends": [
+      "mail_bot",
+      "hr"
+    ],
+    "installable": true
+  },
+  "pos_self_order_pine_labs": {
+    "path": "addons/pos_self_order_pine_labs/__manifest__.py",
+    "name": "POS Self Order Pine Labs",
+    "category": "Sales/Point Of Sale",
+    "depends": [
+      "pos_pine_labs",
+      "pos_self_order"
+    ],
+    "installable": true
+  },
+  "auth_totp": {
+    "path": "addons/auth_totp/__manifest__.py",
+    "name": "Two-Factor Authentication (TOTP)",
+    "category": "Extra Tools",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "test_action_bindings": {
+    "path": "odoo/addons/test_action_bindings/__manifest__.py",
+    "name": "Test Action Bindings",
+    "category": "Hidden/Tests",
+    "depends": [],
+    "installable": true
+  },
+  "test_uninstall": {
+    "path": "odoo/addons/test_uninstall/__manifest__.py",
+    "name": "test-uninstall",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_main_flows": {
+    "path": "odoo/addons/test_main_flows/__manifest__.py",
+    "name": "Test Main Flow",
+    "category": "Hidden/Tests",
+    "depends": [
+      "web_tour",
+      "crm",
+      "sale_timesheet",
+      "purchase_stock",
+      "mrp",
+      "account"
+    ],
+    "installable": true
+  },
+  "test_data_module_install": {
+    "path": "odoo/addons/test_data_module_install/__manifest__.py",
+    "name": "test installation of data module",
+    "category": "Hidden/Tests",
+    "depends": [
+      "test_data_module"
+    ],
+    "installable": true
+  },
+  "test_access_rights": {
+    "path": "odoo/addons/test_access_rights/__manifest__.py",
+    "name": "test of access rights and rules",
+    "category": "Hidden/Tests",
+    "depends": [],
+    "installable": true
+  },
+  "test_mimetypes": {
+    "path": "odoo/addons/test_mimetypes/__manifest__.py",
+    "name": "test mimetypes-guessing",
+    "category": "Hidden/Tests",
+    "depends": [],
+    "installable": true
+  },
+  "test_http": {
+    "path": "odoo/addons/test_http/__manifest__.py",
+    "name": "Test HTTP",
+    "category": "Hidden/Tests",
+    "depends": [
+      "web",
+      "web_tour",
+      "mail",
+      "rpc"
+    ],
+    "installable": true
+  },
+  "test_testing_utilities": {
+    "path": "odoo/addons/test_testing_utilities/__manifest__.py",
+    "name": "Test testing utilities",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  },
+  "test_translation_import": {
+    "path": "odoo/addons/test_translation_import/__manifest__.py",
+    "name": "test-translation-import",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_search_panel": {
+    "path": "odoo/addons/test_search_panel/__manifest__.py",
+    "name": "test_search_panel",
+    "category": "Hidden/Tests",
+    "depends": [
+      "web"
+    ],
+    "installable": true
+  },
+  "test_data_module": {
+    "path": "odoo/addons/test_data_module/__manifest__.py",
+    "name": "test module to test data only modules",
+    "category": "Hidden/Tests",
+    "depends": [],
+    "installable": true
+  },
+  "test_lint": {
+    "path": "odoo/addons/test_lint/__manifest__.py",
+    "name": "test-lint",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_inherits_depends": {
+    "path": "odoo/addons/test_inherits_depends/__manifest__.py",
+    "name": "test-inherits-depends",
+    "category": "Hidden/Tests",
+    "depends": [
+      "test_inherits"
+    ],
+    "installable": true
+  },
+  "test_inherit": {
+    "path": "odoo/addons/test_inherit/__manifest__.py",
+    "name": "test-inherit",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base",
+      "test_orm"
+    ],
+    "installable": true
+  },
+  "test_converter": {
+    "path": "odoo/addons/test_converter/__manifest__.py",
+    "name": "test-field-converter",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_assetsbundle": {
+    "path": "odoo/addons/test_assetsbundle/__manifest__.py",
+    "name": "test-assetsbundle",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_orm": {
+    "path": "odoo/addons/test_orm/__manifest__.py",
+    "name": "Test ORM",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base",
+      "web",
+      "web_tour"
+    ],
+    "installable": true
+  },
+  "test_convert": {
+    "path": "odoo/addons/test_convert/__manifest__.py",
+    "name": "test_convert",
+    "category": "Hidden/Tests",
+    "depends": [],
+    "installable": true
+  },
+  "test_rpc": {
+    "path": "odoo/addons/test_rpc/__manifest__.py",
+    "name": "Test RPC",
+    "category": "Hidden/Tests",
+    "depends": [
+      "web",
+      "rpc"
+    ],
+    "installable": true
+  },
+  "test_inherit_depends": {
+    "path": "odoo/addons/test_inherit_depends/__manifest__.py",
+    "name": "test-inherit-depends",
+    "category": "Hidden/Tests",
+    "depends": [
+      "test_inherit",
+      "test_orm"
+    ],
+    "installable": true
+  },
+  "test_inherits": {
+    "path": "odoo/addons/test_inherits/__manifest__.py",
+    "name": "test-inherits",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base"
+    ],
+    "installable": true
+  },
+  "test_auth_custom": {
+    "path": "odoo/addons/test_auth_custom/__manifest__.py",
+    "name": "Tests that custom auth works & is not impaired by CORS",
+    "category": "Hidden",
+    "depends": [],
+    "installable": true
+  },
+  "base": {
+    "path": "odoo/addons/base/__manifest__.py",
+    "name": "Base",
+    "category": "Hidden",
+    "depends": [],
+    "installable": true
+  },
+  "test_read_group": {
+    "path": "odoo/addons/test_read_group/__manifest__.py",
+    "name": "test of (formatted/web)_read_group",
+    "category": "Hidden/Tests",
+    "depends": [
+      "base",
+      "web"
+    ],
+    "installable": true
+  }
+}

@@ -1,0 +1,32 @@
+component,source
+后台用户 / WebClient,addons/web/static/src/webclient/webclient.js
+网站 / Portal / POS,addons/website/__manifest__.py
+外部系统 / API client,addons/rpc/controllers/json2.py
+启动 / 配置,odoo/cli/server.py
+HTTP / Controllers,odoo/http.py
+业务模型 / Addons,odoo/modules/loading.py
+集成与输出,odoo/addons/base/models/ir_actions_report.py
+Registry / 模块装载,odoo/orm/registry.py
+ORM / 权限 / 事务,odoo/orm/models.py
+附件 / 资源 / 会话,odoo/addons/base/models/ir_attachment.py
+Server 进程模型,odoo/service/server.py
+后台任务 / 自动化 / 消息,odoo/addons/base/models/ir_cron.py
+数据库访问 / SQL,odoo/sql_db.py
+外部服务  [按模块启用],addons/payment/models/payment_provider.py
+云存储  [可选],addons/cloud_storage/models/ir_attachment.py
+本地文件存储,odoo/tools/config.py
+PostgreSQL,addons/bus/models/bus.py
+业务事件 / mail.thread,addons/bus/models/bus.py
+业务数据库 / bus_bus,addons/bus/models/bus.py
+PostgreSQL / imbus,addons/bus/models/bus.py
+ImDispatch + WebSocket,addons/bus/websocket.py
+浏览器 / bus_service,addons/bus/static/src/services/bus_service.js
+定时 / 规则触发,addons/base_automation/models/base_automation.py
+ir.cron / WorkerCron,odoo/addons/base/models/ir_cron.py
+执行模型方法 / ORM,odoo/addons/base/models/ir_cron.py
+销售 / 客户 / 收银,addons/sale/__manifest__.py
+供应链 / 制造,addons/mrp/__manifest__.py
+财务 / 支付 / 本地化,addons/account/__manifest__.py
+网站 / 电商 / 内容,addons/website_sale/__manifest__.py
+人员 / 项目 / 资源,addons/hr/__manifest__.py
+协作 / 营销 / 自动化,addons/mail/__manifest__.py

@@ -1,0 +1,6 @@
+component,source
+Agent / MCP Client,/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/README.md
+MCP 适配层  /  stdio server,/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/src/createPlatformProxyMcpServer.js
+ERP BFF  /  接口入口,/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/README.md
+Platform Proxy,/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/README.md
+Mercado Libre API,/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/src/registerMlNativeTools.js

@@ -1,0 +1,42 @@
+<odoo>
+ <record id="publication_list" model="ir.ui.view"><field name="name">meli.store.publication.list</field><field name="model">meli.store.publication</field><field name="arch" type="xml">
+  <list decoration-success="state == 'done'" decoration-danger="state in ('failed','uncertain')" decoration-warning="state == 'blocked'" create="0" delete="0">
+   <header><button name="action_check" type="object" string="检查商品"/><button name="action_publish" type="object" string="发布已检查商品" confirm="将按显示的美元售价，向所选目标店铺创建真实 Full 仓刊登。确认发布？"/></header>
+   <field name="store_id"/><field name="product_id"/><field name="sku"/><field name="family_name"/><field name="price"/><field name="gtin" optional="hide"/><field name="state" widget="badge"/><field name="target_item"/><field name="checked_at" optional="hide"/>
+  </list>
+ </field></record>
+ <record id="publication_form" model="ir.ui.view"><field name="name">meli.store.publication.form</field><field name="model">meli.store.publication</field><field name="arch" type="xml">
+  <form string="商品发布" create="0" delete="0"><header>
+   <button name="action_check" type="object" string="检查商品" class="oe_highlight" invisible="state in ('queued','sending','done','uncertain')"/>
+   <button name="action_publish" type="object" string="发布到目标店铺" class="oe_highlight" invisible="state != 'ready'" confirm="将按当前美元售价在此目标店铺创建真实 Full 仓刊登。确认发布？"/>
+   <button name="action_cancel_queue" type="object" string="取消排队" invisible="state != 'queued'"/>
+   <button name="action_refresh_result" type="object" string="核对发布结果" invisible="state not in ('done','uncertain')"/>
+   <field name="state" widget="statusbar" statusbar_visible="draft,ready,queued,done"/>
+  </header><sheet>
+   <div class="alert alert-info">目标为墨西哥 Full 仓。美元售价沿用原店；新刊登编号独立保存。Full 可售库存以平台实际入仓为准。</div>
+   <group><group><field name="store_id"/><field name="product_id"/><field name="source_item"/><field name="sku"/></group>
+   <group><field name="family_name" readonly="state in ('queued','sending','done','uncertain')"/><field name="english_confirmed" readonly="state in ('queued','sending','done','uncertain')"/><field name="price"/><field name="gtin" readonly="state in ('queued','sending','done','uncertain')"/><field name="listing_type" readonly="state in ('queued','sending','done','uncertain')"/></group></group>
+   <notebook>
+    <page string="商品资料"><field name="description" placeholder="英文商品描述" readonly="state in ('queued','sending','done','uncertain')"/>
+     <field name="attribute_ids" readonly="state in ('queued','sending','done','uncertain')"><list editable="bottom" create="0" delete="0"><field name="name"/><field name="value"/></list></field>
+    </page>
+    <page string="检查结果"><field name="check_result"/><field name="checked_at"/></page>
+    <page string="发布结果"><group><field name="target_item"/><field name="submitted_at"/><field name="reconcile_id" invisible="state != 'uncertain'"/></group><field name="result"/><field name="marketplace_items"/></page>
+   </notebook>
+  </sheet></form>
+ </field></record>
+ <record id="publication_search" model="ir.ui.view"><field name="name">meli.store.publication.search</field><field name="model">meli.store.publication</field><field name="arch" type="xml">
+  <search><field name="sku"/><field name="product_id"/><field name="store_id"/><filter name="needs_work" string="待处理" domain="[('state','in',['draft','blocked','failed','uncertain'])]"/><filter name="ready" string="检查通过" domain="[('state','=','ready')]"/><filter name="done" string="已创建刊登" domain="[('state','=','done')]"/><group><filter name="by_store" string="店铺" context="{'group_by':'store_id'}"/><filter name="by_state" string="状态" context="{'group_by':'state'}"/><filter name="by_product" string="商品" context="{'group_by':'product_id'}"/></group></search>
+ </field></record>
+ <record id="publication_action" model="ir.actions.act_window"><field name="name">商品发布与结果</field><field name="res_model">meli.store.publication</field><field name="view_mode">list,form</field></record>
+ <record id="prepare_form" model="ir.ui.view"><field name="name">meli.store.prepare.form</field><field name="model">meli.store.prepare</field><field name="arch" type="xml">
+  <form string="选择店铺和商品"><group><field name="store_id" options="{'no_create': True}"/><field name="product_ids" widget="many2many_tags" options="{'no_create': True}"/></group>
+   <div class="alert alert-info">读取原店商品及全部尺码 SKU，沿用原店美元售价。此步骤仅建立待检查记录，不会发布商品。</div>
+   <footer><button name="action_prepare" type="object" string="准备商品" class="oe_highlight"/><button string="取消" special="cancel"/></footer>
+  </form>
+ </field></record>
+ <record id="prepare_action" model="ir.actions.act_window"><field name="name">选择店铺和商品</field><field name="res_model">meli.store.prepare</field><field name="view_mode">form</field><field name="target">new</field></record>
+ <menuitem id="prepare_menu" name="选择店铺和商品" parent="store_root" action="prepare_action" sequence="20"/>
+ <menuitem id="publication_menu" name="商品发布与结果" parent="store_root" action="publication_action" sequence="30"/>
+ <record id="cron_publish" model="ir.cron"><field name="name">独立店铺：处理已确认发布的商品</field><field name="model_id" ref="model_meli_store_publication"/><field name="state">code</field><field name="code">model._cron_publish()</field><field name="interval_number">1</field><field name="interval_type">minutes</field><field name="active" eval="True"/></record>
+</odoo>

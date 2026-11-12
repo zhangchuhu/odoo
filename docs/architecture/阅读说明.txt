@@ -1,0 +1,32 @@
+Odoo 19.0 项目架构图
+源码提交：fb5dffbfc
+分析日期：2026-11-06
+
+打开方式：在 Excalidraw 中选择“打开”，导入 odoo-architecture.excalidraw；也可以直接拖入。所有组件为原生图形、文本、箭头，不是嵌入图片。
+
+画布分三块：
+01 运行时全景：客户端、HTTP 路由、模块、ORM、存储、外部系统。
+02 实时通知与后台任务：bus_bus 数据、imbus 唤醒与 WebSocket 分发；cron 调度。
+03 业务模块地图：六个领域分组及部分直接模块依赖示例。
+
+范围：按本地源码绘制，不代表已部署实例。共 666 个 __manifest__.py（addons 642，odoo/addons 24），包含测试、桥接、地区本地化等模块。未读取运行数据库，未核实实际安装列表、代理、域名和 worker 数。
+
+主要核对点：
+- 19.0 版本来自 odoo/release.py。
+- WebClient 为 Owl 前端，经 ORM service 调用 /web/dataset/call_kw。
+- JSON-2、XML-RPC、JSON-RPC 接口位于 addons/rpc；JSON-2 使用 bearer 认证。
+- 模块依赖由 __manifest__.py 决定，每个数据库构造独立 Registry。
+- ORM 使用 psycopg2 与 PostgreSQL 通信，含 ACL 和记录规则。
+- 附件默认使用 filestore，元数据在数据库，可切换 DB 内容或使用云存储扩展。
+- Session 默认是 FilesystemSessionStore。
+- bus_bus 数据在业务 DB；源码在 postgres DB 使用 imbus NOTIFY/LISTEN 唤醒分发。
+- Cron 使用数据库锁和自身 worker，不是 Celery。
+- 图内不将此前讨论的 MCP 接入方案当作项目现有组件。
+
+文件：
+.excalidraw：可编辑源文件。
+.svg：矢量预览（与源文件同一布局，手绘线条为近似预览）。
+.png：预览图。
+modules.json：完整模块清单及 manifest 元数据。
+module-dependencies.csv：全部直接依赖边，可继续生成更细粒度模块图。
+sources.csv：主要组件与代码路径对应表。

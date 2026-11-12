@@ -1,0 +1,13 @@
+<odoo>
+ <record id="store_list" model="ir.ui.view"><field name="name">meli.independent.store.list</field><field name="model">meli.independent.store</field><field name="arch" type="xml">
+ <list><field name="name"/><field name="site"/><field name="logistic_type"/><field name="marketplace_seller_id"/><field name="seller_id"/><field name="nickname"/><field name="state"/></list>
+ </field></record>
+ <record id="store_form" model="ir.ui.view"><field name="name">meli.independent.store.form</field><field name="model">meli.independent.store</field><field name="arch" type="xml">
+ <form string="独立店铺"><header><button name="action_authorize" type="object" string="授权此店铺 / Authorize" class="oe_highlight"/><field name="state" widget="statusbar"/></header>
+ <sheet><div class="alert alert-info">授权前请在美客多登录目标店铺账号。此配置独立保存，不会替换原店铺授权。请通过“选择店铺和商品”准备刊登，在“商品发布与结果”检查并发布。</div>
+ <group><field name="name"/><field name="company_id" groups="base.group_multi_company"/><field name="account_type"/><field name="site"/><field name="logistic_type"/><field name="marketplace_seller_id"/><field name="seller_id"/><field name="nickname"/><field name="business_model"/><field name="pricing_model"/><field name="marketplace_user_product"/><field name="authorized_at"/><field name="expires_at"/></group></sheet></form>
+ </field></record>
+ <record id="store_action" model="ir.actions.act_window"><field name="name">美客多独立店铺</field><field name="res_model">meli.independent.store</field><field name="view_mode">list,form</field></record>
+ <menuitem id="store_root" name="美客多店铺" sequence="35" groups="meli_oerp.group_mercadolibre_manager"/>
+ <menuitem id="store_menu" name="独立店铺" parent="store_root" action="store_action"/>
+</odoo>

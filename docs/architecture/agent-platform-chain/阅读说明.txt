@@ -1,0 +1,17 @@
+Agent → MCP → ERP BFF → Platform Proxy → Mercado Libre API
+
+此版本按用户提供的五层链路重画，替代此前以 Odoo 内核为重点的视角。
+源码依据：/Users/hugo_1/Workspace/PythonProject/meli-pilot/mcp__platform_proxy_listings/，提交 9514ce8。
+
+已核对：
+1. src/index.js 使用 StdioServerTransport。
+2. createPlatformProxyMcpServer.js 暴露四个元工具，operation 白名单与 Zod 校验。
+3. lib/erpBffClient.js 拼接 /api/proxy/platform，并附带 ERP Bearer Token。
+4. buildListingDeps.js 使用 Axios、JSON、query、multipart 公共依赖，不跟随重定向。
+5. registerMlNativeTools.js 的 listing_seller_me 请求 /api/listings/shops/:shopId/seller/me，工具描述给出上游 /users/me。
+6. cbtTools.js 的 listing_cbt_create_item 工具描述给出 POST /global/items 映射。
+
+证据边界：本次未取得 BFF 与 Platform Proxy 的服务端实现，图中权限、店铺上下文、平台 OAuth 等职责依据 README 契约，以虚线框标识；未进行真实 API 调用。Agent 为使用方角色，不特指本仓库实现的某个 Agent 服务。
+当前源码入口为 stdio，HTTP(S) 是 MCP 到 BFF 的通信方式，不能据此认为 MCP 已支持 Streamable HTTP 服务入口。
+
+文件：.excalidraw 为原生可编辑图；.svg 与 .png 为同布局预览；sources.csv 为代码依据。可将 .excalidraw 拖入 Excalidraw 打开。

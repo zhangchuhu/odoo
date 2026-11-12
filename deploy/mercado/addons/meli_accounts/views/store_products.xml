@@ -1,0 +1,32 @@
+<odoo>
+  <record id="store_product_action" model="ir.actions.act_window">
+    <field name="name">店铺商品</field>
+    <field name="res_model">product.template</field>
+    <field name="view_mode">kanban,list,form</field>
+    <field name="path">meli-store-products</field>
+    <field name="help" type="html">
+      <p class="o_view_nocontent_smiling_face">当前店铺暂无已关联商品</p>
+      <p>请在顶部“当前店铺”选择店铺。商品导入并核对归属、或成功发布后会自动显示；未确认归属的商品可在“待归属商品”中查看。</p>
+    </field>
+  </record>
+  <menuitem id="store_product_menu" name="店铺商品" parent="store_root" action="store_product_action" sequence="10"/>
+  <record id="product_template_store_form" model="ir.ui.view">
+    <field name="name">product.template.store.form</field>
+    <field name="model">product.template</field>
+    <field name="inherit_id" ref="product.product_template_only_form_view"/>
+    <field name="arch" type="xml">
+      <xpath expr="//field[@name='categ_id']" position="after">
+        <field name="meli_store_ids" widget="many2many_tags" groups="meli_oerp.group_mercadolibre_manager"/>
+      </xpath>
+    </field>
+  </record>
+  <record id="cron_store_ownership" model="ir.cron">
+    <field name="name">美客多：核对导入商品的店铺归属</field>
+    <field name="model_id" ref="product.model_product_product"/>
+    <field name="state">code</field>
+    <field name="code">model._cron_sync_meli_store_ownership()</field>
+    <field name="interval_number">5</field>
+    <field name="interval_type">minutes</field>
+    <field name="active" eval="True"/>
+  </record>
+</odoo>
