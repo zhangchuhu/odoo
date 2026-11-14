@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from odoo import fields
 from odoo.tests import HttpCase, tagged
@@ -34,3 +35,40 @@ class OptimizationHTTPCase(HttpCase):
         self.assertEqual(response.status_code, 200, response.text[:200])
         self.assertEqual(response.json()['data']['payload'], {'item_id': 'MLM-A'})
         self.assertEqual(response.json()['data']['digest'], snapshot.digest)
+
+    def test_wait_fail_resume_cancel_transport(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'Lifecycle HTTP'})
+        case = self.env['meli.optimization.case'].create({'name': 'Lifecycle', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        user = self.env['res.users'].create({'name': 'Lifecycle editor', 'login': 'lifecycle-http',
+            'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id])]})
+        key = self.env['res.users.apikeys'].with_user(user).sudo()._generate('rpc', 'test only', fields.Datetime.now() + timedelta(hours=1))
+        headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
+        def post(path, data):
+            return self.url_open(path, data=json.dumps(data), headers=headers)
+        claim = post('/internal/meli-optimization/claim', {'capabilities': ['product.facts']}).json()['data']
+        self.assertEqual(claim['id'], task.id)
+        worker_path = '/internal/meli-optimization/tasks/' + str(task.id)
+        editor_path = '/api/meli/optimization/tasks/' + str(task.id)
+        envelope = {'lease_token': claim['lease_token'], 'lease_epoch': claim['lease_epoch'],
+            'submission_key': 'wait', 'body': {'code': 'capability_missing', 'message': 'Provider unavailable'}}
+        response = post(worker_path + '/wait', envelope)
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        self.assertEqual(response.json()['data']['state'], 'waiting')
+        self.assertEqual(post(worker_path + '/wait', envelope).json(), response.json())
+        response = post(editor_path + '/resume', {})
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        self.assertEqual(response.json()['data']['state'], 'queued')
+        claim = post('/internal/meli-optimization/claim', {'capabilities': ['product.facts']}).json()['data']
+        envelope.update(lease_token=claim['lease_token'], lease_epoch=claim['lease_epoch'], submission_key='fail')
+        response = post(worker_path + '/fail', envelope)
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        self.assertEqual(response.json()['data']['state'], 'failed')
+        self.assertEqual(post(editor_path + '/cancel', {}).status_code, 409)
+        queued = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': 'product.facts', 'payload': task.payload})
+        response = post('/api/meli/optimization/tasks/' + str(queued.id) + '/cancel', {})
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        self.assertEqual(response.json()['data']['state'], 'cancelled')

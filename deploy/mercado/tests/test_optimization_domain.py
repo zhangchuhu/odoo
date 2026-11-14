@@ -70,6 +70,11 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(domain.canonical_hash({'z': None, 'a': ['ñ', 1]}), expected)
         self.assertNotEqual(domain.canonical_hash([1, 2]), domain.canonical_hash([2, 1]))
 
+    def test_hash_rejects_unpaired_surrogate_keys_and_values(self):
+        for value in ({'bad': '\ud800'}, {'\udfff': 'bad'}):
+            with self.subTest(value=repr(value)):
+                self.reject('invalid_json', domain.canonical_hash, value)
+
     def test_non_json_values_are_rejected_not_coerced(self):
         for value in (float('nan'), float('inf'), {1: 'bad'}, {'x': (1, 2)}, {'x': object()}):
             with self.subTest(value=value):

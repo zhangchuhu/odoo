@@ -7,7 +7,7 @@ POST requests use `Content-Type: application/json`. Successful responses are `{"
 ## Human/editor endpoints
 
 - `POST /api/meli/optimization/cases`: `{"batch_name":"November","name":"Product A","snapshot":{"item_id":"MLM-A","schema_version":"1"}}` -> 201 data `{batch_id,case_id,snapshot_id,snapshot_digest}`. A fresh batch is created for this case.
-- `GET /api/meli/optimization/cases/12` -> data `{id,name,company_id,revision,tasks:[{id,task_type,state,result}]}`.
+- `GET /api/meli/optimization/cases/12` -> data `{id,name,company_id,revision,tasks:[{id,task_type,state,result,status_detail}]}`.
 - `POST /api/meli/optimization/cases/12/tasks`: `{"snapshot_id":15,"task_type":"product.facts","payload":{"schema_version":"1","product_snapshot_id":"15"},"dependency_ids":[]}` -> 201 data `{task_id,state:"queued"}`. Dependencies and snapshot must belong to the same case. Inputs follow domain/contracts.py.
 - `POST /api/meli/optimization/cases/12/proposals`: `{"payload":{"titles":["Example"]}}` -> 201 data `{proposal_id,digest,input_revision}`. This stores a proposal; it does not execute it.
 - `POST /api/meli/optimization/proposals/18/confirm`: `{"digest":"<exact returned hash>"}` -> data `{confirmation_id,valid:true}`. Confirmation binds the current API user, exact proposal payload digest, and case input revision. New snapshots increment revision and invalidate older confirmations. Confirmation does not authorize any live execution endpoint.
@@ -40,7 +40,17 @@ Checkpoint state is one of `unknown`, `dispatched`, `succeeded`, `failed`. Recor
 {"lease_token":"<uuid>","lease_epoch":1,"submission_key":"complete-21","body":{"schema_version":"1","evidence":[{"id":"e1","source":"snapshot:15","observed_at":"2026-11-15T00:00:00Z"}],"facts":[{"name":"item_id","value":"MLM-A","evidence_ids":["e1"]}],"uncertainties":[]}}
 ```
 
-Complete validates the domain result, stores it and changes task state to succeeded. Checkpoint/complete return `{task_id,submission_key,state,accepted:true}`. Retries with the identical key, token, epoch, operation, body and user return the original receipt even after successful completion; conflicting reuse returns 409. This does not make arbitrary external provider calls idempotent.
+Complete rejects unresolved `unknown`/`dispatched` external requests, validates the domain result, stores it and changes task state to succeeded. Checkpoint/complete/fail/wait return `{task_id,submission_key,state,accepted:true}`. Retries with the identical key, token, epoch, operation, body and user return the original receipt even after completion, failure, waiting, cancellation or a later lease; conflicting reuse returns 409. This does not make arbitrary external provider calls idempotent.
+
+`POST /internal/meli-optimization/tasks/21/wait` and `POST /internal/meli-optimization/tasks/21/fail` use the same fenced submission envelope:
+
+```json
+{"lease_token":"<uuid>","lease_epoch":1,"submission_key":"wait-provider-21","body":{"code":"capability_missing","message":"Configured provider is unavailable"}}
+```
+
+The body has exactly `code` (nonblank string, max 128 characters) and `message` (nonblank string, max 4096 characters); the full submission remains bounded to 256 KiB. Wait changes running to waiting; fail changes running to terminal failed. Both persist `status_detail`, emit an immutable event, and revoke the lease. Use wait for operator-actionable missing capabilities; use fail for terminal invalid results. The same exact replay rules apply. New submissions require a live matching lease and the claiming user. Fail/wait never resolve external requests or unblock dependents.
+
+Editor only: `POST /api/meli/optimization/tasks/21/resume` with `{}` changes waiting to queued, returning `{task_id:21,state:"queued"}`. Any unresolved external request rejects resume with 409, preserving the uncertainty ledger. Next claim issues a new token and increments the epoch. `POST /api/meli/optimization/tasks/21/cancel` with `{}` changes queued/running/waiting to terminal cancelled and returns `{task_id:21,state:"cancelled"}`. Cancellation revokes any lease but leaves every external request intact. Controls check the editor role and authorized company, serialize with worker submissions, and append audit events. Terminal tasks cannot resume or cancel; duplicate controls return 409. A cancelled task with an unknown provider outcome still needs external reconciliation; this version provides no force-unblock operation.
 
 ## Artifacts
 
@@ -50,4 +60,4 @@ Worker or Editor: `POST /api/meli/optimization/cases/12/artifacts` with exactly 
 
 From repository root: `.venv/bin/python deploy/mercado/tests/run_optimization_odoo.py` runs ORM tests in a freshly initialized private Unix-socket PostgreSQL 16 cluster. `--http` additionally runs real HttpCase tests on owned loopback port 55440. The runner unsets inherited PG settings, uses `/dev/null` config, blocks non-test network connections in the Odoo child, and stops its owned cluster in `finally`. It never uses the existing Mercado database or `.local/odoo.conf`. Port conflicts fail rather than attach to an existing server. `.venv/bin/python deploy/mercado/tests/run_unit.py` runs the full pure suite.
 
-Queue scanning is bounded to the oldest 100 queued/running candidates per claim; blocked head candidates can delay later work. There is no cancel/retry/reconciliation UI or automatic task graph builder in this version. The minimal backend views show tasks; creation and operation use the narrow APIs. Do not enable live execution based on a confirmation or task capability string alone.
+Queue search filters company, capability, lease expiry, succeeded dependencies and unresolved requests before selecting up to 100 eligible candidates per claim; each locked candidate is rechecked. Permanently blocked older tasks do not starve later ready work. Concurrently locked candidates are skipped; callers may poll again. There is no reconciliation or cancel/resume UI or automatic task graph builder in this version. The minimal backend views show tasks; creation and operation use the narrow APIs. Do not enable live execution based on a confirmation or task capability string alone.

@@ -124,3 +124,138 @@ class OptimizationQueueCase(TransactionCase):
             second.rollback()
             two.invalidate_recordset()
             self.assertFalse(two.claim(['product.facts']))
+
+
+    def _review_task(self, **extra):
+        batch = self.env['meli.optimization.batch'].create({'name': 'Review'})
+        case = self.env['meli.optimization.case'].create({'name': 'Review', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        return self.env['meli.optimization.task'].create(dict(case_id=case.id, snapshot_id=snap.id,
+            task_type='product.facts', payload={'schema_version': '1', 'product_snapshot_id': str(snap.id)}, **extra))
+
+    def _review_result(self):
+        return {'schema_version': '1', 'evidence': [{'id': 'e1', 'source': 'snapshot', 'observed_at': '2026-11-14T00:00:00Z'}],
+                'facts': [{'name': 'item', 'value': 'A', 'evidence_ids': ['e1']}], 'uncertainties': []}
+
+    def test_ready_task_beyond_100_blocked_candidates(self):
+        upstream = self._review_task()
+        template = {'case_id': upstream.case_id.id, 'snapshot_id': upstream.snapshot_id.id,
+                    'task_type': 'product.facts', 'payload': upstream.payload}
+        blocked = self.env['meli.optimization.task'].create([
+            dict(template, dependency_ids=[(6, 0, upstream.ids)]) for _ in range(101)])
+        lease = upstream.claim(['product.facts'])
+        upstream.checkpoint(lease['lease_token'], lease['lease_epoch'], 'unknown', {'request_id': 'remote', 'state': 'unknown'})
+        self.env.cr.execute('UPDATE meli_optimization_task SET lease_expires_at=%s WHERE id=%s',
+                            (fields.Datetime.now() - timedelta(seconds=1), upstream.id))
+        upstream.invalidate_recordset()
+        ready = self.env['meli.optimization.task'].create(template)
+        claim = self.env['meli.optimization.task'].claim(['product.facts'])
+        self.assertTrue(claim, 'blocked first 100 must not starve later eligible work')
+        self.assertEqual(claim['id'], ready.id)
+        self.assertEqual(set(blocked.mapped('state')), {'queued'})
+
+    def test_completion_rejects_uncertainty_until_resolved(self):
+        for status in ('unknown', 'dispatched'):
+            task = self._review_task()
+            dependent = self.env['meli.optimization.task'].create({'case_id': task.case_id.id,
+                'snapshot_id': task.snapshot_id.id, 'task_type': 'product.facts', 'payload': task.payload,
+                'dependency_ids': [(6, 0, task.ids)]})
+            lease = task.claim(['product.facts'])
+            args = (lease['lease_token'], lease['lease_epoch'])
+            task.checkpoint(*args, 'request', {'request_id': 'remote', 'state': status})
+            with self.assertRaises(ValidationError):
+                task.complete(*args, 'done', self._review_result())
+            self.assertEqual(task.state, 'running')
+            self.assertFalse(dependent.claim(['product.facts']))
+            task.checkpoint(*args, 'resolved', {'request_id': 'remote', 'state': 'succeeded'})
+            receipt = task.complete(*args, 'done', self._review_result())
+            self.assertEqual(task.complete(*args, 'done', self._review_result()), receipt)
+            self.assertEqual(dependent.claim(['product.facts'])['id'], dependent.id)
+
+    def test_fenced_wait_fail_and_editor_controls(self):
+        task = self._review_task()
+        self.assertTrue(callable(getattr(task, 'wait', None)), 'fenced wait operation missing')
+        self.assertTrue(callable(getattr(task, 'fail', None)), 'fenced fail operation missing')
+        for operation, state in (('wait', 'waiting'), ('fail', 'failed')):
+            task = self._review_task()
+            lease = task.claim(['product.facts'])
+            args = (lease['lease_token'], lease['lease_epoch'])
+            method = getattr(task, operation)
+            with self.assertRaises(ValidationError):
+                method('stale', args[1], 'stale', {'code': 'provider_error', 'message': 'Unavailable'})
+            with self.assertRaises(ValidationError):
+                method(*args, 'bad', {'code': ''})
+            with self.assertRaises(ValidationError):
+                method(*args, 'oversize', {'code': 'error', 'message': 'x' * 4097})
+            detail = {'code': 'capability_missing', 'message': 'Provider unavailable'}
+            receipt = method(*args, 'status', detail)
+            self.assertEqual(task.state, state)
+            self.assertEqual(method(*args, 'status', detail), receipt)
+            with self.assertRaises(ValidationError):
+                method(*args, 'status', dict(detail, message='Changed'))
+            with self.assertRaises(ValidationError):
+                task.heartbeat(*args)
+            with self.assertRaises(ValidationError):
+                task.complete(*args, 'done', self._review_result())
+            if operation == 'wait':
+                editor = self.env['res.users'].create({'name': 'Resume editor', 'login': 'resume-editor',
+                    'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id])]})
+                task.with_user(editor).resume()
+                self.assertEqual(task.state, 'queued')
+                self.assertEqual(method(*args, 'status', detail), receipt)
+                newer = task.claim(['product.facts'])
+                self.assertEqual(newer['lease_epoch'], args[1] + 1)
+                with self.assertRaises(ValidationError):
+                    method(*args, 'stale-new', detail)
+                task.with_user(editor).cancel()
+                self.assertEqual(task.state, 'cancelled')
+            else:
+                with self.assertRaises(ValidationError):
+                    task.resume()
+                with self.assertRaises(ValidationError):
+                    task.cancel()
+
+    def test_resume_does_not_unblock_unknown_and_control_authorization(self):
+        task = self._review_task()
+        self.assertTrue(callable(getattr(task, 'wait', None)), 'fenced wait operation missing')
+        lease = task.claim(['product.facts'])
+        args = (lease['lease_token'], lease['lease_epoch'])
+        task.checkpoint(*args, 'unknown', {'request_id': 'remote', 'state': 'unknown'})
+        task.wait(*args, 'wait', {'code': 'uncertain', 'message': 'Reconciliation required'})
+        with self.assertRaises(ValidationError):
+            task.resume()
+        self.assertEqual(task.state, 'waiting')
+        self.assertFalse(task.claim(['product.facts']))
+        worker = self.env['res.users'].create({'name': 'Control worker', 'login': 'control-worker',
+            'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_worker').id])]})
+        for action in ('resume', 'cancel'):
+            with self.assertRaises(AccessError):
+                getattr(task.with_user(worker), action)()
+        other = self.env['res.company'].create({'name': 'Foreign control'})
+        editor = self.env['res.users'].create({'name': 'Foreign editor', 'login': 'foreign-control-editor',
+            'company_id': other.id, 'company_ids': [(6, 0, other.ids)],
+            'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id])]})
+        for action in ('resume', 'cancel'):
+            with self.assertRaises(AccessError):
+                getattr(task.with_user(editor).with_context(allowed_company_ids=other.ids), action)()
+        task.cancel()
+        self.assertEqual(task.state, 'cancelled')
+        self.assertEqual(self.env['meli.optimization.external.request'].search([('task_id', '=', task.id)]).state, 'unknown')
+
+
+    def test_expired_fail_wait_and_cross_worker_rejected(self):
+        for operation in ('fail', 'wait'):
+            task = self._review_task()
+            lease = task.claim(['product.facts'])
+            args = (lease['lease_token'], lease['lease_epoch'])
+            detail = {'code': 'provider_error', 'message': 'Unavailable'}
+            worker = self.env['res.users'].create({'name': operation, 'login': 'other-' + operation,
+                'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_worker').id])]})
+            with self.assertRaises(AccessError):
+                getattr(task.with_user(worker), operation)(*args, 'wrong-user', detail)
+            self.env.cr.execute('UPDATE meli_optimization_task SET lease_expires_at=%s WHERE id=%s',
+                                (fields.Datetime.now() - timedelta(seconds=1), task.id))
+            task.invalidate_recordset()
+            with self.assertRaises(ValidationError):
+                getattr(task, operation)(*args, 'expired', detail)
+            self.assertEqual(task.state, 'running')

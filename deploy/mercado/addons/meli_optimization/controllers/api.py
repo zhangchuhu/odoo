@@ -72,7 +72,7 @@ class OptimizationAPI(http.Controller):
             case = record('case', case_id)
             case._authorize('worker')
             tasks = request.env[PREFIX + 'task'].search([('case_id', '=', case.id)])
-            return reply({'id': case.id, 'name': case.name, 'company_id': case.company_id.id, 'revision': case.revision, 'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state, 'result': t.result} for t in tasks]})
+            return reply({'id': case.id, 'name': case.name, 'company_id': case.company_id.id, 'revision': case.revision, 'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state, 'result': t.result, 'status_detail': t.status_detail} for t in tasks]})
         return operation(run)
 
     @http.route('/api/meli/optimization/snapshots/<int:snapshot_id>', type='http', auth='meli_optimization', methods=['GET'], csrf=False)
@@ -146,10 +146,32 @@ class OptimizationAPI(http.Controller):
     def complete(self, task_id):
         return self._submission(task_id, 'complete')
 
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/fail', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def fail(self, task_id):
+        return self._submission(task_id, 'fail')
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/wait', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def wait(self, task_id):
+        return self._submission(task_id, 'wait')
+
+    @http.route('/api/meli/optimization/tasks/<int:task_id>/resume', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def resume(self, task_id):
+        def run():
+            body()
+            return reply(record('task', task_id).resume())
+        return operation(run)
+
+    @http.route('/api/meli/optimization/tasks/<int:task_id>/cancel', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def cancel(self, task_id):
+        def run():
+            body()
+            return reply(record('task', task_id).cancel())
+        return operation(run)
+
     def _submission(self, task_id, kind):
         def run():
             data = body()
             task = record('task', task_id)
-            method = task.complete if kind == 'complete' else task.checkpoint
+            method = {'complete': task.complete, 'checkpoint': task.checkpoint, 'fail': task.fail, 'wait': task.wait}[kind]
             return reply(method(data['lease_token'], data['lease_epoch'], data['submission_key'], data['body']))
         return operation(run)

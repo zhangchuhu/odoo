@@ -94,8 +94,12 @@ def canonical_hash(value):
     infinity, non-string keys, cycles and Python-only container/scalar types.
     """
     _json(value)
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                     separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
+    try:
+        encoded = json.dumps(value, sort_keys=True, ensure_ascii=False,
+                             separators=(',', ':'), allow_nan=False).encode('utf-8')
+    except UnicodeEncodeError as exc:
+        raise DomainError('invalid_json', 'JSON contains invalid Unicode') from exc
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _text(value):

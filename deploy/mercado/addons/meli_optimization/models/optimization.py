@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
-from ..domain import canonical_hash, validate_input, validate_result, validate_lease, DomainError
+from ..domain import canonical_hash, validate_input, validate_result, validate_lease, validate_transition, DomainError
 
 PREFIX = 'meli.optimization.'
 MAX_JSON = 256 * 1024
@@ -142,17 +142,19 @@ class Task(models.Model):
     snapshot_id = fields.Many2one(PREFIX + 'snapshot', required=True, ondelete='restrict')
     task_type = fields.Char(required=True, index=True)
     payload = ExactJson(required=True)
-    state = fields.Selection([(s, s) for s in ('queued', 'running', 'succeeded', 'failed', 'cancelled')], default='queued', required=True, index=True)
+    state = fields.Selection([(s, s) for s in ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')], default='queued', required=True, index=True)
     dependency_ids = fields.Many2many(PREFIX + 'task', 'meli_opt_task_dependency', 'task_id', 'dependency_id')
     lease_token = fields.Char(readonly=True)
     lease_epoch = fields.Integer(default=0, readonly=True)
     lease_expires_at = fields.Datetime(readonly=True)
     worker_uid = fields.Many2one('res.users', readonly=True)
     result = ExactJson(readonly=True)
+    status_detail = ExactJson(readonly=True)
+    request_ids = fields.One2many(PREFIX + 'external.request', 'task_id', readonly=True)
 
     @api.model_create_multi
     def create(self, vals_list):
-        forbidden = {'state', 'lease_token', 'lease_epoch', 'lease_expires_at', 'worker_uid', 'result'}
+        forbidden = {'state', 'lease_token', 'lease_epoch', 'lease_expires_at', 'worker_uid', 'result', 'status_detail', 'request_ids'}
         for v in vals_list:
             if forbidden.intersection(v):
                 raise AccessError('Task state is server managed')
@@ -173,7 +175,15 @@ class Task(models.Model):
         self._authorize('worker')
         if not isinstance(capabilities, list) or not capabilities or len(capabilities) > 32 or any(not isinstance(c, str) for c in capabilities):
             raise ValidationError('Capabilities must be a nonempty string list')
-        candidates = self or self.search([('company_id', 'in', self.env.companies.ids), ('task_type', 'in', capabilities), ('state', 'in', ['queued', 'running'])], order='id', limit=100)
+        # Apply readiness before the cap, so permanently blocked older work cannot
+        # starve ready tasks. Recheck after locking against concurrent changes.
+        candidates = self or self.search([
+            ('company_id', 'in', self.env.companies.ids), ('task_type', 'in', capabilities),
+            '|', ('state', '=', 'queued'), '&', ('state', '=', 'running'),
+            ('lease_expires_at', '<=', fields.Datetime.now()),
+            ('dependency_ids', 'not any', [('state', '!=', 'succeeded')]),
+            ('request_ids', 'not any', [('state', 'in', ['unknown', 'dispatched'])]),
+        ], order='id', limit=100)
         for task in candidates:
             task._authorize('worker')
             self.env.cr.execute('SELECT id FROM meli_optimization_task WHERE id=%s FOR UPDATE SKIP LOCKED', [task.id])
@@ -187,6 +197,8 @@ class Task(models.Model):
                 continue
             if self.env[PREFIX + 'external.request'].search_count([('task_id', '=', task.id), ('state', 'in', ['unknown', 'dispatched'])]):
                 continue
+            if task.state == 'queued':
+                task._transition('running')
             task._set({'state': 'running', 'lease_token': str(uuid.uuid4()), 'lease_epoch': task.lease_epoch + 1, 'lease_expires_at': now + timedelta(seconds=120), 'worker_uid': self.env.uid})
             self.env[PREFIX + 'attempt']._append({'task_id': task.id, 'company_id': task.company_id.id, 'epoch': task.lease_epoch, 'worker_uid': self.env.uid})
             return task._envelope()
@@ -223,11 +235,21 @@ class Task(models.Model):
             return event.receipt
         self._fence(token, epoch)
         if kind == 'complete':
+            if self._unresolved_requests():
+                raise ValidationError('Unresolved external requests prevent completion')
             try:
                 validate_result(self.task_type, body)
             except DomainError as exc:
                 raise ValidationError(str(exc)) from exc
-            self._set({'state': 'succeeded', 'result': body})
+            self._transition('succeeded')
+            self._set({'result': body})
+        elif kind in ('fail', 'wait'):
+            if (not isinstance(body, dict) or set(body) != {'code', 'message'}
+                    or any(not isinstance(body[k], str) or not body[k].strip() for k in ('code', 'message'))
+                    or len(body['code']) > 128 or len(body['message']) > 4096):
+                raise ValidationError('Status requires code (1-128) and message (1-4096)')
+            self._transition('failed' if kind == 'fail' else 'waiting')
+            self._set({'status_detail': body})
         else:
             if not isinstance(body, dict) or not isinstance(body.get('request_id'), str) or not body['request_id'] or len(body['request_id']) > 200 or body.get('state') not in ('unknown', 'dispatched', 'succeeded', 'failed'):
                 raise ValidationError('Checkpoint requires request_id and explicit request state')
@@ -248,6 +270,44 @@ class Task(models.Model):
 
     def complete(self, token, epoch, key, body):
         return self._submit(token, epoch, key, body, 'complete')
+
+    def fail(self, token, epoch, key, body):
+        return self._submit(token, epoch, key, body, 'fail')
+
+    def wait(self, token, epoch, key, body):
+        return self._submit(token, epoch, key, body, 'wait')
+
+    def _unresolved_requests(self):
+        return self.env[PREFIX + 'external.request'].search_count([
+            ('task_id', '=', self.id), ('state', 'in', ['unknown', 'dispatched'])])
+
+    def _transition(self, target):
+        try:
+            validate_transition(self.state, target)
+        except DomainError as exc:
+            raise ValidationError(str(exc)) from exc
+        vals = {'state': target}
+        if target != 'running':
+            vals.update(lease_token=False, lease_expires_at=False, worker_uid=False)
+        self._set(vals)
+
+    def _control(self, operation):
+        self._authorize()
+        self._lock()
+        if operation == 'resume' and self._unresolved_requests():
+            raise ValidationError('Unresolved external requests require reconciliation')
+        self._transition('queued' if operation == 'resume' else 'cancelled')
+        receipt = {'task_id': self.id, 'state': self.state}
+        self.env[PREFIX + 'event']._append({'task_id': self.id, 'company_id': self.company_id.id,
+            'submission_key': 'control-' + str(uuid.uuid4()), 'digest': bounded(receipt),
+            'kind': operation, 'payload': {}, 'receipt': receipt, 'worker_uid': self.env.uid})
+        return receipt
+
+    def resume(self):
+        return self._control('resume')
+
+    def cancel(self):
+        return self._control('cancel')
 
 
 class Attempt(models.Model):
