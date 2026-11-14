@@ -259,3 +259,61 @@ class OptimizationQueueCase(TransactionCase):
             with self.assertRaises(ValidationError):
                 getattr(task, operation)(*args, 'expired', detail)
             self.assertEqual(task.state, 'running')
+
+    def _default_editor(self):
+        return self.env['res.users'].create({'name': 'Defaults editor', 'login': 'defaults-editor',
+            'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id,
+                                 self.env.ref('meli_optimization.group_worker').id])]})
+
+    def test_context_defaults_cannot_forge_task_state(self):
+        task = self._review_task()
+        model = self.env['meli.optimization.task'].with_user(self._default_editor())
+        self.assertFalse(model.env.su)
+        vals = {'case_id': task.case_id.id, 'snapshot_id': task.snapshot_id.id,
+                'task_type': task.task_type, 'payload': task.payload}
+        for name, value in {'state': 'succeeded', 'result': {'unvalidated': True}, 'lease_token': 'forged',
+                'lease_epoch': 8, 'lease_expires_at': '2099-01-01 00:00:00', 'worker_uid': model.env.uid,
+                'status_detail': {'code': 'forged'}, 'request_ids': []}.items():
+            with self.subTest(field=name), self.assertRaises(AccessError):
+                model.with_context(**{'default_' + name: value}).create(vals)
+
+    def test_context_revision_and_artifact_defaults_are_validated(self):
+        import base64
+        from ..domain import canonical_hash
+        task = self._review_task()
+        user = self._default_editor()
+        case_model = self.env['meli.optimization.case'].with_user(user)
+        with self.subTest(field='revision'), self.assertRaises(AccessError):
+            case_model.with_context(default_revision=99).create({'name': 'Injected', 'batch_id': task.case_id.batch_id.id})
+        artifact = self.env['meli.optimization.artifact'].with_user(user)
+        with self.subTest(field='data'), self.assertRaises(ValidationError):
+            artifact.with_context(default_data=base64.b64encode(b'forged').decode()).create({
+                'case_id': task.case_id.id, 'payload': {}, 'digest': canonical_hash({})})
+        with self.subTest(field='payload'), self.assertRaises(ValidationError):
+            artifact.with_context(default_payload={'forged': True}).create({
+                'case_id': task.case_id.id, 'data': base64.b64encode(b'image').decode(),
+                'digest': __import__('hashlib').sha256(b'image').hexdigest()})
+
+    def test_valid_context_defaults_and_input_company_validation(self):
+        from ..domain import canonical_hash
+        task = self._review_task()
+        user = self._default_editor()
+        model = self.env['meli.optimization.task'].with_user(user)
+        defaults = dict(default_case_id=task.case_id.id, default_snapshot_id=task.snapshot_id.id,
+                        default_task_type=task.task_type, default_payload=task.payload)
+        normal = model.with_context(**defaults).create({})
+        self.assertEqual(normal.payload, task.payload)
+        self.assertEqual(normal.state, 'queued')
+        self.assertEqual(normal.lease_epoch, 0)
+        self.assertFalse(normal.result)
+        with self.assertRaises(ValidationError):
+            model.with_context(**dict(defaults, default_payload={'unvalidated': True})).create({})
+        other = self.env['res.company'].create({'name': 'Default foreign company'})
+        with self.assertRaises(ValidationError):
+            model.with_context(**dict(defaults, default_company_id=other.id)).create({})
+        artifact = self.env['meli.optimization.artifact'].with_user(user).with_context(
+            default_case_id=task.case_id.id, default_payload={}, default_digest=canonical_hash({})).create({})
+        self.assertEqual(artifact.payload, {})
+        snapshot = self.env['meli.optimization.snapshot'].with_user(user).with_context(
+            default_case_id=task.case_id.id, default_payload={'default': True}, default_digest='forged').create({})
+        self.assertEqual(snapshot.digest, canonical_hash({'default': True}))

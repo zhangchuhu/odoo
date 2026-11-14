@@ -47,6 +47,14 @@ class Protected(models.AbstractModel):
             if any(r.company_id not in self.env.companies for r in self):
                 raise AccessError('Company access denied')
 
+    def _creation_values(self, values):
+        # Validate the same effective inputs the ORM will store, including
+        # context/user defaults. Company normally derives from the parent;
+        # caller-supplied company defaults must still pass that boundary.
+        missing = [name for name in self._fields if name not in values
+                   and (name != 'company_id' or 'default_company_id' in self.env.context)]
+        return dict(self.default_get(missing), **values)
+
     @api.model_create_multi
     def create(self, vals_list):
         self._authorize(self._create_role)
@@ -54,7 +62,7 @@ class Protected(models.AbstractModel):
             raise AccessError('Use the fenced business operation')
         prepared = []
         for original in vals_list:
-            vals = dict(original)
+            vals = self._creation_values(original)
             if self._parent_field:
                 field, model = self._parent_field
                 parent = self.env[PREFIX + model].browse(vals.get(field)).exists()
@@ -105,9 +113,9 @@ class Case(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        if any('revision' in v for v in vals_list):
+        if 'default_revision' in self.env.context or any('revision' in v for v in vals_list):
             raise AccessError('Revision is server managed')
-        return super().create(vals_list)
+        return super().create([dict(self._creation_values(v), revision=0) for v in vals_list])
 
 
 class Snapshot(models.Model):
@@ -121,6 +129,7 @@ class Snapshot(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        vals_list = [self._creation_values(v) for v in vals_list]
         vals_list = [dict(v, digest=bounded(v.get('payload'))) for v in vals_list]
         for v in vals_list:
             case = self.env[PREFIX + 'case'].browse(v['case_id'])
@@ -155,9 +164,15 @@ class Task(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         forbidden = {'state', 'lease_token', 'lease_epoch', 'lease_expires_at', 'worker_uid', 'result', 'status_detail', 'request_ids'}
+        if any('default_' + name in self.env.context for name in forbidden):
+            raise AccessError('Task state is server managed')
         for v in vals_list:
             if forbidden.intersection(v):
                 raise AccessError('Task state is server managed')
+        vals_list = [dict(self._creation_values(v), state='queued', lease_token=False, lease_epoch=0,
+                          lease_expires_at=False, worker_uid=False, result=None, status_detail=None,
+                          request_ids=[]) for v in vals_list]
+        for v in vals_list:
             bounded(v.get('payload'))
             try:
                 validate_input(v['task_type'], v['payload'])
@@ -361,6 +376,7 @@ class Artifact(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        vals_list = [self._creation_values(v) for v in vals_list]
         for v in vals_list:
             if bool(v.get('data')) == ('payload' in v):
                 raise ValidationError('Provide exactly one JSON payload or binary data')
@@ -392,7 +408,8 @@ class Proposal(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         prepared = []
-        for v in vals_list:
+        for original in vals_list:
+            v = self._creation_values(original)
             case = self.env[PREFIX + 'case'].browse(v['case_id'])
             case._authorize()
             case._lock()

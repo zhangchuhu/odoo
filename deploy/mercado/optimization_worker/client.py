@@ -72,18 +72,28 @@ class Client:
         return self.request('POST', '/internal/meli-optimization/tasks/%s/%s' % (claim['id'], operation), envelope)
 
     def snapshot(self, snapshot_id):
-        result = self.request('GET', '/api/meli/optimization/snapshots/' + _id(snapshot_id))
+        result = self._reference('/api/meli/optimization/snapshots/' + _id(snapshot_id))
         if canonical_hash(result['payload']) != result['digest']:
             raise ValueError('Snapshot digest mismatch')
         return result
 
     def artifact(self, artifact_id):
-        result = self.request('GET', '/api/meli/optimization/artifacts/' + _id(artifact_id))
+        result = self._reference('/api/meli/optimization/artifacts/' + _id(artifact_id))
         digest = (hashlib.sha256(base64.b64decode(result['data'], validate=True)).hexdigest()
                   if result.get('data') else canonical_hash(result['payload']))
         if digest != result['digest']:
             raise ValueError('Artifact digest mismatch')
         return result
+
+    def _reference(self, path):
+        try:
+            return self.request('GET', path)
+        except APIError as exc:
+            # Reference validation has no lease semantics. Keep transport/server
+            # failures recoverable; let the caller classify invalid input/output.
+            if exc.status in (403, 404, 409):
+                raise ValueError('Referenced snapshot or artifact is unavailable') from None
+            raise
 
     def create_artifact(self, case_id, *, payload=None, data=None, mime_type=None):
         if (payload is None) == (data is None):

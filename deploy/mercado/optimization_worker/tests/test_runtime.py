@@ -44,6 +44,7 @@ class Fixture:
         self.cancel_heartbeat = False
         self.stale = False
         self.artifacts = {}
+        self.lookup_errors = {}
         self.claim = {'id': 21, 'snapshot_id': 15, 'company_id': 1, 'task_type': 'research.keywords',
             'schema_version': '1', 'payload': {'schema_version': '1', 'facts_artifact_id': '23', 'site_id': 'MLM'},
             'lease_token': 'secret-lease', 'lease_epoch': 1, 'heartbeat_seconds': .02}
@@ -60,6 +61,8 @@ class Fixture:
                     return self.send(401, {'success': False})
                 path = self.path
                 fixture.events.append((path.rsplit('/', 1)[-1], copy.deepcopy(body)))
+                if path in fixture.lookup_errors:
+                    return self.send(fixture.lookup_errors[path], {'success': False})
                 if path.endswith('/claim'):
                     if fixture.state != 'queued':
                         return self.send(200, {'success': True, 'data': False})
@@ -141,6 +144,74 @@ class WorkerTests(unittest.TestCase):
         states = [body['body']['state'] for op, body in self.fixture.events if op == 'checkpoint']
         self.assertEqual(states, ['unknown', 'succeeded'])
         self.assertEqual(self.fixture.state, 'succeeded')
+
+    def test_output_artifact_lookup_rejection_fails_known_result(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tests'))
+        from test_optimization_domain import gallery
+        for status in (403, 404, 409):
+            with self.subTest(status=status):
+                self.fixture.state = 'queued'
+                self.fixture.events.clear()
+                self.fixture.receipts.clear()
+                output = gallery()
+                output['images'][0]['artifact_id'] = '999'
+                self.fixture.claim.update(task_type='gallery.collect', payload={
+                    'schema_version': '1', 'reference_item_id': 'MLM123', 'selected_variant': {'color': 'black'}})
+                self.fixture.lookup_errors['/api/meli/optimization/artifacts/999'] = status
+                provider = Provider(output=output)
+                worker = Worker(Client(self.fixture.url, 'fixture-key'),
+                    Path(self.tmp.name) / ('output-%s.sqlite' % status), providers={'gallery.collect': provider})
+                self.assertEqual(worker.once(), 'failed')
+                self.assertEqual(self.fixture.state, 'failed')
+                self.assertEqual([body['body']['state'] for op, body in self.fixture.events if op == 'checkpoint'],
+                                 ['unknown', 'failed'])
+                self.assertEqual([body['body']['code'] for op, body in self.fixture.events if op == 'fail'], ['invalid_result'])
+                self.assertEqual(worker.once(), 'idle')
+                self.assertEqual(provider.calls, 1)
+
+    def test_input_lookup_rejection_fails_before_dispatch(self):
+        for resource in ('snapshots/15', 'artifacts/23'):
+            for status in (403, 404, 409):
+                with self.subTest(resource=resource, status=status):
+                    self.fixture.state = 'queued'
+                    self.fixture.events.clear()
+                    self.fixture.receipts.clear()
+                    self.fixture.lookup_errors = {'/api/meli/optimization/' + resource: status}
+                    provider = Provider()
+                    worker = Worker(Client(self.fixture.url, 'fixture-key'),
+                        Path(self.tmp.name) / ('input-%s-%s.sqlite' % (resource.replace('/', '-'), status)),
+                        providers={'research.keywords': provider})
+                    self.assertEqual(worker.once(), 'failed')
+                    self.assertEqual(provider.calls, 0)
+                    self.assertEqual([body['body']['code'] for op, body in self.fixture.events if op == 'fail'], ['invalid_input'])
+                    self.assertFalse(any(op == 'checkpoint' for op, _ in self.fixture.events))
+
+    def test_reference_server_failure_remains_recoverable(self):
+        provider = Provider()
+        self.fixture.lookup_errors['/api/meli/optimization/artifacts/23'] = 503
+        worker = self.worker(provider)
+        with self.assertRaises(APIError):
+            worker.once()
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(self.fixture.state, 'running')
+        self.fixture.lookup_errors.clear()
+        self.assertEqual(worker.once(), 'succeeded')
+        self.assertEqual(provider.calls, 1)
+
+    def test_fenced_endpoint_rejections_remain_lease_loss(self):
+        for operation in ('heartbeat', 'checkpoint'):
+            for status in (403, 404, 409):
+                with self.subTest(operation=operation, status=status):
+                    self.fixture.state = 'queued'
+                    self.fixture.events.clear()
+                    self.fixture.lookup_errors = {'/internal/meli-optimization/tasks/21/' + operation: status}
+                    provider = Provider()
+                    worker = Worker(Client(self.fixture.url, 'fixture-key'),
+                        Path(self.tmp.name) / ('fence-%s-%s.sqlite' % (operation, status)),
+                        providers={'research.keywords': provider})
+                    self.assertEqual(worker.once(), 'lease_lost')
+                    self.assertEqual(provider.calls, 0)
+                    self.assertFalse(any(op in ('complete', 'fail', 'wait') for op, _ in self.fixture.events))
 
     def test_missing_provider_waits_with_exact_status_envelope(self):
         self.assertEqual(self.worker().once(), 'waiting')
