@@ -1,0 +1,14 @@
+<odoo>
+<record id="group_worker" model="res.groups"><field name="name">Optimization Worker</field><field name="implied_ids" eval="[(4, ref('base.group_user'))]"/></record>
+<record id="group_editor" model="res.groups"><field name="name">Optimization Editor</field><field name="implied_ids" eval="[(4, ref('group_worker'))]"/></record>
+<record id="rule_batch" model="ir.rule"><field name="name">Optimization company: batch</field><field name="model_id" ref="model_meli_optimization_batch"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_case" model="ir.rule"><field name="name">Optimization company: case</field><field name="model_id" ref="model_meli_optimization_case"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_snapshot" model="ir.rule"><field name="name">Optimization company: snapshot</field><field name="model_id" ref="model_meli_optimization_snapshot"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_task" model="ir.rule"><field name="name">Optimization company: task</field><field name="model_id" ref="model_meli_optimization_task"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_attempt" model="ir.rule"><field name="name">Optimization company: attempt</field><field name="model_id" ref="model_meli_optimization_attempt"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_event" model="ir.rule"><field name="name">Optimization company: event</field><field name="model_id" ref="model_meli_optimization_event"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_external_request" model="ir.rule"><field name="name">Optimization company: external.request</field><field name="model_id" ref="model_meli_optimization_external_request"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_artifact" model="ir.rule"><field name="name">Optimization company: artifact</field><field name="model_id" ref="model_meli_optimization_artifact"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_proposal" model="ir.rule"><field name="name">Optimization company: proposal</field><field name="model_id" ref="model_meli_optimization_proposal"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_confirmation" model="ir.rule"><field name="name">Optimization company: confirmation</field><field name="model_id" ref="model_meli_optimization_confirmation"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+</odoo>

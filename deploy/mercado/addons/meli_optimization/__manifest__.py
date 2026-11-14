@@ -1,0 +1,1 @@
+{'name': 'Mercado Optimization', 'author': 'Mercado Integration', 'version': '19.0.1.0.0', 'depends': ['meli_bff'], 'data': ['security/security.xml', 'security/ir.model.access.csv', 'views/optimization.xml'], 'license': 'LGPL-3', 'installable': True}

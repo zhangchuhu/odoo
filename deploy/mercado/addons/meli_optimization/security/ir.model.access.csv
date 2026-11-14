@@ -1,0 +1,21 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_batch_editor,batch editor,model_meli_optimization_batch,group_editor,1,1,1,0
+access_batch_worker,batch worker,model_meli_optimization_batch,group_worker,1,1,1,0
+access_case_editor,case editor,model_meli_optimization_case,group_editor,1,1,1,0
+access_case_worker,case worker,model_meli_optimization_case,group_worker,1,1,1,0
+access_snapshot_editor,snapshot editor,model_meli_optimization_snapshot,group_editor,1,1,1,0
+access_snapshot_worker,snapshot worker,model_meli_optimization_snapshot,group_worker,1,1,1,0
+access_task_editor,task editor,model_meli_optimization_task,group_editor,1,1,1,0
+access_task_worker,task worker,model_meli_optimization_task,group_worker,1,1,1,0
+access_attempt_editor,attempt editor,model_meli_optimization_attempt,group_editor,1,1,1,0
+access_attempt_worker,attempt worker,model_meli_optimization_attempt,group_worker,1,1,1,0
+access_event_editor,event editor,model_meli_optimization_event,group_editor,1,1,1,0
+access_event_worker,event worker,model_meli_optimization_event,group_worker,1,1,1,0
+access_external_request_editor,external_request editor,model_meli_optimization_external_request,group_editor,1,1,1,0
+access_external_request_worker,external_request worker,model_meli_optimization_external_request,group_worker,1,1,1,0
+access_artifact_editor,artifact editor,model_meli_optimization_artifact,group_editor,1,1,1,0
+access_artifact_worker,artifact worker,model_meli_optimization_artifact,group_worker,1,1,1,0
+access_proposal_editor,proposal editor,model_meli_optimization_proposal,group_editor,1,1,1,0
+access_proposal_worker,proposal worker,model_meli_optimization_proposal,group_worker,1,1,1,0
+access_confirmation_editor,confirmation editor,model_meli_optimization_confirmation,group_editor,1,1,1,0
+access_confirmation_worker,confirmation worker,model_meli_optimization_confirmation,group_worker,1,1,1,0
