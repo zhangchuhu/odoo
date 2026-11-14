@@ -109,3 +109,9 @@ Full 库存变动查询要求日期范围不超过 60 天，并校验每条结�
 全球商品批量查询最多10个，逐个校验归属并验证批量返回的每项 ID 和卖家。
 
 Full 履约的范围、进度及未解决事项见 `docs/architecture/global-selling/fulfillment-scope.md`。
+
+## 优化任务 Worker（独立执行基础设施）
+
+新增 `addons/meli_optimization` 与独立 Python Worker；接口、安装步骤、环境变量、一次/循环运行、离线验收和恢复规则见 [Worker 部署文档](optimization_worker/README.md) 与 [权威 API 契约](addons/meli_optimization/README.md)。Worker 标准库运行，无需导入 Odoo；模块必须通过正常 Odoo 安装流程部署到明确选择的实例，本次没有升级现有 Mercado 数据库。
+
+已实现快照事实提取、可注入研究/标题/图库/生图/QC 契约、独立心跳、SQLite 持久化提交重放及未知外部结果阻断。未配置的供应商明确进入 `capability_missing` 等待；离线 fixture 必须显式启用。浏览器/付费生图供应商、图片上传适配器、平台发布、广告与业务收益测量仍未接入，不代表全流程生产能力。独立验证命令：`.venv/bin/python deploy/mercado/tests/run_optimization_worker.py`；真实 Odoo HTTP 验证使用私有临时集群：`.venv/bin/python deploy/mercado/tests/run_optimization_odoo.py --http`。

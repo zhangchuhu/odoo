@@ -72,3 +72,46 @@ class OptimizationHTTPCase(HttpCase):
         response = post('/api/meli/optimization/tasks/' + str(queued.id) + '/cancel', {})
         self.assertEqual(response.status_code, 200, response.text[:200])
         self.assertEqual(response.json()['data']['state'], 'cancelled')
+
+    def test_actual_standalone_worker_completes_facts_over_http(self):
+        import sys
+        import tempfile
+        from pathlib import Path
+        worker_root = str(Path(__file__).resolve().parents[3])
+        if worker_root not in sys.path:
+            sys.path.insert(0, worker_root)
+        from optimization_worker.client import Client
+        from optimization_worker.runtime import Worker
+        batch = self.env['meli.optimization.batch'].create({'name': 'Standalone Worker HTTP'})
+        case = self.env['meli.optimization.case'].create({'name': 'Worker', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id,
+            'payload': {'item_id': 'MLM-WORKER', 'category': 'dress'}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        user = self.env['res.users'].create({'name': 'Standalone worker', 'login': 'standalone-worker-http',
+            'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_worker').id])]})
+        key = self.env['res.users.apikeys'].with_user(user).sudo()._generate('rpc', 'test only',
+            fields.Datetime.now() + timedelta(hours=1))
+        with tempfile.TemporaryDirectory(prefix='worker-httpcase-') as tmp, self.allow_requests(all_requests=True):
+            worker = Worker(Client(self.base_url(), key), Path(tmp) / 'journal.sqlite', capabilities=('product.facts',))
+            self.assertEqual(worker.once(), 'succeeded')
+            self.assertEqual(worker.once(), 'idle')
+            artifact = worker.client.create_artifact(case.id, payload={'facts': 'fixture observation'})
+        keywords = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': 'research.keywords', 'payload': {'schema_version': '1',
+            'facts_artifact_id': str(artifact['artifact_id']), 'site_id': 'MLM'},
+            'dependency_ids': [(6, 0, [task.id])]})
+        from optimization_worker.providers import OfflineProvider
+        output = {'schema_version': '1', 'evidence': [{'id': 'fixture', 'source': 'offline:test',
+            'observed_at': '2026-11-15T00:00:00Z'}], 'status': 'complete',
+            'keywords': [{'text': 'vestido', 'evidence_ids': ['fixture']}]}
+        with tempfile.TemporaryDirectory(prefix='worker-provider-httpcase-') as tmp, self.allow_requests(all_requests=True):
+            worker = Worker(Client(self.base_url(), key), Path(tmp) / 'journal.sqlite',
+                capabilities=('research.keywords',), providers={'research.keywords':
+                OfflineProvider(offline=True, results={'research.keywords': output})})
+            self.assertEqual(worker.once(), 'succeeded')
+        self.env.invalidate_all()
+        self.assertEqual(keywords.state, 'succeeded')
+        self.assertEqual(task.state, 'succeeded')
+        values = {fact['name']: fact['value'] for fact in task.result['facts']}
+        self.assertEqual(values['item_id'], 'MLM-WORKER')
