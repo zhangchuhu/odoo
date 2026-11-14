@@ -40,7 +40,7 @@ function createPlatformProxyMcpServer({erpBaseUrl,token}){
    body=new FormData();body.set('request',JSON.stringify(envelope));body.set('file',new Blob([bytes],{type:f.mime_type}),f.filename);
   }else{if(input.file)return text({code:'INVALID_FILE'},true);headers['Content-Type']='application/json';body=JSON.stringify(envelope);}
   const r=await request('/operations/'+encodeURIComponent(op.operation_id)+'/execute',{method:'POST',headers,body});
-  if(r.status===409){await r.body?.cancel();return text({code:'CONTRACT_CHANGED',message:'Refresh the operation catalog and decide whether to retry.'},true);}
+  if(r.status===409){let error;try{error=JSON.parse(await bounded(r)).error;}catch{} if(error==='Operation contract version changed')return text({code:'CONTRACT_CHANGED',message:'Refresh the operation catalog and decide whether to retry.'},true); if(error==='Shop authorization unavailable; retry or authorize the shop')return text({code:'SHOP_AUTHORIZATION_UNAVAILABLE',message:'Check or renew the shop authorization.'},true); return text({code:'BFF_OPERATION_FAILED',http_status:409,message:'Verify the result before retrying a write.'},true);}
   if(!r.ok){await r.body?.cancel();return text({code:'BFF_OPERATION_FAILED',http_status:r.status,message:'Verify the result before retrying a write.'},true);}
   if(!/^application\/json(?:;|$)/i.test(r.headers.get('content-type')||'')){await r.body?.cancel();return text({code:'UNSUPPORTED_RESPONSE'},true);}
   return text(JSON.parse(await bounded(r)));

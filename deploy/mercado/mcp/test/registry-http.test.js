@@ -11,7 +11,7 @@ async function fixture(t){
  const calls=[]; let version='v1', conflict=false;
  const bff=http.createServer(async(req,res)=>{let body='';for await(const c of req)body+=c;calls.push({path:req.url,auth:req.headers.authorization,body});res.setHeader('Content-Type','application/json');
   if(req.url==='/api/meli/operations'){return res.end(JSON.stringify({contract_version:version,operations:[{operation_id:'items.read',domain:'items',title:'Read item',description:'Read',permission:'read',scope:'shop',request_kind:'json',response_kind:'json',exposure:'mcp',input_schema:{type:'object',properties:{item_id:{type:'string',pattern:'^CBT[0-9]+$'}},required:['item_id'],additionalProperties:false}},{operation_id:'pictures.upload',domain:'pictures',title:'Upload',description:'Upload',permission:'write',scope:'shop',request_kind:'multipart',response_kind:'json',exposure:'mcp',input_schema:{type:'object',properties:{},additionalProperties:false}},{operation_id:'shipments.label',domain:'shipments',title:'Label',description:'Label',permission:'read',scope:'shop',request_kind:'json',response_kind:'binary',exposure:'mcp',input_schema:{type:'object',properties:{},additionalProperties:false}}]}));}
-  if(req.url==='/api/meli/operations/items.read/execute'){if(conflict){res.writeHead(409);return res.end('{}');}return res.end(JSON.stringify({owner:req.headers.authorization,version:JSON.parse(body).contract_version}));}
+  if(req.url==='/api/meli/operations/items.read/execute'){if(conflict){res.writeHead(409);return res.end(JSON.stringify({success:false,error:conflict===true?'Operation contract version changed':conflict}));}return res.end(JSON.stringify({owner:req.headers.authorization,version:JSON.parse(body).contract_version}));}
   if(req.url==='/api/meli/shops')return res.end(JSON.stringify({shops:[{id:42,name:req.headers.authorization}]}));
   if(req.url==='/api/meli/operations/pictures.upload/execute')return res.end('{"uploaded":true}');
   res.writeHead(404);res.end('{}');
@@ -39,6 +39,11 @@ test('contract conflict is reported without replaying an operation',async t=>{
  const result=await c.callTool({name:'listing_call',arguments:{operation:'items.read',shop_id:1,arguments:{item_id:'CBT123'}}});
  assert.equal(result.isError,true);assert.equal(unpack(result).code,'CONTRACT_CHANGED');
  assert.equal(f.calls.filter(x=>x.path.endsWith('/execute')).length,1);
+});
+test('shop authorization conflict is not a contract change',async t=>{
+ const f=await fixture(t),c=await f.connect(tA);f.setConflict('Shop authorization unavailable; retry or authorize the shop');
+ const result=await c.callTool({name:'listing_call',arguments:{operation:'items.read',shop_id:1,arguments:{item_id:'CBT123'}}});
+ assert.equal(result.isError,true);assert.equal(unpack(result).code,'SHOP_AUTHORIZATION_UNAVAILABLE');
 });
 test('files are bounded and malformed data or binary downloads never reach execute',async t=>{
  const f=await fixture(t),c=await f.connect(tA);
