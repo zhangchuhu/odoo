@@ -59,3 +59,30 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(calls.count('/marketplace/items/MLM1'), 2)
         self.assertEqual(len(calls), 6)
         self.assertEqual(len(domain.screen_products(products, orders, criteria, '9', source['orders_complete'])['matches']), 1)
+
+    def test_expired_final_checkpoint_does_not_replay_or_fetch(self):
+        from datetime import datetime, timedelta, timezone
+        clock = [datetime(2026, 11, 15, tzinfo=timezone.utc)]
+        checkpoint, calls = {}, []
+        reader = self.m.ReplayReads(checkpoint, lambda *a: calls.append(1) or {'id': 8}, now=lambda: clock[0])
+        with self.assertRaises(self.m.CollectionPending): reader.get('/users/me')
+        clock[0] += timedelta(hours=2, seconds=1)
+        with self.assertRaises(self.m.CheckpointExpired):
+            self.m.ReplayReads(checkpoint, lambda *a: calls.append(2), now=lambda: clock[0]).get('/users/me')
+        self.assertEqual(calls, [1])
+
+    def test_delayed_valid_restart_preserves_actual_observed_time(self):
+        from datetime import datetime, timedelta, timezone
+        clock = [datetime(2026, 11, 15, tzinfo=timezone.utc)]
+        checkpoint = {}
+        with self.assertRaises(self.m.CollectionPending):
+            self.m.ReplayReads(checkpoint, lambda *a: {'id': 8}, now=lambda: clock[0]).get('/users/me')
+        observed = clock[0].isoformat()
+        clock[0] += timedelta(minutes=90)
+        self.m.ReplayReads(checkpoint, lambda *a: self.fail('unexpected fetch'), now=lambda: clock[0]).get('/users/me')
+        window = self.m.observation_window(checkpoint, now=clock[0])
+        self.assertEqual(window['observed_at'], observed)
+
+    def test_legacy_checkpoint_without_timestamps_fails_closed(self):
+        checkpoint = {'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]}
+        with self.assertRaises(self.m.CheckpointExpired): self.m.ReplayReads(checkpoint, lambda *a: self.fail('unexpected fetch'))

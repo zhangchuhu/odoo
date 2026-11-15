@@ -1,5 +1,32 @@
 """Ordered, sanitized read checkpoints. Repeated paths in pass two stay distinct."""
 import json
+from datetime import datetime, timedelta, timezone
+
+MAX_OBSERVATION_AGE = timedelta(hours=2)
+
+
+class CheckpointExpired(ValueError):
+    pass
+
+
+def observation_window(checkpoint, now=None):
+    now = now or datetime.now(timezone.utc)
+    rows = checkpoint.get('responses', [])
+    if not rows:
+        return {}
+    try:
+        dates = [(datetime.fromisoformat(r['read_started_at']), datetime.fromisoformat(r['observed_at'])) for r in rows]
+        previous = dates[0][0]
+        for started, observed in dates:
+            if started.tzinfo is None or observed.tzinfo is None or not previous <= started <= observed <= now:
+                raise ValueError()
+            previous = observed
+        if now - dates[0][0] > MAX_OBSERVATION_AGE:
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise CheckpointExpired('Observation checkpoint is older than 2 hours or lacks trustworthy read timestamps') from None
+    return {'collection_started_at': dates[0][0].isoformat(), 'observed_at': dates[-1][1].isoformat(), 'max_observation_age_seconds': 7200}
+
 
 
 class CollectionPending(Exception):
@@ -34,7 +61,9 @@ def minimized(path, data):
 
 
 class ReplayReads:
-    def __init__(self, checkpoint, fetch):
+    def __init__(self, checkpoint, fetch, now=None):
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        observation_window(checkpoint, self.now())
         self.checkpoint, self.fetch, self.index = checkpoint, fetch, 0
         checkpoint.setdefault('responses', [])
 
@@ -47,8 +76,11 @@ class ReplayReads:
             if row['path'] != path or row['query'] != query:
                 raise ValueError('Checkpoint request sequence changed')
             return row['data']
+        read_started_at = self.now().isoformat()
         data = minimized(path, self.fetch(path, query))
-        responses.append({'path': path, 'query': query, 'data': data})
+        observed_at = self.now().isoformat()
+        responses.append({'path': path, 'query': query, 'data': data, 'read_started_at': read_started_at, 'observed_at': observed_at})
+        observation_window(self.checkpoint, self.now())
         if len(json.dumps(self.checkpoint, ensure_ascii=False).encode()) > 8 * 1024 * 1024:
             raise ValueError('Screening checkpoint exceeds 8 MiB; no partial batch created')
         # Always yield after exactly one new read, even if it was the final read.

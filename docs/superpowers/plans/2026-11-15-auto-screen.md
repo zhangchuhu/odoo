@@ -50,3 +50,10 @@
 - Reuse immutable request outcome JSON for private running state (no schema change). Nonblocking advisory lock prevents concurrent collection steps. Each HTTP step is bounded by one 30-second GET; retries retain original criteria/window/digest. No detached threads or hidden process lifetime.
 - HTTP execute returns running/progress until complete; same tool polls/resumes. History exposes safe status without checkpoint data. Completion uses existing atomic batch transaction and stable identity.
 - Test replay/restart, drift, concurrency, sanitized persistence, HTTP progress and completion. Update MCP/skill contract and docs; parent coordinates deployment and actual preview1 execution.
+
+### Follow-up: checkpoint observation freshness
+
+- [x] RED expired final-checkpoint replay, legacy missing timestamps and delayed valid restart tests.
+- [x] Persist actual read start/end and enforce a 7200-second collection-age bound before replay, after new fetch and before completion.
+- [x] RED ORM expired no-fetch/no-batch and actual observed_at regressions; return checkpoint_expired on that call, explicit later same-preview retry recollects.
+- [x] Preserve actual final read as observed_at and expose separate committed_at; document policy and run isolated full checks.

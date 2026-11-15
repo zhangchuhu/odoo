@@ -7,7 +7,7 @@ from odoo.addons.meli_bff.service import authorize
 from odoo.addons.meli_bff.protocol import Operation
 from odoo.addons.meli_platform_adapter import transport
 from .optimization import PREFIX, ExactJson, bounded
-from ..domain.screening_resume import ReplayReads, CollectionPending
+from ..domain.screening_resume import ReplayReads, CollectionPending, CheckpointExpired, observation_window
 from ..domain.screening import parse_criteria, screen_products, collect_shop, timestamp
 
 
@@ -121,9 +121,17 @@ class ScreeningWorkbench(models.Model):
         checkpoint = previous.get('job_checkpoint', {}) if previous.get('job_state') == 'running' else {}
         started = previous.get('started_at') if checkpoint else datetime.now(timezone.utc).isoformat()
         try:
+            observation_window(checkpoint)
             products, orders, source = self._screen_collect(shop, row.criteria, checkpoint)
-            source = dict(source, collection_started_at=started)
+            window = observation_window(checkpoint)
+            source = dict(source, collection_started_at=started, **{k: v for k, v in window.items() if k != 'collection_started_at'})
+            source['collection_started_at'] = window.get('collection_started_at', started)
             result = screen_products(products, orders, row.criteria, row.seller_id, source.get('orders_complete'))
+        except CheckpointExpired:
+            state = {'preview_id': row.id, 'job_state': 'failed', 'code': 'checkpoint_expired',
+                'message': '采集观察已超过 2 小时，或旧检查点缺少可信读取时间；未创建批次。再次执行同一预览才会重新采集。', 'resume_action': 'execute_same_preview_recollects'}
+            row._set({'outcome': state})
+            return state
         except CollectionPending:
             state = {'preview_id': row.id, 'job_state': 'running', 'completed_reads': len(checkpoint.get('responses', [])), 'started_at': started,
                 'resume_action': 'execute_same_preview', 'job_checkpoint': checkpoint}
@@ -136,7 +144,8 @@ class ScreeningWorkbench(models.Model):
                 'message': '完整销售/库存证据不可验证；未创建批次。核验账户权限或数据变化后重试原预览。', 'resume_action': 'execute_same_preview_recollects'}
             row._set({'outcome': state})
             return state
-        observed_at = datetime.now(timezone.utc).isoformat()
+        observed_at = window.get('observed_at', datetime.now(timezone.utc).isoformat())
+        committed_at = datetime.now(timezone.utc).isoformat()
         with self.env.cr.savepoint():
             row._lock()
             if row.batch_id:
@@ -153,7 +162,7 @@ class ScreeningWorkbench(models.Model):
                     screening_id=row.id, screening_digest=row.digest, value_status='known')
                 self.env[PREFIX + 'snapshot'].with_company(shop.company_id).create({'case_id': case.id, 'payload': payload})
                 cases.append(case.id)
-            outcome = dict(preview_id=row.id, batch_id=batch.id, case_ids=cases, matched=len(cases), unknown=result['unknown'], evaluated=result['evaluated'], source=source, observed_at=observed_at)
+            outcome = dict(preview_id=row.id, batch_id=batch.id, case_ids=cases, matched=len(cases), unknown=result['unknown'], evaluated=result['evaluated'], source=source, observed_at=observed_at, committed_at=committed_at)
             bounded(outcome)
             row._set({'batch_id': batch.id, 'outcome': outcome})
             return outcome

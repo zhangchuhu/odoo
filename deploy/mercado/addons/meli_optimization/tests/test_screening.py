@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from datetime import datetime, timezone
 from odoo.tests import TransactionCase, tagged
 from odoo.exceptions import AccessError, ValidationError
 
@@ -50,7 +51,7 @@ class ScreeningCase(TransactionCase):
         preview = self.preview()
         def collect(model, shop, criteria, checkpoint=None):
             if not checkpoint.get('responses'):
-                checkpoint['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]
+                checkpoint['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': datetime.now(timezone.utc).isoformat(), 'observed_at': datetime.now(timezone.utc).isoformat()}]
                 raise CollectionPending()
             return self.collected()
         with patch.object(type(self.ui), '_screen_collect', collect):
@@ -88,6 +89,30 @@ class ScreeningCase(TransactionCase):
             result = self.ui.screening_execute(preview['id'], preview['digest'])
         self.assertEqual(checkpoints[1], {})
         self.assertEqual(result['matched'], 1)
+
+    def test_expired_checkpoint_fails_without_recollection_or_batch(self):
+        from datetime import datetime, timedelta, timezone
+        preview = self.preview()
+        old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        row = self.env['meli.optimization.screening'].browse(preview['id'])
+        row._set({'outcome': {'job_state': 'running', 'job_checkpoint': {'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': old, 'observed_at': old}]}}})
+        with patch.object(type(self.ui), '_screen_collect', side_effect=AssertionError('expired checkpoint must not fetch')):
+            failed = self.ui.screening_execute(preview['id'], preview['digest'])
+        self.assertEqual(failed['code'], 'checkpoint_expired')
+        self.assertFalse(row.batch_id)
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            self.assertEqual(self.ui.screening_execute(preview['id'], preview['digest'])['matched'], 1)
+
+    def test_final_restart_uses_last_actual_read_time(self):
+        from datetime import datetime, timedelta, timezone
+        preview = self.preview()
+        observed = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
+        row = self.env['meli.optimization.screening'].browse(preview['id'])
+        row._set({'outcome': {'job_state': 'running', 'job_checkpoint': {'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': observed, 'observed_at': observed}]}}})
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        self.assertEqual(result['observed_at'], observed)
+        self.assertGreater(result['committed_at'], observed)
 
     def test_atomic_batch_rollback(self):
         preview = self.preview()
@@ -142,7 +167,7 @@ class ScreeningHTTPCase(HttpCase):
         def collect(*args):
             from ..domain.screening_resume import CollectionPending
             if not args[-1].get('responses'):
-                args[-1]['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]
+                args[-1]['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': datetime.now(timezone.utc).isoformat(), 'observed_at': datetime.now(timezone.utc).isoformat()}]
                 raise CollectionPending()
             return ([dict(id='MLM1', seller_id='9', site_id='MLM', title='Dress', available_quantity=20, variations=[])], [], dict(orders_complete=True, provider='isolated-test'))
         with patch.object(type(self.env['meli.optimization.case']), '_screen_collect', collect):
