@@ -90,3 +90,42 @@ class WorkbenchCase(TransactionCase):
         task.complete(claim['lease_token'], claim['lease_epoch'], 'gallery', result)
         with self.assertRaises(ValidationError):
             self.ui.workbench_propose(detail['id'], task.id, canonical_hash(result), 'images', [0])
+
+    def test_archive_result_advances_fresh_workflow_and_is_idempotent(self):
+        detail = self.create_case()
+        facts_id = self.ui.workbench_task(detail['id'], 'product.facts', {})
+        task = self.env['meli.optimization.task'].browse(facts_id)
+        result = {'schema_version': '1', 'evidence': [{'id': 'e', 'source': 'snapshot', 'observed_at': '2026-11-15T00:00:00Z'}],
+            'facts': [{'name': 'title', 'value': 'Original', 'evidence_ids': ['e']}], 'uncertainties': []}
+        with self.assertRaises(ValidationError):
+            self.ui.workbench_archive(detail['id'], task.id, canonical_hash(result))
+        claim = task.claim(['product.facts'])
+        task.complete(claim['lease_token'], claim['lease_epoch'], 'facts', result)
+        with self.assertRaises(ValidationError):
+            self.ui.workbench_archive(detail['id'], task.id, 'wrong')
+        artifact_id = self.ui.workbench_archive(detail['id'], task.id, canonical_hash(result))
+        self.assertEqual(self.ui.workbench_archive(detail['id'], task.id, canonical_hash(result)), artifact_id)
+        artifact = self.env['meli.optimization.artifact'].browse(artifact_id)
+        self.assertEqual(artifact.payload, result)
+        self.assertEqual(artifact.result_task_id, task)
+        self.assertEqual(artifact.digest, canonical_hash(result))
+        keywords_id = self.ui.workbench_task(detail['id'], 'research.keywords', {'facts_artifact_id': str(artifact_id), 'site_id': 'MLM'})
+        keywords = self.env['meli.optimization.task'].browse(keywords_id)
+        output = {'schema_version': '1', 'evidence': result['evidence'], 'status': 'complete', 'keywords': [{'text': 'Vestido', 'evidence_ids': ['e']}]}
+        claim = keywords.claim(['research.keywords'])
+        keywords.complete(claim['lease_token'], claim['lease_epoch'], 'keywords', output)
+        keyword_artifact = self.ui.workbench_archive(detail['id'], keywords.id, canonical_hash(output))
+        self.assertTrue(self.ui.workbench_task(detail['id'], 'title.generate', {'facts_artifact_id': str(artifact_id), 'keywords_artifact_id': str(keyword_artifact), 'language': 'es-MX'}))
+        other = self.create_case(item_id='OTHER')
+        with self.assertRaises(ValidationError):
+            self.ui.workbench_archive(other['id'], task.id, canonical_hash(result))
+        self.ui.workbench_snapshot(detail['id'], {'shop': 'Test shop', 'item_id': 'MLM1', 'title': 'Changed'})
+        with self.assertRaises(ValidationError):
+            self.ui.workbench_archive(detail['id'], task.id, canonical_hash(result))
+
+    def test_search_matches_displayed_snapshot_identity(self):
+        detail = self.create_case(title='Obsolete Unique Name')
+        self.ui.workbench_snapshot(detail['id'], {'shop': 'Test shop', 'item_id': 'CURRENT-ITEM', 'title': 'Current Unique Name'})
+        self.assertEqual([r['id'] for r in self.ui.workbench_overview(query='Current Unique')['rows']], [detail['id']])
+        self.assertEqual([r['id'] for r in self.ui.workbench_overview(query='CURRENT-ITEM')['rows']], [detail['id']])
+        self.assertFalse(self.ui.workbench_overview(query='Obsolete Unique')['rows'])

@@ -1,5 +1,5 @@
 /** @odoo-module **/
-import { Component, onWillStart, useState, useEffect } from '@odoo/owl';
+import { Component, onWillStart, useState, useEffect, onWillUnmount } from '@odoo/owl';
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
 import { candidateRows, displayValue, moveSelection } from './workbench_helpers';
@@ -8,6 +8,9 @@ export class OptimizationWorkbench extends Component {
     static template = 'meli_optimization.Workbench';
     static props = ['*'];
     setup() {
+        this.navigationVersion = 0;
+        this.disposed = false;
+        onWillUnmount(() => { this.disposed = true; this.navigationVersion++; });
         this.orm = useService('orm');
         this.notification = useService('notification');
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
@@ -53,10 +56,12 @@ export class OptimizationWorkbench extends Component {
     }
     async refresh() { return this.perform(() => this.load()); }
     async filter() { this.state.page = 0; return this.refresh(); }
+    back() { this.navigationVersion++; this.state.detail=null; this.state.preview=null; this.state.modal=''; }
     async open(id) {
+        this.navigationVersion++;
         return this.perform(async () => { this.state.detail = await this.rpc('workbench_detail',[id]); this.state.tab='snapshot'; this.state.selections={}; this.state.preview=null; });
     }
-    async navigate(section) { this.state.detail=null; this.state.section=section; this.state.status=''; this.state.page=0; return this.refresh(); }
+    async navigate(section) { this.back(); this.state.section=section; this.state.status=''; this.state.page=0; return this.refresh(); }
     async page(delta) { this.state.page += delta; return this.refresh(); }
     createForm() { this.state.form = {shop:'',item_id:'',title:'',site_id:'MLM',seller_sku:'',available_quantity:'',image_url:'',batch_name:''}; this.state.modal='create'; }
     snapshotForm() { this.state.form = {...this.state.detail.snapshot.payload}; this.state.form.available_quantity ??= ''; this.state.modal='snapshot'; }
@@ -91,7 +96,7 @@ export class OptimizationWorkbench extends Component {
     label(state) { return ({queued:'排队中',running:'执行中',waiting:'等待条件',succeeded:'已完成',failed:'失败',cancelled:'已取消'})[state] || state; }
     safeUrl(value) { return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : ''; }
     imageUrl(row) {
-        const artifact = this.state.detail.artifacts.find(a => String(a.id) === String(row.artifact_id));
+        const artifact = (this.state.detail?.artifacts || []).find(a => String(a.id) === String(row.artifact_id));
         return artifact?.mime_type?.startsWith('image/') ? `/web/image/meli.optimization.artifact/${artifact.id}/data` : this.safeUrl(row.image_url);
     }
     selectable(task) { return task.state==='succeeded' && task.snapshot_id === this.state.detail.snapshot.id && ['title.generate','research.bestseller','gallery.collect','image.generate'].includes(task.task_type); }
@@ -102,16 +107,36 @@ export class OptimizationWorkbench extends Component {
         this.state.selections[task.id] = current.includes(index) ? current.filter(i=>i!==index) : multi ? [...current,index] : [index];
     }
     move(task,index,delta) { this.state.selections[task.id]=moveSelection(this.state.selections[task.id], index, delta); }
+    contextMatches(context) {
+        return !this.disposed && this.navigationVersion === context.version && this.state.detail?.id === context.case_id && this.state.detail?.revision === context.revision;
+    }
+    async archive(task) {
+        const context = {version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        await this.perform(async () => {
+            await this.rpc('workbench_archive',[context.case_id,task.id,task.result_hash]);
+            if (this.contextMatches(context)) await this.load();
+        }, '真实任务结果已归档，可用于后续任务');
+    }
     async propose(task) {
+        const context = {version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
         await this.perform(async () => {
             const kind=task.task_type==='title.generate'?'title':task.task_type==='research.bestseller'?'reference':'images';
-            this.state.preview=await this.rpc('workbench_propose',[this.state.detail.id,task.id,task.result_hash,kind,this.state.selections[task.id] || []]);
+            const proposal=await this.rpc('workbench_propose',[context.case_id,task.id,task.result_hash,kind,this.state.selections[task.id] || []]);
+            if (!this.contextMatches(context)) return;
+            this.state.preview={...proposal,case_id:context.case_id,revision:context.revision};
             this.state.modal='preview';
         });
     }
-    preview(proposal) { this.state.preview=proposal; this.state.modal='preview'; }
+    preview(proposal) { this.state.preview={...proposal,case_id:this.state.detail.id,revision:this.state.detail.revision}; this.state.modal='preview'; }
     async confirm() {
-        await this.perform(async () => { const p=this.state.preview; await this.rpc('workbench_confirm',[this.state.detail.id,p.id,p.digest]); this.state.modal=''; this.state.tab='proposals'; await this.load(); }, '已确认确切方案；平台发布尚未接入');
+        const p=this.state.preview;
+        if (!p || this.disposed || this.state.detail?.id !== p.case_id || this.state.detail?.revision !== p.revision) return;
+        const context={version:this.navigationVersion,case_id:p.case_id,revision:p.revision};
+        await this.perform(async () => {
+            await this.rpc('workbench_confirm',[p.case_id,p.id,p.digest]);
+            if (!this.contextMatches(context)) return;
+            this.state.modal=''; this.state.tab='proposals'; await this.load();
+        }, '已确认确切方案；平台发布尚未接入');
     }
 }
 registry.category('actions').add('meli_optimization.workbench', OptimizationWorkbench);

@@ -62,7 +62,41 @@ class WorkbenchBrowserCase(HttpCase):
                     if(document.querySelectorAll('.mw-form input').length < 7) throw Error('Product fields missing');
                     console.log('workbench-shot-form');
                     await new Promise(r=>setTimeout(r,300));
-                    document.querySelector('[aria-label="关闭对话框"]').click();
+                    // Create a fresh case through the real product form.
+                    const set = (el,value,event='input') => {el.value=value;el.dispatchEvent(new Event(event,{bubbles:true}));};
+                    const inputs=[...document.querySelectorAll('.mw-form input')];
+                    set(inputs[0],'Fresh shop');set(inputs[1],'FRESH-CHAIN');set(inputs[2],'Fresh product');
+                    button('保存快照').click();
+                    await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('h1')?.textContent.includes('FRESH-CHAIN'));
+                    button('任务队列').click();await wait(()=>button('创建任务'));button('创建任务').click();
+                    await wait(()=>button('加入执行队列'));button('加入执行队列').click();
+                    await wait(()=>document.querySelector('.mw-task')?.textContent.includes('整理商品事实'));
+                    // Offline Worker fixture: only the test submits known fixture results.
+                    const rpc=async(model,method,args)=>{const data=await(await fetch('/web/dataset/call_kw/'+model+'/'+method,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'call',id:1,params:{model,method,args,kwargs:{}}})})).json();if(data.error)throw Error(data.error.data.message);return data.result;};
+                    const cases=await rpc('meli.optimization.case','search_read',[[['name','ilike','FRESH-CHAIN']],['id']]);
+                    const caseId=cases[0].id;
+                    const finish=async(kind,result)=>{const tasks=await rpc('meli.optimization.task','search_read',[[['case_id','=',caseId],['task_type','=',kind]],['id']]);const claim=await rpc('meli.optimization.task','claim',[[tasks[0].id],[kind]]);await rpc('meli.optimization.task','complete',[[tasks[0].id],claim.lease_token,claim.lease_epoch,'fixture-'+kind,result]);};
+                    const evidence=[{id:'fixture',source:'offline browser fixture',observed_at:'2026-11-15T00:00:00Z'}];
+                    await finish('product.facts',{schema_version:'1',evidence,facts:[{name:'title',value:'Fresh product',evidence_ids:['fixture']}],uncertainties:[]});
+                    button('刷新').click();await wait(()=>button('归档结果供后续任务使用'));button('归档结果供后续任务使用').click();
+                    await wait(()=>!document.querySelector('.mw-loading'));
+                    const createKind=async(kind)=>{button('创建任务').click();await wait(()=>document.querySelector('.mw-form select'));set(document.querySelector('.mw-form select'),kind,'change');await new Promise(r=>setTimeout(r,100));};
+                    await createKind('research.keywords');
+                    let selects=document.querySelectorAll('.mw-form select');
+                    if(selects[1].options.length<2)throw Error('Facts archival missing from selector');
+                    const factsArtifact=selects[1].options[1].value;set(selects[1],factsArtifact,'change');
+                    button('加入执行队列').click();await wait(()=>!document.querySelector('.mw-modal'));
+                    await finish('research.keywords',{schema_version:'1',evidence,status:'complete',keywords:[{text:'Vestido',evidence_ids:['fixture']}]});
+                    button('刷新').click();await wait(()=>document.querySelectorAll('.mw-task .primary').length===2);
+                    [...document.querySelectorAll('.mw-task')].find(el=>el.textContent.includes('关键词研究')).querySelector('.primary').click();
+                    await wait(()=>!document.querySelector('.mw-loading'));
+                    await createKind('title.generate');selects=document.querySelectorAll('.mw-form select');
+                    if(selects[2].options.length<3)throw Error('Keyword archival missing from selector');
+                    set(selects[1],factsArtifact,'change');
+                    const keywordArtifact=[...selects[2].options].find(o=>o.value && o.value!==factsArtifact).value;
+                    set(selects[2],keywordArtifact,'change');button('加入执行队列').click();
+                    await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('.mw-task')?.textContent.includes('生成标题候选'));
+                    console.log('workbench-shot-fresh-chain');await new Promise(r=>setTimeout(r,300));
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=100)

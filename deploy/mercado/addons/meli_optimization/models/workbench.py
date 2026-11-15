@@ -1,8 +1,8 @@
 """Session-authenticated operations facade. Never returns worker leases or credentials."""
-from odoo import api, models
+from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
 from .optimization import PREFIX, bounded
-from ..domain import canonical_hash
+from ..domain import canonical_hash, validate_result
 
 TASK_INPUTS = {
     'product.facts': [], 'research.keywords': ['facts_artifact_id', 'site_id'],
@@ -34,8 +34,7 @@ class OperationsWorkbench(models.Model):
         self._authorize('worker')
         page = max(0, int(page))
         domain = []
-        if query:
-            domain += [('name', 'ilike', str(query)[:200])]
+        query = str(query or '').strip()[:200].casefold()
         if batch_id:
             domain += [('batch_id', '=', int(batch_id))]
         # Snapshot scope filters are observations, never platform account access grants.
@@ -43,6 +42,8 @@ class OperationsWorkbench(models.Model):
         for case in self.search(domain, order='id desc'):
             snap = self._wb_snapshot(case)
             payload = snap.payload if snap and isinstance(snap.payload, dict) else {}
+            if query and not any(query in str(value or '').casefold() for value in (payload.get('title') or case.name, payload.get('item_id'))):
+                continue
             tasks = self.env[PREFIX + 'task'].search([('case_id', '=', case.id)])
             if shop and payload.get('shop') != shop or site and payload.get('site_id') != site:
                 continue
@@ -78,7 +79,7 @@ class OperationsWorkbench(models.Model):
             'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state,
                 'snapshot_id': t.snapshot_id.id, 'result': t.result,
                 'result_hash': canonical_hash(t.result), 'status_detail': t.status_detail} for t in tasks],
-            'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload']),
+            'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload', 'result_task_id', 'result_snapshot_id', 'result_hash']),
             'proposals': [{'id': p.id, 'digest': p.digest, 'payload': p.payload,
                 'current': p.input_revision == case.revision,
                 'confirmed': p in confirmations.mapped('proposal_id')} for p in proposals],
@@ -149,6 +150,24 @@ class OperationsWorkbench(models.Model):
             'task_type': task_type, 'payload': payload}).id
 
     @api.model
+    def workbench_archive(self, case_id, task_id, result_hash):
+        case = self._wb_case(case_id, True)
+        case._lock()
+        task = self.env[PREFIX + 'task'].browse(int(task_id)).exists()
+        task._authorize()
+        snapshot = self._wb_snapshot(case)
+        if not task or task.case_id != case or task.snapshot_id != snapshot or task.state != 'succeeded' or task.task_type not in ('product.facts', 'research.keywords') or canonical_hash(task.result) != result_hash:
+            raise ValidationError('仅可归档当前商品快照的已完成事实或关键词结果，请刷新')
+        validate_result(task.task_type, task.result)
+        artifacts = self.env[PREFIX + 'artifact']
+        existing = artifacts.search([('case_id', '=', case.id), ('result_task_id', '=', task.id), ('result_hash', '=', result_hash)], limit=1)
+        if existing:
+            return existing.id
+        return artifacts._append({'company_id': case.company_id.id, 'case_id': case.id,
+            'payload': task.result, 'digest': bounded(task.result), 'mime_type': 'application/json',
+            'result_task_id': task.id, 'result_snapshot_id': snapshot.id, 'result_hash': result_hash}).id
+
+    @api.model
     def workbench_control(self, case_id, task_id, operation):
         case = self._wb_case(case_id, True)
         task = self.env[PREFIX + 'task'].browse(int(task_id)).exists()
@@ -210,3 +229,18 @@ class OperationsWorkbench(models.Model):
         if not proposal or proposal.case_id != case:
             raise ValidationError('方案不属于当前商品')
         return proposal.confirm(digest).id
+
+
+class ResultArtifact(models.Model):
+    _inherit = PREFIX + 'artifact'
+
+    result_task_id = fields.Many2one(PREFIX + 'task', readonly=True, ondelete='restrict', index=True)
+    result_snapshot_id = fields.Many2one(PREFIX + 'snapshot', readonly=True, ondelete='restrict')
+    result_hash = fields.Char(readonly=True)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        provenance = {'result_task_id', 'result_snapshot_id', 'result_hash'}
+        if any(provenance.intersection(values) for values in vals_list) or any('default_' + key in self.env.context for key in provenance):
+            raise AccessError('Result provenance is assigned only by checked archival')
+        return super().create(vals_list)
