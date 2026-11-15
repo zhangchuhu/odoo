@@ -1,7 +1,5 @@
 """Resolve verified inputs and validate provider outputs before submission."""
-from datetime import datetime, timezone
-
-from .domain import DomainError, validate_input, validate_result
+from .domain import DomainError, validate_input, validate_result, product_facts_from_snapshot
 
 TASK_TYPES = ('product.facts', 'research.keywords', 'research.bestseller', 'gallery.collect',
               'title.generate', 'image.generate', 'image.qc')
@@ -43,14 +41,7 @@ def prepare(client, claim):
 
 
 def product_facts(context):
-    snapshot = context['snapshot']
-    return {'schema_version': '1', 'evidence': [{'id': 'snapshot',
-        'source': 'snapshot:' + str(snapshot['snapshot_id']),
-        'observed_at': datetime.now(timezone.utc).isoformat()}],
-        'facts': [{'name': key, 'value': value, 'evidence_ids': ['snapshot']}
-                  for key, value in (snapshot['payload'].items() if isinstance(snapshot['payload'], dict) else [])] or [
-                  {'name': 'snapshot_payload', 'value': snapshot['payload'], 'evidence_ids': ['snapshot']}],
-        'uncertainties': ['Snapshot fields are supplied observations; external truth has not been verified.']}
+    return product_facts_from_snapshot(context['snapshot'])
 
 
 def validate_output(client, claim, output, request_id=None):

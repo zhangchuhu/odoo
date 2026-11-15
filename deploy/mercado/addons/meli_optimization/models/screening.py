@@ -7,6 +7,7 @@ from odoo.addons.meli_bff.service import authorize
 from odoo.addons.meli_bff.protocol import Operation
 from odoo.addons.meli_platform_adapter import transport
 from .optimization import PREFIX, ExactJson, bounded
+from ..domain import product_facts_from_snapshot, validate_result
 from ..domain.screening_resume import ReplayReads, CollectionPending, CheckpointExpired, observation_window
 from ..domain.screening import parse_criteria, screen_products, collect_shop, timestamp
 
@@ -160,7 +161,25 @@ class ScreeningWorkbench(models.Model):
                 payload = dict(product, item_id=product['id'], shop=shop.name, shop_id=shop.id, company_id=shop.company_id.id,
                     seller_id=row.seller_id, source=source, observed_at=observed_at, screening_criteria=row.criteria,
                     screening_id=row.id, screening_digest=row.digest, value_status='known')
-                self.env[PREFIX + 'snapshot'].with_company(shop.company_id).create({'case_id': case.id, 'payload': payload})
+                snapshot = self.env[PREFIX + 'snapshot'].with_company(shop.company_id).create({'case_id': case.id, 'payload': payload})
+                # Local observation arrangement is part of persistence, not a
+                # provider job. Use the same builder and checked archival as the
+                # manual worker flow, without claiming a worker lease.
+                task_id = scoped.workbench_task(case.id, 'product.facts', {})
+                task = self.env[PREFIX + 'task'].browse(task_id)
+                facts = product_facts_from_snapshot({'snapshot_id': snapshot.id, 'payload': snapshot.payload})
+                validate_result('product.facts', facts)
+                result_hash = bounded(facts)
+                task._transition('running')
+                task._set({'result': facts})
+                task._transition('succeeded')
+                receipt = {'task_id': task.id, 'submission_key': 'screening-facts',
+                    'state': 'succeeded', 'accepted': True, 'execution': 'local_snapshot', 'screening_id': row.id}
+                self.env[PREFIX + 'event']._append({'company_id': shop.company_id.id, 'task_id': task.id,
+                    'submission_key': 'screening-facts', 'kind': 'complete', 'payload': facts,
+                    'digest': bounded({'body': facts, 'execution': 'local_snapshot', 'screening_id': row.id}),
+                    'receipt': receipt, 'worker_uid': self.env.uid})
+                scoped.workbench_archive(case.id, task.id, result_hash)
                 cases.append(case.id)
             outcome = dict(preview_id=row.id, batch_id=batch.id, case_ids=cases, matched=len(cases), unknown=result['unknown'], evaluated=result['evaluated'], source=source, observed_at=observed_at, committed_at=committed_at)
             bounded(outcome)

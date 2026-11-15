@@ -33,6 +33,65 @@ class ScreeningCase(TransactionCase):
         with self.assertRaises(ValidationError):
             self.ui.screening_preview(self.shop.id, 'stable-request', dict(self.criteria, sales_max=3))
 
+    def test_screening_arranges_and_archives_facts_for_every_product(self):
+        from ..domain import canonical_hash, validate_result
+        preview = self.preview()
+        def collect(*args):
+            products, orders, source = self.collected()
+            products[0]['seller_custom_field'] = None
+            products.append(dict(products[0], id='MLM2', title='Second dress'))
+            return products, orders, source
+        with patch.object(type(self.ui), '_screen_collect', collect):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+            self.assertEqual(self.ui.screening_execute(preview['id'], preview['digest']), result)
+        self.assertEqual(result['matched'], 2)
+        for case_id in result['case_ids']:
+            detail = self.ui.workbench_detail(case_id)
+            self.assertEqual(len(detail['tasks']), 1, 'Every screened product needs completed facts immediately')
+            task = detail['tasks'][0]
+            self.assertEqual((task['task_type'], task['state']), ('product.facts', 'succeeded'))
+            self.assertEqual(task['snapshot_id'], detail['snapshot']['id'])
+            validate_result('product.facts', task['result'])
+            facts = {row['name']: row['value'] for row in task['result']['facts']}
+            self.assertEqual(facts, detail['snapshot']['payload'])
+            self.assertIsNone(facts['seller_custom_field'], 'Missing SKU must remain unknown')
+            self.assertNotIn('seller_sku', facts)
+            self.assertEqual(task['result']['evidence'][0]['source'], 'snapshot:' + str(task['snapshot_id']))
+            self.assertIn('external truth has not been verified', task['result']['uncertainties'][0])
+            self.assertEqual(len(detail['artifacts']), 1)
+            artifact = detail['artifacts'][0]
+            self.assertEqual(artifact['payload'], task['result'])
+            self.assertEqual(artifact['result_task_id'][0], task['id'])
+            self.assertEqual(artifact['result_snapshot_id'][0], task['snapshot_id'])
+            self.assertEqual(artifact['digest'], canonical_hash(task['result']))
+            self.assertEqual(artifact['result_hash'], task['result_hash'])
+            self.assertEqual(self.ui.workbench_archive(case_id, task['id'], task['result_hash']), artifact['id'])
+            self.assertEqual(len(detail['events']), 1)
+            self.assertEqual(detail['events'][0]['kind'], 'complete')
+            self.assertEqual(detail['events'][0]['receipt']['execution'], 'local_snapshot')
+            self.assertEqual(detail['events'][0]['receipt']['screening_id'], preview['id'])
+            stored_task = self.env['meli.optimization.task'].browse(task['id'])
+            self.assertFalse(stored_task.lease_token)
+            self.assertEqual(stored_task.lease_epoch, 0)
+            self.assertFalse(stored_task.claim(['product.facts']), 'Local facts must not enter the worker queue')
+            self.assertFalse(self.env['meli.optimization.attempt'].search([('task_id', '=', task['id'])]))
+            keyword_id = self.ui.workbench_task(case_id, 'research.keywords', {'facts_artifact_id': artifact['id'], 'site_id': 'MLM'})
+            self.assertEqual(self.env['meli.optimization.task'].browse(keyword_id).payload['facts_artifact_id'], str(artifact['id']))
+
+    def test_facts_archive_failure_rolls_back_entire_screening_and_retry(self):
+        preview = self.preview()
+        names = ('batch', 'case', 'snapshot', 'task', 'artifact', 'event')
+        counts = {name: self.env['meli.optimization.' + name].search_count([]) for name in names}
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            with patch.object(type(self.ui), 'workbench_archive', side_effect=ValidationError('forced archive failure')):
+                with self.assertRaises(ValidationError):
+                    self.ui.screening_execute(preview['id'], preview['digest'])
+            for name in names:
+                self.assertEqual(self.env['meli.optimization.' + name].search_count([]), counts[name], name)
+            self.assertFalse(self.env['meli.optimization.screening'].browse(preview['id']).batch_id)
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        self.assertEqual(len(self.ui.workbench_detail(result['case_ids'][0])['artifacts']), 1)
+
     def test_all_sizes_criteria_and_evidence_persisted(self):
         self.criteria.update(require_all_skus_in_stock=True, sales_max=1, stock_min=0)
         preview = self.preview()
@@ -45,6 +104,8 @@ class ScreeningCase(TransactionCase):
         self.assertTrue(payload['screening_criteria']['require_all_skus_in_stock'])
         self.assertEqual([row['size']['value_name'] for row in payload['sku_size_evidence']], ['S', 'M'])
         self.assertEqual(payload['sales_units'], 0)
+        facts = self.ui.workbench_detail(outcome['case_ids'][0])['artifacts'][0]['payload']['facts']
+        self.assertEqual(next(row['value'] for row in facts if row['name'] == 'sku_size_evidence'), payload['sku_size_evidence'])
 
     def test_execute_checkpoints_progress_without_exposing_private_cache(self):
         from ..domain.screening_resume import CollectionPending
