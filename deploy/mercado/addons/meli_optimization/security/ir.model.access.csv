@@ -21,3 +21,6 @@ access_confirmation_editor,confirmation editor,model_meli_optimization_confirmat
 access_confirmation_worker,confirmation worker,model_meli_optimization_confirmation,group_worker,1,1,1,0
 access_library_editor,library editor,model_meli_optimization_library,group_editor,1,1,1,0
 access_library_worker,library worker,model_meli_optimization_library,group_worker,1,1,1,0
+
+access_screening_editor,screening editor,model_meli_optimization_screening,group_editor,1,1,1,0
+access_screening_worker,screening worker,model_meli_optimization_screening,group_worker,1,0,0,0

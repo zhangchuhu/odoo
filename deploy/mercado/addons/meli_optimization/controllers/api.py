@@ -51,6 +51,21 @@ def operation(callback):
 
 
 class OptimizationAPI(http.Controller):
+    @http.route('/api/meli/optimization/screening/preview', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def screening_preview(self):
+        def run():
+            data = body()
+            return reply(request.env[PREFIX + 'case'].screening_preview(data['shop_id'], data['request_key'], data['criteria']))
+        return operation(run)
+
+    @http.route('/api/meli/optimization/screening/<int:preview_id>/execute', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def screening_execute(self, preview_id):
+        return operation(lambda: reply(request.env[PREFIX + 'case'].screening_execute(preview_id, body()['digest'])))
+
+    @http.route('/api/meli/optimization/screening/history', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def screening_history(self):
+        return operation(lambda: reply(request.env[PREFIX + 'case'].screening_history()))
+
     @http.route('/api/meli/optimization/capabilities', type='http', auth='meli_optimization', methods=['GET'], csrf=False)
     def capabilities(self):
         request.env[PREFIX + 'task']._authorize('worker')

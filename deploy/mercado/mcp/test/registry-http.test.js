@@ -25,7 +25,7 @@ async function fixture(t){
 }
 test('real Streamable HTTP tools use the authorized catalog and per-user identity',async t=>{
  const f=await fixture(t),a=await f.connect(tA),b=await f.connect(tB);
- assert.equal((await a.listTools()).tools.length,5);
+ assert.equal((await a.listTools()).tools.length,8);
  const shopA=unpack(await a.callTool({name:'listing_shops',arguments:{}}));
  assert.equal(shopA.shops[0].name,'Bearer key-a');
  const list=unpack(await a.callTool({name:'listing_list_operations',arguments:{}}));assert.equal(list.operations[0].operation_id,'items.read');
@@ -61,4 +61,15 @@ test('reject untrusted hosts, origins, credentials, paths and invalid operation 
  const c=await f.connect(tA);const before=f.calls.length;
  const bad=await c.callTool({name:'listing_call',arguments:{operation:'items.read',shop_id:1,arguments:{item_id:'../bad'}}});assert.equal(bad.isError,true);assert.equal(f.calls.slice(before).some(x=>x.path.endsWith('/execute')),false);
  const unknown=await c.callTool({name:'listing_call',arguments:{operation:'../admin',shop_id:1,arguments:{}}});assert.equal(unknown.isError,true);
+});
+
+test('screening tools expose structured preview then execute without confirmation',async t=>{
+ const f=await fixture(t),c=await f.connect(tA);
+ const tools=(await c.listTools()).tools.map(t=>t.name);
+ for(const name of ['optimization_screen_preview','optimization_screen_execute','optimization_screen_history'])assert.ok(tools.includes(name),name);
+ await c.callTool({name:'optimization_screen_preview',arguments:{shop_id:42,request_key:'stable',criteria:{site_id:'MLM',timezone:'America/Mexico_City',start:'2026-11-01T00:00:00-06:00',end:'2026-11-08T00:00:00-06:00',sales_max:2,stock_min:10,sales_policy:'paid_gross_units'}}});
+ assert.equal(f.calls.at(-1).path,'/api/meli/optimization/screening/preview');
+ assert.equal(f.calls.at(-1).auth,'Bearer key-a');
+ await c.callTool({name:'optimization_screen_execute',arguments:{preview_id:1,digest:'abc'}});
+ assert.equal(f.calls.at(-1).path,'/api/meli/optimization/screening/1/execute');
 });
