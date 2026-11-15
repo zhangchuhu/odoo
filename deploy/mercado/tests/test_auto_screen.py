@@ -21,6 +21,56 @@ class ScreeningTests(unittest.TestCase):
         for key, val in [('sales_max', True), ('stock_min', -1), ('start', '2026-11-01'), ('end', self.criteria['start']), ('timezone', 'UTC'), ('sales_policy', 'net')]:
             with self.assertRaises(ValueError): self.m.parse_criteria(dict(self.criteria, **{key: val}))
 
+    def sized(self, sku_id, size, quantity, color='black'):
+        return dict(id=sku_id, available_quantity=quantity, attribute_combinations=[dict(id='SIZE', value_name=size), dict(id='COLOR', value_name=color)])
+
+    def all_sizes(self):
+        self.criteria.update(require_all_skus_in_stock=True, sales_max=1, stock_min=0)
+
+    def test_all_sizes_optional_boolean_is_backward_compatible(self):
+        self.assertEqual(self.m.parse_criteria(self.criteria), self.criteria)
+        self.assertTrue(self.m.parse_criteria(dict(self.criteria, require_all_skus_in_stock=True))['require_all_skus_in_stock'])
+        self.criteria['require_all_skus_in_stock'] = False
+        self.assertFalse(self.m.parse_criteria(self.criteria)['require_all_skus_in_stock'])
+        self.assertEqual(len(self.evaluate()['matches']), 1)
+        for value in (1, 'true', None):
+            with self.assertRaises(ValueError): self.m.parse_criteria(dict(self.criteria, require_all_skus_in_stock=value))
+
+    def test_all_sizes_rejects_one_empty_sku_despite_large_total_stock(self):
+        self.all_sizes()
+        self.product['variations'] = [self.sized('s', 'S', 100), self.sized('m', 'M', 0)]
+        self.assertEqual(self.evaluate()['matches'], [])
+        self.assertEqual(self.evaluate()['unknown'], [])
+        self.product['variations'][1]['available_quantity'] = 2
+        match = self.evaluate()['matches'][0]
+        self.assertEqual(match['sku_size_evidence'][1]['size']['value_name'], 'M')
+        self.assertEqual(match['sku_size_evidence'][1]['available_quantity'], 2)
+
+    def test_all_sizes_missing_size_or_stock_is_unknown(self):
+        self.all_sizes()
+        for sku in (dict(id='s', available_quantity=10), self.sized('s', 'M', None), self.sized('s', 'Unknown', 10)):
+            self.product['variations'] = [sku]
+            self.assertEqual(self.evaluate()['matches'], [])
+            self.assertEqual(len(self.evaluate()['unknown']), 1)
+
+    def test_all_sizes_checks_every_color_variant_and_product_sales_total(self):
+        self.all_sizes()
+        self.product['variations'] = [self.sized('black-s', 'S', 10), self.sized('red-s', 'S', 0, 'red')]
+        self.assertEqual(self.evaluate()['matches'], [])
+        self.product['variations'][1]['available_quantity'] = 1
+        self.assertEqual(len(self.evaluate(orders=[self.order(lines=[dict(item_id='MLM1', variation_id='black-s', quantity=1)])])['matches']), 1)
+        self.assertEqual(self.evaluate(orders=[self.order(lines=[dict(item_id='MLM1', variation_id='black-s', quantity=1), dict(item_id='MLM1', variation_id='red-s', quantity=1)])])['matches'], [])
+
+    def test_all_sizes_single_item_requires_explicit_one_size(self):
+        self.all_sizes()
+        self.product.update(variations=[], available_quantity=10)
+        self.assertEqual(len(self.evaluate()['unknown']), 1)
+        self.product['attributes'] = [dict(id='SIZE', value_name='M')]
+        self.assertEqual(len(self.evaluate()['unknown']), 1)
+        self.product['attributes'] = [dict(id='SIZE', value_name='Unitalla')]
+        match = self.evaluate()['matches'][0]
+        self.assertEqual(match['sku_size_evidence'][0]['size']['value_name'], 'Unitalla')
+
     def test_pages_complete_deduplicated_and_consistent(self):
         pages = {None: dict(rows=[dict(id='a')], next='c', total=2, snapshot='stable'), 'c': dict(rows=[dict(id='b')], next=None, total=2, snapshot='stable')}
         self.assertEqual(len(self.m.collect_pages(lambda c: pages[c])), 2)
@@ -36,6 +86,7 @@ class ScreeningTests(unittest.TestCase):
     def test_verified_provider_reads_complete_own_data(self):
         self.assertTrue(hasattr(self.m, 'collect_shop'), 'live provider contract missing')
         calls = []
+        self.product['attributes'] = [dict(id='SIZE', value_name='Unitalla')]
         def get(path, query=()):
             calls.append((path, dict(query)))
             if path.endswith('/items/search'):
@@ -49,6 +100,7 @@ class ScreeningTests(unittest.TestCase):
         products, orders, source = self.m.collect_shop(get, '9', self.criteria)
         self.assertEqual(self.evaluate(products, orders)['matches'][0]['sales_units'], 2)
         self.assertTrue(source['orders_complete'])
+        self.assertEqual(products[0]['attributes'], self.product['attributes'])
         self.assertEqual([q for p,q in calls if p.endswith('/orders/search')][0]['date_created.from'], self.criteria['start'])
 
     def test_live_provider_rejects_stock_detail_drift(self):

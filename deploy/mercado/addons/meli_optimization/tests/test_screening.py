@@ -32,6 +32,19 @@ class ScreeningCase(TransactionCase):
         with self.assertRaises(ValidationError):
             self.ui.screening_preview(self.shop.id, 'stable-request', dict(self.criteria, sales_max=3))
 
+    def test_all_sizes_criteria_and_evidence_persisted(self):
+        self.criteria.update(require_all_skus_in_stock=True, sales_max=1, stock_min=0)
+        preview = self.preview()
+        self.assertIn('every listed SKU', preview['semantics'])
+        def collect(*args):
+            return ([dict(id='MLM1', seller_id='9', site_id='MLM', title='Dress', variations=[dict(id='small', available_quantity=2, attribute_combinations=[dict(id='SIZE', value_name='S')]), dict(id='medium', available_quantity=1, attribute_combinations=[dict(id='SIZE', value_name='M')])])], [], dict(orders_complete=True, provider='isolated-test'))
+        with patch.object(type(self.ui), '_screen_collect', collect):
+            outcome = self.ui.screening_execute(preview['id'], preview['digest'])
+        payload = self.ui.workbench_detail(outcome['case_ids'][0])['snapshot']['payload']
+        self.assertTrue(payload['screening_criteria']['require_all_skus_in_stock'])
+        self.assertEqual([row['size']['value_name'] for row in payload['sku_size_evidence']], ['S', 'M'])
+        self.assertEqual(payload['sales_units'], 0)
+
     def test_atomic_batch_rollback(self):
         preview = self.preview()
         count = self.env['meli.optimization.batch'].search_count([])

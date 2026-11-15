@@ -34,3 +34,11 @@
 ### Task 3: OpenClaw interface
 - [x] Add MCP route tests RED; register strict preview/execute/history tools and rerun GREEN.
 - [x] Record exact commands, results and integration limitations in .superpowers/sdd/auto-screen/report.md; commit scoped files.
+
+### Follow-up: All listed sizes in stock
+
+- [x] Add optional boolean `require_all_skus_in_stock`, retaining existing input/digest behavior when omitted.
+- [x] RED tests: mixed stocked/out-of-stock sizes; missing size metadata/unknown stock; no-variation items require explicit one-size; colors sharing a size must each have stock; product-level aggregate sales <2 is `sales_max=1`.
+- [x] GREEN: verify each listed SKU has known positive stock and a supported SIZE attribute, preserve per-SKU size evidence. Reject missing or contradictory size metadata as unknown. Do not infer an unlisted intended size range.
+- [x] Preserve item-level attributes in the live provider and compare on both passes; update MCP optional boolean, preview semantics and documentation.
+- [x] Run pure/MCP/disposable Odoo tests, commit scoped files; parent handles review and live validation.

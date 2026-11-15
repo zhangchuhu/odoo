@@ -67,8 +67,9 @@ test('screening tools expose structured preview then execute without confirmatio
  const f=await fixture(t),c=await f.connect(tA);
  const tools=(await c.listTools()).tools.map(t=>t.name);
  for(const name of ['optimization_screen_preview','optimization_screen_execute','optimization_screen_history'])assert.ok(tools.includes(name),name);
- await c.callTool({name:'optimization_screen_preview',arguments:{shop_id:42,request_key:'stable',criteria:{site_id:'MLM',timezone:'America/Mexico_City',start:'2026-11-01T00:00:00-06:00',end:'2026-11-08T00:00:00-06:00',sales_max:2,stock_min:10,sales_policy:'paid_gross_units'}}});
+ await c.callTool({name:'optimization_screen_preview',arguments:{shop_id:42,request_key:'stable',criteria:{site_id:'MLM',timezone:'America/Mexico_City',start:'2026-11-01T00:00:00-06:00',end:'2026-11-08T00:00:00-06:00',sales_max:2,stock_min:10,sales_policy:'paid_gross_units',require_all_skus_in_stock:true}}});
  assert.equal(f.calls.at(-1).path,'/api/meli/optimization/screening/preview');
+ assert.equal(JSON.parse(f.calls.at(-1).body).criteria.require_all_skus_in_stock,true);
  assert.equal(f.calls.at(-1).auth,'Bearer key-a');
  await c.callTool({name:'optimization_screen_execute',arguments:{preview_id:1,digest:'abc'}});
  assert.equal(f.calls.at(-1).path,'/api/meli/optimization/screening/1/execute');

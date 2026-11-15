@@ -67,7 +67,7 @@ class ScreeningWorkbench(models.Model):
             raise ValidationError('同一请求身份不可改变筛选条件，请使用新的 request_key')
         row = existing or model._append(dict(company_id=shop.company_id.id, shop_id=shop.id, seller_id=shop.marketplace_seller_id, request_key=request_key, criteria=criteria, digest=digest))
         return dict(id=row.id, digest=row.digest, shop_id=shop.id, company_id=shop.company_id.id, seller_id=row.seller_id, criteria=row.criteria,
-            semantics='sales_units <= sales_max AND sum(all SKU available_quantity) >= stock_min; paid orders created in [start,end); cancellations excluded, returns/refunds not deducted; unknown excluded',
+            semantics='sales_units <= sales_max AND sum(all SKU available_quantity) >= stock_min; paid orders created in [start,end); cancellations excluded, returns/refunds not deducted; unknown excluded' + ('; every listed SKU has verified SIZE and stock > 0; no variations requires explicit one-size; unlisted intended sizes are not inferred' if criteria.get('require_all_skus_in_stock') else ''),
             execute_tool='optimization_screen_execute', batch_id=row.batch_id.id or None)
 
     def _screen_collect(self, shop, criteria):

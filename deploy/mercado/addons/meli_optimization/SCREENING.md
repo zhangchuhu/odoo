@@ -17,3 +17,7 @@ Primary contracts checked 2026-11-15:
 - [Official CBT items and searches](https://global-selling.mercadolibre.com/devsite/en_us/pricing-reference/items-and-searches-global-selling)
 
 Live account acceptance remains separate from offline correctness tests. No platform request or production database mutation is part of the test runner.
+
+Optional `criteria.require_all_skus_in_stock: true` adds the “no broken sizes” check. Every listed variation must have explicit platform `SIZE` evidence and known available_quantity > 0. Each color/size SKU is checked separately, so one stocked black S cannot compensate for a zero-stock red S. Missing/contradictory SIZE metadata or unknown stock excludes the product as unknown. Items without variations require an explicit recognized one-size SIZE attribute (such as Unitalla or One Size). Matched snapshots preserve `sku_size_evidence` with each SKU identity, SIZE value/ID and quantity, in addition to original attributes/variations. Both detail passes include item attributes. This verifies listed variants; it does not infer an unlisted intended size range. Omitted/false retains previous behavior.
+
+For “last 7 days sales < 2 and no broken sizes”, use explicit offset-aware site-local start/end spanning the requested seven days, `sales_max: 1` (strictly below two), `require_all_skus_in_stock: true`, and the explicitly requested total stock floor. If no total-stock floor is requested, `stock_min: 0` adds no extra floor; positive inventory of every SKU is still required by the size check.

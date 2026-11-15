@@ -16,8 +16,10 @@ def timestamp(value):
 
 def parse_criteria(data):
     required = {'site_id', 'timezone', 'start', 'end', 'sales_max', 'stock_min', 'sales_policy'}
-    if not isinstance(data, dict) or set(data) != required:
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {'require_all_skus_in_stock'}:
         raise ValueError('Explicit site, timezone, start/end, sales_max, stock_min and sales_policy required')
+    if 'require_all_skus_in_stock' in data and type(data['require_all_skus_in_stock']) is not bool:
+        raise ValueError('require_all_skus_in_stock must be boolean')
     if data['timezone'] != SITE_ZONES.get(data['site_id']) or data['sales_policy'] != 'paid_gross_units':
         raise ValueError('Unsupported site timezone or sales policy')
     for key in ('sales_max', 'stock_min'):
@@ -61,6 +63,33 @@ def collect_pages(fetch):
     raise ValueError('Pagination budget exceeded; completeness unknown')
 
 
+def sku_size(sku, one_size=False):
+    """Return explicit platform SIZE evidence; never infer size from title/SKU text."""
+    attributes = []
+    for field in ('attribute_combinations', 'attributes'):
+        values = sku.get(field, [])
+        if not isinstance(values, list) or any(not isinstance(v, dict) for v in values):
+            return None
+        attributes.extend(values)
+    sizes = []
+    placeholders = {'unknown', 'desconocido', 'none', 'null', 'n/a', '-', 'no aplica', 'not applicable'}
+    for value in attributes:
+        if value.get('id') != 'SIZE':
+            continue
+        name = value.get('value_name')
+        name = name.strip() if isinstance(name, str) else ''
+        identifier = value.get('value_id')
+        identifier = str(identifier) if type(identifier) in (str, int) and str(identifier).isdigit() and int(identifier) > 0 else ''
+        if name.casefold() in placeholders or not (name or identifier):
+            return None
+        if one_size and name.casefold() not in {'one size', 'onesize', 'talla única', 'talla unica', 'unitalla', 'único', 'única', 'unica', 'tamanho único', '均码'}:
+            return None
+        evidence = {'attribute_id': 'SIZE', 'value_id': identifier or None, 'value_name': name or None}
+        if evidence not in sizes:
+            sizes.append(evidence)
+    return sizes[0] if len(sizes) == 1 else None
+
+
 def screen_products(products, orders, criteria, seller_id, orders_complete):
     criteria = parse_criteria(criteria)
     if orders_complete is not True:
@@ -101,9 +130,24 @@ def screen_products(products, orders, criteria, seller_id, orders_complete):
         if item in unknown_sales or any(type(q) is not int or q < 0 for q in quantities) or len(sku_ids) != len(set(sku_ids)) or (variations and any(s.get('id') is None for s in skus)):
             unknown.append({'item_id': item, 'reason': 'sales_or_sku_stock_unknown'})
             continue
+        size_evidence = []
+        if criteria.get('require_all_skus_in_stock'):
+            for sku in skus:
+                size = sku_size(sku, one_size=not variations)
+                if size is None:
+                    break
+                size_evidence.append({'sku_id': str(sku['id']), 'size': size, 'available_quantity': sku['available_quantity']})
+            if len(size_evidence) != len(skus):
+                unknown.append({'item_id': item, 'reason': 'sku_size_unknown'})
+                continue
+            if any(q == 0 for q in quantities):
+                continue
         units, stock = sales.get(item, 0), sum(quantities)
         if units <= criteria['sales_max'] and stock >= criteria['stock_min']:
-            matches.append(dict(product, sales_units=units, available_quantity=stock))
+            match = dict(product, sales_units=units, available_quantity=stock)
+            if criteria.get('require_all_skus_in_stock'):
+                match['sku_size_evidence'] = size_evidence
+            matches.append(match)
     return {'matches': matches, 'unknown': unknown, 'evaluated': len(products)}
 
 
@@ -172,7 +216,7 @@ def collect_shop(get, seller_id, criteria):
             if product.get('id') != item or product.get('site_id') != criteria['site_id'] or str(product.get('seller_id')) != str(seller_id):
                 raise ValueError('Product ownership mismatch')
             # Keep only fields needed by the immutable snapshot; never persist buyer data.
-            products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'thumbnail', 'seller_custom_field')})
+            products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'attributes', 'thumbnail', 'seller_custom_field')})
         return products
     products = read_products()
     orders = read_orders()
