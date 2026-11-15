@@ -40,7 +40,7 @@ class ScreeningTests(unittest.TestCase):
             calls.append((path, dict(query)))
             if path.endswith('/items/search'):
                 return dict(seller_id='9', results=['MLM1'], paging=dict(total=1, limit=50, offset=0))
-            if path == '/items/MLM1': return self.product
+            if path == '/marketplace/items/MLM1': return self.product
             if path.endswith('/orders/search'):
                 return dict(results=[dict(id='pack', orders=[dict(id='11')])], paging=dict(total=1, limit=50))
             if path.endswith('/orders/11'):
@@ -50,6 +50,21 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(self.evaluate(products, orders)['matches'][0]['sales_units'], 2)
         self.assertTrue(source['orders_complete'])
         self.assertEqual([q for p,q in calls if p.endswith('/orders/search')][0]['date_created.from'], self.criteria['start'])
+
+    def test_live_provider_rejects_stock_detail_drift(self):
+        detail_calls = []
+        def get(path, query=()):
+            if path.endswith('/items/search'):
+                return dict(seller_id='9', results=['MLM1'], paging=dict(total=1, limit=50, offset=0))
+            if path.endswith('/orders/search'):
+                return dict(results=[], paging=dict(total=0, limit=50))
+            if path == '/marketplace/items/MLM1':
+                detail_calls.append(path)
+                return dict(id='MLM1', seller_id='9', site_id='MLM', title='Dress', variations=[dict(id='v1', available_quantity=20 + len(detail_calls))])
+            raise AssertionError(path)
+        with self.assertRaisesRegex(ValueError, 'changed'):
+            self.m.collect_shop(get, '9', self.criteria)
+        self.assertEqual(len(detail_calls), 2)
 
     def test_live_provider_refuses_unknown_and_unsupported_pagination(self):
         for paging in ({}, {'total': 1001, 'limit': 50}, {'total': 1, 'limit': 50}):

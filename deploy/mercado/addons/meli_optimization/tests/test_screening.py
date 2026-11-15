@@ -47,6 +47,14 @@ class ScreeningCase(TransactionCase):
         worker = self.env['res.users'].create({'name': 'Worker', 'login': 'screen-worker', 'company_id': company.id, 'company_ids': [(6, 0, company.ids)], 'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id, self.env.ref('meli_bff.group_reader').id])]})
         with self.assertRaises(AccessError): self.ui.with_user(worker).with_context(allowed_company_ids=company.ids).screening_execute(preview['id'], preview['digest'])
 
+    def test_live_provider_rejects_wrong_parent_token_before_search(self):
+        from types import SimpleNamespace
+        from ..models import screening
+        with patch.object(type(self.shop), '_token', return_value='isolated-token'), patch.object(screening.transport, 'send', return_value=SimpleNamespace(status=200, json=lambda: {'id': 'wrong'})) as send:
+            with self.assertRaises(ValidationError):
+                self.ui._screen_collect(self.shop, self.criteria)
+            self.assertEqual(send.call_args.args[1], '/users/me')
+
     def test_case_shop_link_cannot_cross_company(self):
         company = self.env['res.company'].create({'name': 'Foreign screening shop'})
         shop = self.env['meli.independent.store'].create({'name': 'Foreign', 'company_id': company.id})

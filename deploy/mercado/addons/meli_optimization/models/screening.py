@@ -43,7 +43,7 @@ class ScreeningWorkbench(models.Model):
     def _screen_shop(self, shop_id):
         self._authorize()
         shop = authorize(self.env, Operation('shop', 'GET', int(shop_id)))
-        if not re.fullmatch(r'[1-9][0-9]{0,19}', shop.marketplace_seller_id or ''):
+        if not all(re.fullmatch(r'[1-9][0-9]{0,19}', value or '') for value in (shop.seller_id, shop.marketplace_seller_id)):
             raise ValidationError('店铺缺少已验证的站点 Seller ID')
         return shop
 
@@ -79,6 +79,17 @@ class ScreeningWorkbench(models.Model):
                 response.close()
                 raise ValidationError(f'店铺完整数据不可用 (HTTP {status})；未创建优化批次，请核验账户接口权限')
             return response.json()
+        identity = get('/users/me')
+        if str(identity.get('id')) != shop.seller_id:
+            raise ValidationError('授权令牌与店铺主 Seller 不匹配；未采集商品或创建批次')
+        mapping = get('/marketplace/users/' + shop.seller_id)
+        markets = mapping.get('marketplaces')
+        if str(mapping.get('user_id')) != shop.seller_id or not isinstance(markets, list):
+            raise ValidationError('无法验证店铺主账户与站点映射')
+        matches = [m for m in markets if isinstance(m, dict) and str(m.get('user_id')) == shop.marketplace_seller_id
+            and m.get('site_id') == shop.site and (not shop.logistic_type or m.get('logistic_type') == shop.logistic_type)]
+        if len(matches) != 1:
+            raise ValidationError('站点 Seller、站点或物流映射已改变，请重新授权店铺')
         return collect_shop(get, shop.marketplace_seller_id, criteria)
 
     @api.model

@@ -162,18 +162,21 @@ def collect_shop(get, seller_id, criteria):
                 orders.append(dict(id=oid, seller_id=str(seller_id), site_id=criteria['site_id'], date_created=raw.get('date_created'), status=raw.get('status'), lines_complete=True, lines=lines))
         return orders
     identities = paged(product_path, [], True)
-    products = []
-    for ref in identities:
-        item = ref['id']
-        if not isinstance(item, str) or not re.fullmatch(criteria['site_id'] + r'[0-9]+', item):
-            raise ValueError('Search returned non-site item; marketplace seller mapping unsupported')
-        product = get('/items/' + item)
-        if product.get('id') != item or product.get('site_id') != criteria['site_id'] or str(product.get('seller_id')) != str(seller_id):
-            raise ValueError('Product ownership mismatch')
-        # Keep only fields needed by the immutable snapshot; never persist buyer data.
-        products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'thumbnail', 'seller_custom_field')})
+    def read_products():
+        products = []
+        for ref in identities:
+            item = ref['id']
+            if not isinstance(item, str) or not re.fullmatch(criteria['site_id'] + r'[0-9]+', item):
+                raise ValueError('Search returned non-site item; marketplace seller mapping unsupported')
+            product = get('/marketplace/items/' + item)
+            if product.get('id') != item or product.get('site_id') != criteria['site_id'] or str(product.get('seller_id')) != str(seller_id):
+                raise ValueError('Product ownership mismatch')
+            # Keep only fields needed by the immutable snapshot; never persist buyer data.
+            products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'thumbnail', 'seller_custom_field')})
+        return products
+    products = read_products()
     orders = read_orders()
-    if orders != read_orders() or identities != paged(product_path, [], True):
+    if orders != read_orders() or identities != paged(product_path, [], True) or products != read_products():
         raise ValueError('Shop changed during collection; retry a fresh observation')
     digest = hashlib.sha256(json.dumps(orders, sort_keys=True).encode()).hexdigest()
     return products, orders, dict(orders_complete=True, provider='mercadolibre-cbt-v1', order_count=len(orders), orders_digest=digest, pagination='offset-total-two-pass', consistency='two-pass-observation-not-atomic-platform-snapshot')
