@@ -15,7 +15,7 @@ export class OptimizationWorkbench extends Component {
         this.notification = useService('notification');
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
             batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, taskType: 'product.facts',
-            taskValues: {}, selections: {}, preview: null });
+            taskValues: {}, selections: {}, preview: null, collections: [], library: [], librarySelection: null, libraryIndices: [], garmentArtifact: '', libraryQuery: '', librarySite: '' });
         this.tabs = [['snapshot','商品快照'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
             ['gallery','目标图库'],['images','图片与质检'],['proposals','变更确认'],['activity','活动与广告'],['effects','效果观察'],['audit','审计记录']];
         this.taskLabels = {'product.facts':'整理商品事实','research.keywords':'关键词研究','research.bestseller':'爆款研究',
@@ -49,6 +49,8 @@ export class OptimizationWorkbench extends Component {
     }
     async load() {
         this.state.data = await this.rpc('workbench_overview', [this.state.query,this.state.page,this.state.batch || false,this.state.status,this.state.shop,this.state.site]);
+        if (this.state.section === 'collections') this.state.collections = await this.rpc('workbench_collections', []);
+        if (this.state.section === 'library') await this.loadLibrary();
         if (this.state.detail) {
             this.state.detail = await this.rpc('workbench_detail',[this.state.detail.id]);
             this.state.selections = {}; this.state.preview = null;
@@ -59,7 +61,7 @@ export class OptimizationWorkbench extends Component {
     back() { this.navigationVersion++; this.state.detail=null; this.state.preview=null; this.state.modal=''; }
     async open(id) {
         this.navigationVersion++;
-        return this.perform(async () => { this.state.detail = await this.rpc('workbench_detail',[id]); this.state.tab='snapshot'; this.state.selections={}; this.state.preview=null; });
+        return this.perform(async () => { this.state.detail = await this.rpc('workbench_detail',[id]); this.state.tab=this.state.detail.collection ? 'tasks' : 'snapshot'; this.state.selections={}; this.state.preview=null; });
     }
     async navigate(section) { this.back(); this.state.section=section; this.state.status=''; this.state.page=0; return this.refresh(); }
     async page(delta) { this.state.page += delta; return this.refresh(); }
@@ -72,6 +74,44 @@ export class OptimizationWorkbench extends Component {
             this.state.detail = await this.rpc(this.state.modal === 'create' ? 'workbench_create' : 'workbench_snapshot', this.state.modal === 'create' ? [form] : [this.state.detail.id, form]);
             this.state.modal=''; this.state.tab='snapshot'; await this.load();
         }, '商品快照已保存');
+    }
+    collectionForm() { this.state.form={name:'',garment:'',source_url:'',site_id:'MLM'}; this.state.modal='collection'; }
+    async readGarment(event) {
+        this.state.form.image_data='';
+        const file=event.target.files[0]; if (!file) return;
+        if(file.size > 8*1024*1024) { this.state.error='图片不得超过 8 MiB'; return; }
+        const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});
+        this.state.form.image_data=data;this.state.form.image_mime=file.type;
+    }
+    async saveCollection() {
+        await this.perform(async()=>{
+            this.state.detail=await this.rpc('workbench_collection_create',[{...this.state.form}]);
+            this.state.modal='';this.state.tab='tasks';await this.load();
+        }, '独立采集已建立；外部研究由具备能力的 Worker 执行');
+    }
+    async loadLibrary() { this.state.library=(await this.rpc('workbench_library',[this.state.libraryQuery,this.state.librarySite])).rows; }
+    async filterLibrary() { return this.perform(()=>this.loadLibrary()); }
+    async importGallery(task) {
+        return this.perform(async()=>{await this.rpc('workbench_library_import',[this.state.detail.id,task.id,task.result_hash]);}, '已验证图片已保存到公司图库');
+    }
+    libraryImage(image) { return `/web/image/meli.optimization.artifact/${image.artifact_id}/data`; }
+    async selectLibrary() {
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        return this.perform(async()=>{await this.loadLibrary();if(!this.contextMatches(context)) return;this.state.librarySelection=null;this.state.libraryIndices=[];this.state.garmentArtifact='';this.state.modal='library-select';});
+    }
+    chooseLibrary(entry) { this.state.librarySelection=entry;this.state.libraryIndices=[]; }
+    toggleLibrary(index) { const list=this.state.libraryIndices;this.state.libraryIndices=list.includes(index)?list.filter(i=>i!==index):[...list,index]; }
+    get garmentArtifacts() { return (this.state.detail?.artifacts || []).filter(a=>a.mime_type?.startsWith('image/') && !a.library_origin_id); }
+    async uploadGarment(event) {
+        await this.readGarment(event);
+        if (!this.state.form.image_data) return;
+        await this.perform(async()=>{const id=await this.rpc('workbench_upload_garment',[this.state.detail.id,this.state.form.image_data,this.state.form.image_mime]);await this.load();this.state.garmentArtifact=String(id);},'服装参考图已归档');
+    }
+    async saveLibrarySelection() {
+        return this.perform(async()=>{
+            await this.rpc('workbench_library_generate',[this.state.detail.id,this.state.librarySelection.id,[...this.state.libraryIndices],[Number(this.state.garmentArtifact)]]);
+            this.state.modal='';this.state.tab='tasks';await this.load();
+        }, '所选目标图已冻结计划并逐图加入队列');
     }
     taskForm() { this.state.taskType='product.facts'; this.state.taskValues={site_id:'MLM',language:'es-MX'}; this.state.modal='task'; }
     get taskFields() { return this.state.data?.task_inputs[this.state.taskType] || []; }

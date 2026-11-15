@@ -33,7 +33,7 @@ class OperationsWorkbench(models.Model):
     def workbench_overview(self, query='', page=0, batch_id=False, state='', shop='', site=''):
         self._authorize('worker')
         page = max(0, int(page))
-        domain = []
+        domain = [('collection', '=', False)]
         query = str(query or '').strip()[:200].casefold()
         if batch_id:
             domain += [('batch_id', '=', int(batch_id))]
@@ -53,15 +53,17 @@ class OperationsWorkbench(models.Model):
                 'batch': case.batch_id.name, 'batch_id': case.batch_id.id, 'product': payload,
                 'tasks': len(tasks), 'waiting': len(tasks.filtered(lambda t: t.state == 'waiting')),
                 'failed': len(tasks.filtered(lambda t: t.state == 'failed'))})
+        collection_batches = self.search([('collection', '=', True)]).mapped('batch_id').ids
+        batches = self.env[PREFIX + 'batch'].search([('id', 'not in', collection_batches)], order='id desc')
         task_model = self.env[PREFIX + 'task']
         proposals = self.env[PREFIX + 'proposal'].search([])
         confirmed = self.env[PREFIX + 'confirmation'].search([]).mapped('proposal_id')
         return {'rows': rows[page * 20:(page + 1) * 20], 'total': len(rows), 'page': page,
-            'counts': {'cases': self.search_count([]), 'batches': self.env[PREFIX + 'batch'].search_count([]),
+            'counts': {'cases': self.search_count([('collection', '=', False)]), 'batches': len(batches),
                 'waiting': task_model.search_count([('state', '=', 'waiting')]),
                 'failed': task_model.search_count([('state', '=', 'failed')]),
                 'pending': len(proposals - confirmed)},
-            'batches': self.env[PREFIX + 'batch'].search_read([], ['name'], order='id desc'),
+            'batches': batches.read(['name']),
             'shops': sorted({str(r['product'].get('shop')) for r in rows if r['product'].get('shop')}),
             'company': self.env.company.display_name,
             'can_edit': self.env.su or self.env.user.has_group('meli_optimization.group_editor'),
@@ -75,11 +77,11 @@ class OperationsWorkbench(models.Model):
         proposals = self.env[PREFIX + 'proposal'].search([('case_id', '=', case.id)], order='id desc')
         confirmations = self.env[PREFIX + 'confirmation'].search([('proposal_id', 'in', proposals.ids)])
         return {'id': case.id, 'name': case.name, 'revision': case.revision, 'batch': case.batch_id.name,
-            'snapshot': {'id': snap.id, 'payload': snap.payload, 'digest': snap.digest} if snap else None,
+            'collection': case.collection, 'snapshot': {'id': snap.id, 'payload': snap.payload, 'digest': snap.digest} if snap else None,
             'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state,
                 'snapshot_id': t.snapshot_id.id, 'result': t.result,
                 'result_hash': canonical_hash(t.result), 'status_detail': t.status_detail} for t in tasks],
-            'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload', 'result_task_id', 'result_snapshot_id', 'result_hash']),
+            'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload', 'result_task_id', 'result_snapshot_id', 'result_hash', 'library_origin_id', 'library_artifact_id']),
             'proposals': [{'id': p.id, 'digest': p.digest, 'payload': p.payload,
                 'current': p.input_revision == case.revision,
                 'confirmed': p in confirmations.mapped('proposal_id')} for p in proposals],

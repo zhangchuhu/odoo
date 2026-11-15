@@ -44,3 +44,17 @@
   @media(max-width:1100px){.mw-sidebar{width:180px;}.mw-main{padding:20px;}.mw-scope span:last-child{display:none;}.mw-stats{gap:9px;}.mw-stat{padding:16px;}.mw-topbar{padding:0 20px;gap:10px;}}
   @media(max-width:760px){.mw-sidebar{width:65px;padding:18px 5px;}.mw-brand{padding:0 5px 20px;>span:last-child{display:none;}}.mw-nav-caption,.mw-sidebar-note{display:none;}.mw-sidebar button{overflow:hidden;white-space:nowrap;width:55px;padding:13px 17px;i{width:30px;}}.mw-scope{display:none;}.mw-topbar{justify-content:space-between;}.mw-main{padding:15px;}.mw-stats{grid-template-columns:repeat(2,minmax(0,1fr));}.mw-heading{align-items:flex-start;flex-wrap:wrap;h1{font-size:20px;}}.mw-snapshot{flex-direction:column;}.mw-form,.mw-diff{grid-template-columns:1fr;}.mw-task{flex-wrap:wrap;}.mw-modal-backdrop{padding:12px;}}
 }
+
+.meli-workbench .mw-library-dialog {
+    padding: 22px;
+    overflow-wrap: anywhere;
+    > label { display: block; margin: 16px 0; color: #7a889e; }
+    input, select { box-sizing: border-box; max-width: 100%; border: 1px solid #dce2eb; border-radius: 4px; padding: 8px; }
+    > label input, > label select { display: block; width: 100%; margin-top: 8px; }
+    .mw-candidates { margin: 16px 0; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); }
+    .mw-candidate { min-width: 0; }
+    .mw-candidate small { display: block; overflow-wrap: anywhere; margin-top: 8px; }
+    .mw-actions { flex-wrap: wrap; margin: 16px 0; }
+    .mw-note { margin: 16px 0; }
+}
+.meli-workbench .mw-collection-source { margin-bottom: 18px; > p, > a, > .mw-actions { margin: 18px 23px; } }

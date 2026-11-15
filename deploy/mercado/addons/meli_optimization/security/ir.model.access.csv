@@ -19,3 +19,5 @@ access_proposal_editor,proposal editor,model_meli_optimization_proposal,group_ed
 access_proposal_worker,proposal worker,model_meli_optimization_proposal,group_worker,1,1,1,0
 access_confirmation_editor,confirmation editor,model_meli_optimization_confirmation,group_editor,1,1,1,0
 access_confirmation_worker,confirmation worker,model_meli_optimization_confirmation,group_worker,1,1,1,0
+access_library_editor,library editor,model_meli_optimization_library,group_editor,1,1,1,0
+access_library_worker,library worker,model_meli_optimization_library,group_worker,1,1,1,0

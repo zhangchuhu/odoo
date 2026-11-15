@@ -412,3 +412,16 @@ class WorkerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class SourceImageContextCase(unittest.TestCase):
+    def test_prepare_loads_standalone_source_image_into_verified_context(self):
+        from optimization_worker.handlers import prepare
+        # Narrow in-memory transport fixture: actual handler behavior is under test.
+        class Transport:
+            def snapshot(self, ref):
+                return {'payload': {'source_image_artifact_ids': [99]}}
+            def artifact(self, ref):
+                return {'artifact_id': int(ref), 'digest': 'verified', 'data': 'test-only'}
+        context = prepare(Transport(), {'task_type': 'product.facts', 'snapshot_id': 1,
+            'payload': {'schema_version': '1', 'product_snapshot_id': '1'}})
+        self.assertEqual(context['artifacts']['99']['artifact_id'], 99)

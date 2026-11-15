@@ -11,4 +11,5 @@
 <record id="rule_artifact" model="ir.rule"><field name="name">Optimization company: artifact</field><field name="model_id" ref="model_meli_optimization_artifact"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 <record id="rule_proposal" model="ir.rule"><field name="name">Optimization company: proposal</field><field name="model_id" ref="model_meli_optimization_proposal"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 <record id="rule_confirmation" model="ir.rule"><field name="name">Optimization company: confirmation</field><field name="model_id" ref="model_meli_optimization_confirmation"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_library" model="ir.rule"><field name="name">Optimization company: library</field><field name="model_id" ref="model_meli_optimization_library"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 </odoo>

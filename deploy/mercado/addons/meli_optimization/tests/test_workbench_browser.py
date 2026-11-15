@@ -44,6 +44,7 @@ class WorkbenchBrowserCase(HttpCase):
                     const wait = async (fn) => { for(let i=0;i<150;i++){const v=fn();if(v)return v;await new Promise(r=>setTimeout(r,100));}throw Error('UI timeout'); };
                     const button = (text) => [...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(text));
                     await wait(()=>document.querySelector('.mw-table .mw-link'));
+                    if(getComputedStyle(document.querySelector('.mw-sidebar')).backgroundColor !== 'rgb(23, 34, 56)')throw Error('Native navy styles failed to compile');
                     document.querySelector('.mw-table .mw-link').click();
                     await wait(()=>button('标题候选')); button('标题候选').click();
                     await wait(()=>document.querySelector('.mw-choice input'));
@@ -97,6 +98,54 @@ class WorkbenchBrowserCase(HttpCase):
                     set(selects[2],keywordArtifact,'change');button('加入执行队列').click();
                     await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('.mw-task')?.textContent.includes('生成标题候选'));
                     console.log('workbench-shot-fresh-chain');await new Promise(r=>setTimeout(r,300));
+                    // Independent research flow. Synthetic image/evidence is test-only.
+                    button('独立爆款采集').click();await wait(()=>button('新建独立采集'));button('新建独立采集').click();
+                    await wait(()=>document.querySelector('.mw-form input'));
+                    let collectionInputs=document.querySelectorAll('.mw-form input');
+                    set(collectionInputs[0],'TEST ONLY standalone collection');set(collectionInputs[1],'Test-only dress reference');
+                    set(collectionInputs[2],'https://example.test/garment');
+                    console.log('workbench-shot-independent-form');await new Promise(r=>setTimeout(r,300));
+                    button('创建独立采集任务').click();
+                    await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('h1')?.textContent.includes('TEST ONLY standalone'));
+                    const collections=await rpc('meli.optimization.case','workbench_collections',[]);
+                    const collection=collections.find(c=>c.name==='TEST ONLY standalone collection');
+                    if(!collection)throw Error('Standalone collection not persisted');
+                    const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC';
+                    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(atob(png),c=>c.charCodeAt(0))))).map(x=>x.toString(16).padStart(2,'0')).join('');
+                    const archived=await rpc('meli.optimization.artifact','create',[[{case_id:collection.id,data:png,mime_type:'image/png',digest}]]);
+                    const archivedId=Array.isArray(archived)?archived[0]:archived;
+                    const galleryId=await rpc('meli.optimization.case','workbench_task',[collection.id,'gallery.collect',{reference_item_id:'TEST-LIBRARY-REF',selected_variant:{seller_sku:'TEST-ONLY-SKU'}}]);
+                    const claim=await rpc('meli.optimization.task','claim',[[galleryId],['gallery.collect']]);
+                    await rpc('meli.optimization.task','complete',[[galleryId],claim.lease_token,claim.lease_epoch,'test-gallery-browser',{
+                        schema_version:'1',evidence:[{id:'fixture',source:'https://example.test/fixture',observed_at:'2026-11-15T00:00:00Z'}],
+                        reference_item_id:'TEST-LIBRARY-REF',selected_variant:{seller_sku:'TEST-ONLY-SKU'},observed_at:'2026-11-15T00:00:00Z',
+                        gallery_manifest_hash:'a'.repeat(64),completeness_status:'complete',images:[{image_id:'TEST ONLY IMAGE',order:0,role:'front',artifact_id:String(archivedId),source:'https://example.test/fixture',evidence_ids:['fixture'],mime_type:'image/png',width:1,height:1,sha256:digest}]}]);
+                    button('刷新').click();await wait(()=>!document.querySelector('.mw-loading'));button('目标图库').click();
+                    await wait(()=>button('保存已验证图片到公司图库'));button('保存已验证图片到公司图库').click();
+                    await wait(()=>[...document.querySelectorAll('.o_notification_content')].some(n=>n.textContent.includes('已验证图片已保存')));button('公司图片库').click();
+                    await wait(()=>document.querySelector('.mw-candidate')?.textContent.includes('TEST-LIBRARY-REF'));
+                    document.querySelectorAll('.o_notification_close').forEach(el=>el.click());
+                    console.log('workbench-shot-persistent-library');await new Promise(r=>setTimeout(r,300));
+                    button('查看图片与来源').click();await wait(()=>document.querySelector('.mw-library-dialog'));
+                    if(!document.querySelector('.mw-library-dialog').textContent.includes('TEST-ONLY-SKU'))throw Error('Library provenance missing');
+                    document.querySelector('[aria-label="关闭对话框"]').click();
+                    const garment=await rpc('meli.optimization.case','workbench_upload_garment',[caseId,png,'image/png']);
+                    button('商品优化').click();await wait(()=>document.querySelector('.mw-table .mw-link'));
+                    [...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes('FRESH-CHAIN')).querySelector('.mw-link').click();
+                    await wait(()=>button('图片与质检'));button('图片与质检').click();await wait(()=>button('从公司图库选择换装目标'));button('从公司图库选择换装目标').click();
+                    await wait(()=>button('TEST-LIBRARY-REF'));button('TEST-LIBRARY-REF').click();
+                    await wait(()=>document.querySelector('.mw-library-dialog .mw-choice input'));document.querySelector('.mw-library-dialog .mw-choice input').click();
+                    set(document.querySelector('.mw-library-dialog select'),String(garment),'change');
+                    document.querySelectorAll('.o_notification_close').forEach(el=>el.click());
+                    const dialog=document.querySelector('.mw-modal');dialog.scrollTop=dialog.scrollHeight;
+                    if(dialog.scrollWidth>dialog.clientWidth+1)throw Error('Library modal horizontal overflow');
+                    console.log('workbench-shot-cross-case-selection');await new Promise(r=>setTimeout(r,300));
+                    button('冻结计划并创建换装任务').click();
+                    await wait(()=>!document.querySelector('.mw-modal') && [...document.querySelectorAll('.mw-task')].some(t=>t.textContent.includes('逐图生成')));
+                    const swapped=await rpc('meli.optimization.task','search_read',[[['case_id','=',caseId],['task_type','=','image.generate']],['payload']]);
+                    if(swapped.length!==1)throw Error('Selected scope is not exactly one generation task');
+                    const plans=await rpc('meli.optimization.artifact','read',[[Number(swapped[0].payload.generation_plan_id)],['payload']]);
+                    if(plans[0].payload.target_count!==1 || plans[0].payload.case_id!==caseId)throw Error('Plan did not freeze destination and target count');
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=100)

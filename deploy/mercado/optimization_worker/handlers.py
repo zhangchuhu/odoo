@@ -18,6 +18,9 @@ def prepare(client, claim):
     if kind == 'product.facts' and payload['product_snapshot_id'] != str(claim['snapshot_id']):
         raise DomainError('invalid_input', 'Product snapshot does not match claim')
     context = {'snapshot': snapshot, 'artifacts': {}}
+    snapshot_payload = snapshot.get('payload')
+    for reference in (snapshot_payload.get('source_image_artifact_ids', []) if isinstance(snapshot_payload, dict) else []):
+        context['artifacts'][str(reference)] = client.artifact(str(reference))
     for name, value in payload.items():
         if name.endswith('_artifact_id') or name == 'generation_plan_id':
             context['artifacts'][value] = client.artifact(value)
