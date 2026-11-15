@@ -58,3 +58,21 @@
     .mw-note { margin: 16px 0; }
 }
 .meli-workbench .mw-collection-source { margin-bottom: 18px; > p, > a, > .mw-actions { margin: 18px 23px; } }
+
+.meli-workbench .mw-facts {
+    .mw-facts-meta { margin: 18px 23px; color: #607086; overflow-wrap: anywhere; }
+    .mw-facts-list { margin: 0 23px 23px; display: grid; grid-template-columns: repeat(auto-fit,minmax(270px,1fr)); gap: 14px; }
+    .mw-fact { min-width: 0; padding: 16px; border: 1px solid #e3e9f2; border-radius: 5px; overflow-wrap: anywhere; }
+    .mw-fact h3 { margin: 0 0 12px; font-size: 14px; }
+    .mw-fact dl { margin: 0; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 8px; font-size: 12px; }
+    .mw-fact dt { color: #718096; font-weight: 400; }
+    .mw-fact dd { margin: 0; white-space: pre-wrap; }
+    .mw-fact-evidence { border-top: 1px solid #edf0f5; margin-top: 14px; padding-top: 10px; font-size: 11px; color: #718096; }
+    .mw-fact-evidence span { display: block; margin-top: 4px; }
+    .mw-facts-uncertainties { margin: 20px 23px; padding: 16px 20px; background: #fff8eb; color: #805c26; }
+    .mw-facts-uncertainties h3 { margin: 0 0 10px; font-size: 14px; }
+    .mw-facts-uncertainties ul { margin: 0; padding-left: 18px; }
+    .mw-facts-history { border-top: 1px solid #e3e9f2; padding-top: 12px; }
+    .mw-facts-history .mw-facts-list { margin-left: 0; margin-right: 0; }
+    @media(max-width:760px) { .mw-facts-list { grid-template-columns: minmax(0,1fr); } }
+}

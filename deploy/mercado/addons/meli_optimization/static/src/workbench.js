@@ -2,7 +2,7 @@
 import { Component, onWillStart, useState, useEffect, onWillUnmount } from '@odoo/owl';
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
-import { candidateRows, displayValue, moveSelection } from './workbench_helpers';
+import { candidateRows, displayValue, moveSelection, productFactsView } from './workbench_helpers';
 
 export class OptimizationWorkbench extends Component {
     static template = 'meli_optimization.Workbench';
@@ -16,7 +16,7 @@ export class OptimizationWorkbench extends Component {
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
             batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, taskType: 'product.facts',
             taskValues: {}, selections: {}, preview: null, collections: [], library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', libraryQuery: '', librarySite: '' });
-        this.tabs = [['snapshot','商品快照'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
+        this.tabs = [['snapshot','商品快照'],['facts','商品事实'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
             ['gallery','目标图库'],['images','图片与质检'],['proposals','变更确认'],['activity','活动与广告'],['effects','效果观察'],['audit','审计记录']];
         this.taskLabels = {'product.facts':'整理商品事实','research.keywords':'关键词研究','research.bestseller':'爆款研究',
             'gallery.collect':'采集 SKU 图库','title.generate':'生成标题候选','image.generate':'逐图生成','image.qc':'图片质检'};
@@ -172,6 +172,7 @@ export class OptimizationWorkbench extends Component {
         const kinds={titles:['title.generate'],research:['research.bestseller','research.keywords'],gallery:['gallery.collect'],images:['image.generate','image.qc']};
         return (this.state.detail?.tasks || []).filter(t => (kinds[this.state.tab] || []).includes(t.task_type));
     }
+    get factsView() { return productFactsView(this.state.detail); }
     rows(result) { return candidateRows(result); }
     value(value) { return displayValue(value); }
     json(value) { return JSON.stringify(value,null,2); }

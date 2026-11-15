@@ -158,3 +158,65 @@ class WorkbenchBrowserCase(HttpCase):
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=100)
+
+    def test_screened_product_facts_tab(self):
+        """Exercises real screening -> completed result -> native facts tab."""
+        self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref(g).id) for g in ('meli_optimization.group_editor', 'meli_bff.group_reader', 'meli_oerp.group_mercadolibre_manager')]})
+        ui = self.env['meli.optimization.case'].with_user(self.env.ref('base.user_admin'))
+        shop = self.env['meli.independent.store'].create({'name': 'Facts browser fixture', 'seller_id': '8', 'marketplace_seller_id': '9', 'site': 'MLM'})
+        criteria = dict(site_id='MLM', timezone='America/Mexico_City', start='2026-11-01T00:00:00-06:00', end='2026-11-08T00:00:00-06:00', sales_max=1, stock_min=0, sales_policy='paid_gross_units', require_all_skus_in_stock=True)
+        preview = ui.screening_preview(shop.id, 'facts-browser', criteria)
+        def collect(*args):
+            return ([dict(id='FACTS-SCREENED', seller_id='9', site_id='MLM', title='<img src=x onerror="window.factsInjected=1">Observed dress', variations=[
+                dict(id='small', seller_custom_field='SKU-S', available_quantity=2, attribute_combinations=[dict(id='SIZE', value_name='S')]),
+                dict(id='medium', available_quantity=1, attribute_combinations=[dict(id='SIZE', value_name='M')])])], [], dict(orders_complete=True, provider='isolated-test'))
+        with patch.object(type(ui), '_screen_collect', collect):
+            screened = ui.screening_execute(preview['id'], preview['digest'])
+        current_id = screened['case_ids'][0]
+        empty = ui.workbench_create({'shop': 'Facts browser fixture', 'item_id': 'FACTS-EMPTY', 'title': 'No facts'})
+        # An older completed result is never shown under the current heading.
+        stale = ui.workbench_create({'shop': 'Facts browser fixture', 'item_id': 'FACTS-STALE', 'title': 'Old observation'})
+        task_id = ui.workbench_task(stale['id'], 'product.facts', {})
+        task = self.env['meli.optimization.task'].browse(task_id)
+        claim = task.claim(['product.facts'])
+        task.complete(claim['lease_token'], claim['lease_epoch'], 'stale-fixture', {'schema_version': '1',
+            'facts': [{'name': 'title', 'value': 'Old observation', 'evidence_ids': ['s']}],
+            'evidence': [{'id': 's', 'source': 'snapshot:old', 'observed_at': '2026-11-15T00:00:00Z'}], 'uncertainties': []})
+        ui.workbench_snapshot(stale['id'], {'shop': 'Facts browser fixture', 'item_id': 'FACTS-STALE', 'title': 'New snapshot'})
+        action_id = self.env.ref('meli_optimization.workbench_action').id
+        spawn = ChromeBrowser._spawn_chrome
+        def fixed_port_spawn(browser, cmd):
+            Path(browser.user_data_dir, 'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            return spawn(browser, cmd)
+        handle_console = ChromeBrowser._handle_console
+        def screenshots(browser, type, args=None, **kwargs):
+            handle_console(browser, type, args=args, **kwargs)
+            for arg in args or []:
+                value = arg.get('value')
+                if isinstance(value, str) and value.startswith('facts-shot-'):
+                    browser.take_screenshot(prefix=value.replace('-', '_') + '_')
+        with patch.object(ChromeBrowser, 'remote_debugging_port', 55441), patch.object(ChromeBrowser, '_spawn_chrome', fixed_port_spawn), patch.object(ChromeBrowser, '_handle_console', screenshots):
+            self.browser_js('/odoo/action-%s' % action_id, r"""
+                (async()=>{
+                    const wait=async(fn)=>{for(let i=0;i<120;i++){if(fn())return;await new Promise(r=>setTimeout(r,100));}throw Error('Facts UI timeout');};
+                    const button=text=>[...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.trim()===text);
+                    const open=async(id)=>{await wait(()=>document.querySelector('.mw-table'));const link=[...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes(id))?.querySelector('.mw-link');if(!link)throw Error('Fixture missing '+id);link.click();await wait(()=>document.querySelector('.mw-tabs'));if(!button('商品事实'))throw Error('Dedicated 商品事实 tab missing');button('商品事实').click();await wait(()=>document.querySelector('.mw-facts'));};
+                    await open('FACTS-SCREENED');
+                    const facts=document.querySelector('.mw-facts');
+                    if(!facts.querySelector('.mw-facts-current'))throw Error('Current facts absent');
+                    const text=facts.textContent;
+                    for(const expected of ['Observed dress','SKU / 尺码库存证据','S','M','snapshot:','采集时间','external truth has not been verified'])if(!text.includes(expected))throw Error('Missing fact detail '+expected);
+                    if(facts.querySelector('img') || window.factsInjected)throw Error('Fact text executed as HTML');
+                    if(text.includes('[object Object]') || facts.querySelector('pre'))throw Error('Facts must be structured, not raw JSON');
+                    console.log('facts-shot-screened');await new Promise(r=>setTimeout(r,350));
+                    button('返回列表').click();await open('FACTS-EMPTY');
+                    if(!document.querySelector('.mw-facts-empty') || document.querySelector('.mw-facts-current'))throw Error('No-facts case falsely displayed current facts');
+                    console.log('facts-shot-empty');await new Promise(r=>setTimeout(r,350));
+                    button('返回列表').click();await open('FACTS-STALE');
+                    if(!document.querySelector('.mw-facts-stale') || document.querySelector('.mw-facts-current'))throw Error('Stale facts presented as current');
+                    const history=document.querySelector('.mw-facts-history');history.open=true;
+                    await wait(()=>history.textContent.includes('Old observation'));
+                    console.log('facts-shot-stale');await new Promise(r=>setTimeout(r,350));
+                    console.log('test successful');
+                })().catch(e=>console.error(e));
+            """, login='admin', timeout=70)
