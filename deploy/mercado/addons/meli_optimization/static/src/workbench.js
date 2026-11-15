@@ -45,18 +45,51 @@ export class OptimizationWorkbench extends Component {
         this.state.loading = true; this.state.error = '';
         try { const result = await action(); if (message) this.notification.add(message, { type:'success' }); return result; }
         catch (error) { this.state.error = error.data?.message || error.message || '操作失败，请重试'; this.notification.add(this.state.error, { type:'danger' }); }
-        finally { this.state.loading = false; }
-    }
-    async load() {
-        this.state.data = await this.rpc('workbench_overview', [this.state.query,this.state.page,this.state.batch || false,this.state.status,this.state.shop,this.state.site]);
-        if (this.state.section === 'collections') this.state.collections = await this.rpc('workbench_collections', []);
-        if (this.state.section === 'library') await this.loadLibrary();
-        if (this.state.detail) {
-            this.state.detail = await this.rpc('workbench_detail',[this.state.detail.id]);
-            this.state.selections = {}; this.state.preview = null;
+        finally {
+            this.state.loading = false;
+            if (this.refreshPending) {
+                this.refreshPending = false;
+                const waiters = this.refreshWaiters || [];
+                this.refreshWaiters = [];
+                try { if (!this.disposed) await this.refresh(); }
+                finally { waiters.forEach(resolve => resolve()); }
+            }
         }
     }
-    async refresh() { return this.perform(() => this.load()); }
+    loadScope() {
+        return JSON.stringify([this.navigationVersion, this.state.query, this.state.page, this.state.batch,
+            this.state.status, this.state.shop, this.state.site, this.state.section, this.state.detail?.id || false]);
+    }
+    async load() {
+        const scope = this.loadScope();
+        const generation = this.loadGeneration = (this.loadGeneration || 0) + 1;
+        const current = () => !this.disposed && this.loadGeneration === generation && this.loadScope() === scope;
+        const section = this.state.section, detailId = this.state.detail?.id;
+        try {
+            const data = await this.rpc('workbench_overview', [this.state.query,this.state.page,this.state.batch || false,this.state.status,this.state.shop,this.state.site]);
+            if (!current()) return;
+            const collections = section === 'collections' ? await this.rpc('workbench_collections', []) : null;
+            const library = section === 'library' ? (await this.rpc('workbench_library',[this.state.libraryQuery,this.state.librarySite])).rows : null;
+            const detail = detailId ? await this.rpc('workbench_detail',[detailId]) : null;
+            if (!current()) return;
+            this.state.data = data;
+            if (collections) this.state.collections = collections;
+            if (library) this.state.library = library;
+            if (detail) {
+                this.state.detail = detail;
+                this.state.selections = {}; this.state.preview = null;
+            }
+        } catch (error) { if (current()) throw error; }
+    }
+    async refresh() {
+        if (this.state.loading) {
+            this.refreshPending = true;
+            return new Promise(resolve => {
+                (this.refreshWaiters ||= []).push(resolve);
+            });
+        }
+        return this.perform(() => this.load());
+    }
     async filter() { this.state.page = 0; return this.refresh(); }
     openBatch(batchId) {
         this.back();

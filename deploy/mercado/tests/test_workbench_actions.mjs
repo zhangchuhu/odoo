@@ -58,3 +58,31 @@ test('late library chooser does not reopen after leaving a product', async () =>
     const request=ui.selectLibrary();ui.back();resolve();await request;
     assert.equal(ui.state.modal,'');
 });
+test('batch click during stale refresh queues latest scope and never installs old rows', async () => {
+    const ui=fixture();ui.state.detail=null;ui.state.section='batches';ui.state.batch='';ui.state.page=3;
+    ui.state.data={rows:[{id:'existing'}]};ui.navigationVersion=0;
+    const calls=[];let resolveOld;
+    ui.rpc=async(method,args)=>{
+        calls.push({method,args});
+        if(calls.length===1)return new Promise(r=>resolveOld=r);
+        assert.notDeepEqual(ui.state.data.rows,[{id:'wrong-batch'}]);
+        return {rows:[{id:'batch3'}]};
+    };
+    const staleRefresh=ui.refresh();
+    const batchClick=ui.openBatch(3);
+    resolveOld({rows:[{id:'wrong-batch'}]});
+    // The obsolete response must never become visible while the next read starts.
+    await new Promise(r=>setImmediate(r));
+    await Promise.all([staleRefresh,batchClick]);
+    assert.equal(calls.length,2);
+    assert.equal(calls[1].args[2],3);
+    assert.equal(calls[1].args[1],0);
+    assert.deepEqual(ui.state.data.rows,[{id:'batch3'}]);
+});
+test('rapid batch switches install only final scope after pending refresh', async () => {
+    const ui=fixture();ui.state.detail=null;ui.state.section='cases';ui.state.batch=1;ui.navigationVersion=0;
+    let resolveOld;const seen=[];
+    ui.rpc=async(method,args)=>{seen.push(args[2]);return seen.length===1?new Promise(r=>resolveOld=r):{rows:[{id:args[2]}]};};
+    const request=ui.refresh();ui.openBatch(2);ui.openBatch(3);resolveOld({rows:[{id:1}]});await request;
+    assert.deepEqual(seen,[1,3]);assert.deepEqual(ui.state.data.rows,[{id:3}]);
+});
