@@ -9,6 +9,7 @@ from .client import APIError
 from .domain import DomainError, canonical_hash
 from .handlers import CapabilityMissing, TASK_TYPES, prepare, product_facts, validate_output
 from .journal import Journal
+from .host_session import SessionPending
 
 
 class LeaseLost(Exception):
@@ -108,6 +109,12 @@ class Worker:
                 if record.get('done'):
                     return record['outcome']
             self.client.heartbeat(claim)  # Fence before reading inputs or dispatching a provider.
+            if record['phase'] == 'calling' and getattr(self.providers.get(claim['task_type']), 'durable_session', False):
+                record['phase'] = 'ready'
+                save()
+            if record['phase'] == 'host_pending':
+                record['phase'] = 'ready'
+                save()
             if record['phase'] == 'calling':
                 return status('wait', 'external_result_unknown', 'Provider dispatch was interrupted; operator reconciliation required')
             if record['phase'] == 'prepare':
@@ -134,6 +141,8 @@ class Worker:
                     try:
                         results.put(('ok', provider.run(claim['task_type'], copy.deepcopy(claim['payload']),
                                      copy.deepcopy(record['context']), record['request_id'])))
+                    except SessionPending:
+                        results.put(('host_pending', None))
                     except CapabilityMissing:
                         results.put(('missing', None))
                     except Exception:
@@ -144,6 +153,10 @@ class Worker:
                 except queue.Empty:
                     outcome, output = 'unknown', None
                 pulse.check()
+                if outcome == 'host_pending':
+                    record['phase'] = 'host_pending'
+                    save()
+                    return 'host_pending'
                 if outcome == 'unknown':
                     return status('wait', 'external_result_unknown', 'Provider outcome unknown; operator reconciliation required')
                 if outcome == 'missing':

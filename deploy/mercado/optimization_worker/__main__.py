@@ -15,9 +15,12 @@ from .runtime import Worker
 def main():
     parser = argparse.ArgumentParser(description='Provider-injected durable optimization Worker')
     parser.add_argument('mode', choices=('once', 'loop'))
+    parser.add_argument('--session', action='store_true', help='Use durable native Codex host-session bridge')
     parser.add_argument('--offline', action='store_true', help='Explicitly enable user-supplied fixture results')
     parser.add_argument('--fixture', type=Path, help='JSON mapping of task types to offline results')
     args = parser.parse_args()
+    if args.session and args.offline:
+        parser.error('--session and --offline are mutually exclusive')
     if args.fixture and not args.offline:
         parser.error('--fixture requires --offline')
     try:
@@ -34,6 +37,11 @@ def main():
             providers = {kind: provider for kind in results}
         client = Client(os.environ.get('ODOO_OPTIMIZATION_URL', 'http://127.0.0.1:8069'),
                         os.environ.get('ODOO_API_KEY', ''))
+        if args.session:
+            from .host_session import SessionProvider, SessionStore
+            store = SessionStore(os.environ.get('OPTIMIZATION_HOST_SESSION', '~/.local/state/optimization-worker/host.sqlite'), client.identity)
+            provider = SessionProvider(store)
+            providers = {kind: provider for kind in TASK_TYPES if kind != 'product.facts'}
         path = Path(os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite')).expanduser()
         worker = Worker(client, path, providers=providers)
         if args.mode == 'once':

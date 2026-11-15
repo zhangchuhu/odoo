@@ -59,3 +59,8 @@ node --test deploy/mercado/mcp/test/registry-http.test.js
 ```
 
 The Worker suite uses an in-process loopback HTTP server and controlled providers, plus subprocess CLI checks. The isolated Odoo runner owns a fresh private PostgreSQL cluster and runs an actual Worker HttpCase through the real claim/snapshot/heartbeat/complete routes. Neither command reads `.local/odoo.conf` or changes the existing Mercado database. The runtime does not construct a task graph, publish proposals, mutate live marketplace products, execute campaigns or measure business lift. Those capabilities require separate verified external contracts and live acceptance.
+
+Native Codex session execution is available through `loop --session` and the
+[host-session protocol](HOST_SESSION.md). It requires an interactive host with
+actual browser/vision/image tools; Python queues durable requests and imports
+real artifacts, and does not impersonate or invoke native session tools.
