@@ -58,6 +58,12 @@ export class OptimizationWorkbench extends Component {
     }
     async refresh() { return this.perform(() => this.load()); }
     async filter() { this.state.page = 0; return this.refresh(); }
+    openBatch(batchId) {
+        this.back();
+        this.state.batch = Number(batchId);
+        this.state.section = 'cases';
+        return this.filter();
+    }
     back() { this.navigationVersion++; this.state.detail=null; this.state.preview=null; this.state.modal=''; }
     async open(id) {
         this.navigationVersion++;

@@ -12,7 +12,7 @@ class WorkbenchBrowserCase(HttpCase):
     def test_workbench_browser_create_select_confirm(self):
         self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref('meli_optimization.group_editor').id)]})
         ui = self.env['meli.optimization.case']
-        detail = ui.workbench_create({'shop': '演示店铺', 'item_id': 'MLM-DEMO', 'title': 'Vestido elegante', 'seller_sku': 'SKU-A'})
+        detail = ui.workbench_create({'shop': '演示店铺', 'item_id': 'MLM-DEMO', 'title': 'Vestido elegante', 'seller_sku': 'SKU-A', 'batch_name': 'TEST BATCH NAV 3'})
         task = self.env['meli.optimization.task'].create({'case_id': detail['id'], 'snapshot_id': detail['snapshot']['id'],
             'task_type': 'title.generate', 'payload': {'schema_version': '1', 'facts_artifact_id': 'fixture', 'keywords_artifact_id': 'fixture', 'language': 'es-MX'}})
         claim = task.claim(['title.generate'])
@@ -146,6 +146,15 @@ class WorkbenchBrowserCase(HttpCase):
                     if(swapped.length!==1)throw Error('Selected scope is not exactly one generation task');
                     const plans=await rpc('meli.optimization.artifact','read',[[Number(swapped[0].payload.generation_plan_id)],['payload']]);
                     if(plans[0].payload.target_count!==1 || plans[0].payload.case_id!==caseId)throw Error('Plan did not freeze destination and target count');
+                    button('优化批次').click();
+                    await wait(()=>document.querySelector('.mw-batch'));
+                    const batchButton=[...document.querySelectorAll('.mw-batch')].find(b=>b.textContent.includes('TEST BATCH NAV 3'));
+                    if(!batchButton)throw Error('Batch navigation fixture absent');
+                    batchButton.click();
+                    await wait(()=>document.querySelector('.mw-table tbody tr')?.textContent.includes('MLM-DEMO'));
+                    if(document.querySelectorAll('.mw-table tbody tr').length!==1)throw Error('Batch navigation did not apply scope');
+                    if(document.querySelector('[aria-label="批次筛选"]').selectedOptions[0].textContent !== 'TEST BATCH NAV 3')throw Error('Selected batch label does not match applied scope');
+                    console.log('workbench-shot-batch-navigation');await new Promise(r=>setTimeout(r,300));
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=100)
