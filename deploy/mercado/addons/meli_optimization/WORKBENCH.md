@@ -1,0 +1,15 @@
+# 运营工作台
+
+Upgrade/install `meli_optimization` in an explicitly selected environment to register the backend assets and the **Optimization → 运营工作台** menu. No deployment or database upgrade is performed by these changes.
+
+The native OWL action uses the logged-in Odoo session and `orm.call`; no BFF API key or worker lease is sent to the browser. Worker can inspect company-visible records. Editor is required for every creation, proposal, confirmation and recovery operation. Company record rules apply without `sudo`.
+
+Supported flows: dashboard counts from stored records, batch and case navigation, search and pagination, manual product snapshots with unknown inventory preserved, all seven existing task types with case-owned artifact inputs, structured result cards and expandable evidence, current-snapshot candidate selection and image ordering, immutable exact proposal preview, explicit digest confirmation, audited task resume/cancel, refresh and visible errors.
+
+Manual shop names and product identities are observations, not verified account ownership. Task execution needs a separately configured Worker. Research and paid image capabilities are never inferred from the UI. Fact/keyword/plan inputs must already exist as immutable artifacts; the interface does not invent evidence or fabricate provider output. Source-image selection currently accepts one artifact per image task. Old task results remain visible but cannot create current proposals.
+
+Confirmation records intent only. Platform publication, image upload, activity/advertising operations and effect metric collection remain unavailable. Image proposals are selections, not a claim of QC approval. No live platform statistics, fictitious costs or attributed sales effects are shown.
+
+Overview currently derives scope from immutable snapshot JSON and performs case/task reads before pagination. Large catalogs will need indexed product identity fields and grouped queries. Snapshot refresh is manual; native Odoo's existing company switcher controls session scope.
+
+Verification: `node --test deploy/mercado/tests/test_workbench_ui.mjs`; `.venv/bin/python deploy/mercado/tests/run_optimization_odoo.py --http --browser`. Browser tests require local Chrome and `websocket-client`. The disposable runner uses private PostgreSQL Unix socket storage, HTTP 55440 and Chrome debugger 55441, with outbound Python sockets denied. Test artifacts are written under `.superpowers/sdd/operations-workbench/browser`.
