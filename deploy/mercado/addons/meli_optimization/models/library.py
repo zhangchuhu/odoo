@@ -146,9 +146,11 @@ class CollectionWorkbench(models.Model):
             'payload': e.payload, 'company_id': e.company_id.id} for e in entries]}
 
     @api.model
-    def workbench_library_generate(self, case_id, library_id, indices, source_artifact_ids):
+    def workbench_library_generate(self, case_id, library_id, indices, source_artifact_ids, expected_revision=None):
         case = self._wb_case(case_id, True)
         case._lock()
+        if type(expected_revision) is not int or expected_revision != case.revision:
+            raise ValidationError('目标商品快照已改变或版本缺失，请刷新并重新选择图库')
         library = self.env[PREFIX + 'library'].browse(int(library_id)).exists()
         if not library:
             raise ValidationError('图库不存在')
@@ -166,6 +168,13 @@ class CollectionWorkbench(models.Model):
             source._authorize('worker')
             if not source or source.case_id != case or source.company_id != case.company_id or not source.data or source.mime_type not in ('image/png', 'image/jpeg', 'image/webp'):
                 raise ValidationError('源服装必须为当前商品的已归档图片')
+            try:
+                raw = base64.b64decode(source.data, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValidationError('源服装图片编码无效') from exc
+            verified_image(raw, source.mime_type)
+            if hashlib.sha256(raw).hexdigest() != source.digest:
+                raise ValidationError('源服装归档图片摘要不匹配')
         clones = []
         for index in indices:
             original = self._library_image(library.case_id, images[index])
@@ -173,7 +182,7 @@ class CollectionWorkbench(models.Model):
                 'data': original.data, 'digest': original.digest, 'mime_type': original.mime_type,
                 'library_origin_id': library.id, 'library_artifact_id': original.id}))
         plan_payload = {'schema_version': '1', 'operation': 'garment_swap', 'case_id': case.id,
-            'snapshot_id': self._wb_snapshot(case).id, 'library_id': library.id,
+            'snapshot_id': self._wb_snapshot(case).id, 'input_revision': expected_revision, 'library_id': library.id,
             'library_result_hash': library.result_hash, 'selected_indices': indices, 'target_count': len(indices),
             'source_artifact_ids': [str(i) for i in source_artifact_ids], 'target_artifact_ids': [str(a.id) for a in clones],
             'preserve': ['identity', 'pose', 'accessories', 'scene', 'lighting', 'framing']}

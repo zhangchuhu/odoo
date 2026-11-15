@@ -73,7 +73,7 @@ class LibraryCase(TransactionCase):
         destination = self.ui.workbench_create({'shop': 'Test', 'item_id': 'DEST', 'title': 'Destination'})
         source = self.env['meli.optimization.artifact'].create({'case_id': destination['id'], 'data': artifact.data,
             'digest': artifact.digest, 'mime_type': artifact.mime_type})
-        selected = self.ui.workbench_library_generate(destination['id'], library_id, [0], [source.id])
+        selected = self.ui.workbench_library_generate(destination['id'], library_id, [0], [source.id], destination['revision'])
         self.assertEqual(len(selected['task_ids']), 1)
         generated = self.env['meli.optimization.task'].browse(selected['task_ids'])
         clone = self.env['meli.optimization.artifact'].browse(int(generated.payload['target_artifact_id']))
@@ -85,12 +85,12 @@ class LibraryCase(TransactionCase):
         self.assertEqual(plan.payload['source_artifact_ids'], [str(source.id)])
         self.assertEqual(plan.payload['library_result_hash'], canonical_hash(task.result))
         with self.assertRaises(ValidationError):
-            self.ui.workbench_library_generate(destination['id'], library_id, [0, 0], [source.id])
+            self.ui.workbench_library_generate(destination['id'], library_id, [0, 0], [source.id], destination['revision'])
         company = self.env['res.company'].create({'name': 'Other library company'})
         cross = self.ui.with_context(allowed_company_ids=[company.id, self.env.company.id])
         other = cross.workbench_create({'shop': 'Other', 'item_id': 'OTHER', 'title': 'Other company'})
         with self.assertRaises(AccessError):
-            cross.workbench_library_generate(other['id'], library_id, [0], [source.id])
+            cross.workbench_library_generate(other['id'], library_id, [0], [source.id], other['revision'])
 
     def test_binary_content_and_dimensions_must_be_real_images(self):
         detail = self.collection()
@@ -137,3 +137,36 @@ class LibraryCase(TransactionCase):
         self.assertEqual(self.env['meli.optimization.artifact'].browse(references).data.decode(), data)
         with self.assertRaises(ValidationError):
             self.ui.workbench_upload_garment(detail['id'], base64.b64encode(b'not an image').decode(), 'image/png')
+
+    def test_invalid_generic_garment_artifact_creates_no_generation_side_effects(self):
+        detail = self.collection()
+        task, image = self.gallery(detail)
+        library_id = self.ui.workbench_library_import(detail['id'], task.id, canonical_hash(task.result))
+        destination = self.ui.workbench_create({'shop': 'Test', 'item_id': 'BAD-SOURCE', 'title': 'Source validation'})
+        raw = b'not an image'
+        artifacts = self.env['meli.optimization.artifact']
+        source = artifacts.create({'case_id': destination['id'], 'data': base64.b64encode(raw),
+            'digest': hashlib.sha256(raw).hexdigest(), 'mime_type': 'image/png'})
+        domain = [('case_id', '=', destination['id'])]
+        before_artifacts = artifacts.search_count(domain)
+        before_tasks = self.env['meli.optimization.task'].search_count(domain)
+        with self.assertRaisesRegex(ValidationError, '图片内容'):
+            self.ui.workbench_library_generate(destination['id'], library_id, [0], [source.id], destination['revision'])
+        self.assertEqual(artifacts.search_count(domain), before_artifacts)
+        self.assertEqual(self.env['meli.optimization.task'].search_count(domain), before_tasks)
+
+    def test_stale_destination_revision_creates_no_generation_side_effects(self):
+        detail = self.collection()
+        task, image = self.gallery(detail)
+        library_id = self.ui.workbench_library_import(detail['id'], task.id, canonical_hash(task.result))
+        destination = self.ui.workbench_create({'shop': 'Test', 'item_id': 'STALE', 'title': 'Before'})
+        artifacts = self.env['meli.optimization.artifact']
+        source = artifacts.create({'case_id': destination['id'], 'data': image.data,
+            'digest': image.digest, 'mime_type': image.mime_type})
+        self.ui.workbench_snapshot(destination['id'], {'shop': 'Test', 'item_id': 'STALE', 'title': 'After'})
+        domain = [('case_id', '=', destination['id'])]
+        before = artifacts.search_count(domain)
+        with self.assertRaisesRegex(ValidationError, '快照'):
+            self.ui.workbench_library_generate(destination['id'], library_id, [0], [source.id], destination['revision'])
+        self.assertEqual(artifacts.search_count(domain), before)
+        self.assertFalse(self.env['meli.optimization.task'].search(domain))

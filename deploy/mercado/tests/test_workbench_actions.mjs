@@ -45,11 +45,11 @@ test('late proposal is discarded after reopening same case or disposing action',
 test('library selection submits exact indices and source garment separately', async () => {
     const ui=fixture(), calls=[];
     ui.state.librarySelection={id:20,payload:{images:[{artifact_id:'8'}]}};
-    ui.state.libraryIndices=[0];ui.state.garmentArtifact='9';
+    ui.state.libraryIndices=[0];ui.state.garmentArtifact='9';ui.state.libraryContext={case_id:1,revision:1};
     ui.load=async()=>{};
     ui.rpc=async (...args)=>{calls.push(args);return {task_ids:[30]};};
     await ui.saveLibrarySelection();
-    assert.deepEqual(calls,[['workbench_library_generate',[1,20,[0],[9]]]]);
+    assert.deepEqual(calls,[['workbench_library_generate',[1,20,[0],[9],1]]]);
     assert.equal(ui.state.modal,'');
 });
 test('late library chooser does not reopen after leaving a product', async () => {

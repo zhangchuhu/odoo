@@ -18,7 +18,7 @@ Implemented in native Odoo OWL workbench using existing navy design. Production/
 - `workbench_upload_garment(case_id, base64_data, mime_type)` → artifact ID; local upload only, supported PNG/JPEG/WebP, checked bytes, maximum 8 MiB.
 - `workbench_library_import(case_id, task_id, result_hash)` → immutable library ID.
 - `workbench_library(query='', site='')` → latest 200 matching entries; query searches reference item; site exact match.
-- `workbench_library_generate(case_id, library_id, ordered_indices, source_artifact_ids)` → task IDs, generation plan artifact ID, exact target count. Rejects empty/duplicate/out-of-range indices, missing/non-image/wrong-case garment refs and different-company library. Creates one image.generate task per selected target. Frozen plan includes destination snapshot, original library result hash, ordered selection, source refs, cloned target refs, exact count and identity/pose/accessory/scene/light/framing preservation scope.
+- `workbench_library_generate(case_id, library_id, ordered_indices, source_artifact_ids, expected_revision)` → task IDs, generation plan artifact ID, exact target count. Rejects empty/duplicate/out-of-range indices, missing/non-image/wrong-case garment refs and different-company library. Creates one image.generate task per selected target. Frozen plan includes destination snapshot, original library result hash, ordered selection, source refs, cloned target refs, exact count and identity/pose/accessory/scene/light/framing preservation scope.
 - Existing workbench_detail returns collection flag and clone provenance fields. Existing Worker `prepare` resolves uploaded collection source image refs into its verified artifact context. Existing external capability/result/fencing behavior is retained.
 
 ## UI and manual flow
@@ -68,3 +68,16 @@ Screenshots copied from the final passing real Chrome run and visually inspected
 These screenshots display a deliberately synthetic test image, not a live product photograph.
 
 Installation requires normal `meli_optimization` module upgrade to create the library table and new fields/rule/ACL; this task intentionally did not perform it against the existing application database.
+
+
+## Review follow-up: source integrity and stale chooser
+
+Addressed Important finding in `review.md`: a generic same-case binary artifact with a correct digest and declared PNG MIME could previously pass as a garment source without being an actual image. Generation now base64-decodes, calls the same `verified_image` helper used by upload/import (real format/MIME, image integrity, 8 MiB limit, pixel bounds), and rechecks SHA-256 for every source before any target clone, plan, or task is created.
+
+The chooser now also freezes its original destination case/revision when opened. It submits that revision as the fifth RPC argument. Server-side generation checks that revision under the destination case lock and rejects a missing or changed revision with a refresh message. Frozen plans retain `input_revision`. Refreshing detail while the chooser is open does not silently substitute a later revision.
+
+TDD evidence: `/tmp/library-review-red.log` reproduced invalid generic source acceptance (`ValidationError not raised`) and absence of the revision API (`TypeError`); `/tmp/library-review-ui-red.log` reproduced the missing revision argument. Added ORM regressions assert that invalid sources and changed snapshots produce neither new artifacts/clones nor generation tasks.
+
+Review-fix verification: `.venv/bin/python deploy/mercado/tests/run_optimization_odoo.py --http --browser` passed **34 post-tests, 0 failed, 0 errors** (`/tmp/library-review-green.log`), including the entire real Chrome independent ingestion/library/different-case selection flow. Node UI/action tests passed **7/7**. No existing application database or platform service was accessed.
+
+The review-fix broad regression reruns also pass: **37 pure transport/domain tests** (`/tmp/library-review-unit-green.log`) and **28 Worker tests** (`/tmp/library-review-worker-green.log`). `git diff --check` passes.

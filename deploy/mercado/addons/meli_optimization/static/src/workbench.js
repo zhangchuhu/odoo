@@ -15,7 +15,7 @@ export class OptimizationWorkbench extends Component {
         this.notification = useService('notification');
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
             batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, taskType: 'product.facts',
-            taskValues: {}, selections: {}, preview: null, collections: [], library: [], librarySelection: null, libraryIndices: [], garmentArtifact: '', libraryQuery: '', librarySite: '' });
+            taskValues: {}, selections: {}, preview: null, collections: [], library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', libraryQuery: '', librarySite: '' });
         this.tabs = [['snapshot','商品快照'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
             ['gallery','目标图库'],['images','图片与质检'],['proposals','变更确认'],['activity','活动与广告'],['effects','效果观察'],['audit','审计记录']];
         this.taskLabels = {'product.facts':'整理商品事实','research.keywords':'关键词研究','research.bestseller':'爆款研究',
@@ -97,7 +97,7 @@ export class OptimizationWorkbench extends Component {
     libraryImage(image) { return `/web/image/meli.optimization.artifact/${image.artifact_id}/data`; }
     async selectLibrary() {
         const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
-        return this.perform(async()=>{await this.loadLibrary();if(!this.contextMatches(context)) return;this.state.librarySelection=null;this.state.libraryIndices=[];this.state.garmentArtifact='';this.state.modal='library-select';});
+        return this.perform(async()=>{await this.loadLibrary();if(!this.contextMatches(context)) return;this.state.libraryContext=context;this.state.librarySelection=null;this.state.libraryIndices=[];this.state.garmentArtifact='';this.state.modal='library-select';});
     }
     chooseLibrary(entry) { this.state.librarySelection=entry;this.state.libraryIndices=[]; }
     toggleLibrary(index) { const list=this.state.libraryIndices;this.state.libraryIndices=list.includes(index)?list.filter(i=>i!==index):[...list,index]; }
@@ -108,8 +108,11 @@ export class OptimizationWorkbench extends Component {
         await this.perform(async()=>{const id=await this.rpc('workbench_upload_garment',[this.state.detail.id,this.state.form.image_data,this.state.form.image_mime]);await this.load();this.state.garmentArtifact=String(id);},'服装参考图已归档');
     }
     async saveLibrarySelection() {
+        const context=this.state.libraryContext;
+        if(!context || this.disposed || this.navigationVersion !== context.version || this.state.detail?.id !== context.case_id) return;
         return this.perform(async()=>{
-            await this.rpc('workbench_library_generate',[this.state.detail.id,this.state.librarySelection.id,[...this.state.libraryIndices],[Number(this.state.garmentArtifact)]]);
+            await this.rpc('workbench_library_generate',[context.case_id,this.state.librarySelection.id,[...this.state.libraryIndices],[Number(this.state.garmentArtifact)],context.revision]);
+            if(!this.contextMatches(context)) return;
             this.state.modal='';this.state.tab='tasks';await this.load();
         }, '所选目标图已冻结计划并逐图加入队列');
     }
