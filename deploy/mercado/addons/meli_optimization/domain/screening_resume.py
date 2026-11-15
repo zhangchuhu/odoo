@@ -77,7 +77,8 @@ class ReplayReads:
                 raise ValueError('Checkpoint request sequence changed')
             return row['data']
         read_started_at = self.now().isoformat()
-        data = minimized(path, self.fetch(path, query))
+        # JSON signatures use arrays; urllib transport requires tuple pairs.
+        data = minimized(path, self.fetch(path, [tuple(pair) for pair in query]))
         observed_at = self.now().isoformat()
         responses.append({'path': path, 'query': query, 'data': data, 'read_started_at': read_started_at, 'observed_at': observed_at})
         observation_window(self.checkpoint, self.now())

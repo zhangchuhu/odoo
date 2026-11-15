@@ -86,3 +86,18 @@ class ResumeTests(unittest.TestCase):
     def test_legacy_checkpoint_without_timestamps_fails_closed(self):
         checkpoint = {'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]}
         with self.assertRaises(self.m.CheckpointExpired): self.m.ReplayReads(checkpoint, lambda *a: self.fail('unexpected fetch'))
+
+    def test_wire_query_uses_tuple_pairs_while_checkpoint_roundtrips_json(self):
+        import json
+        from urllib.parse import urlencode
+        checkpoint, encoded = {}, []
+        def fetch(path, query):
+            encoded.append(urlencode(query))
+            return dict(seller_id='9', results=[], paging=dict(total=0, limit=50, offset=0))
+        query = [('limit', '50'), ('offset', '0')]
+        with self.assertRaises(self.m.CollectionPending):
+            self.m.ReplayReads(checkpoint, fetch).get('/marketplace/users/9/items/search', query)
+        self.assertEqual(encoded, ['limit=50&offset=0'])
+        restored = json.loads(json.dumps(checkpoint))
+        value = self.m.ReplayReads(restored, lambda *a: self.fail('replayed read must not fetch')).get('/marketplace/users/9/items/search', query)
+        self.assertEqual(value['paging']['total'], 0)
