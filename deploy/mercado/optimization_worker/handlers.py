@@ -27,6 +27,18 @@ def prepare(client, claim):
         elif name == 'source_artifact_ids':
             for reference in value:
                 context['artifacts'][reference] = client.artifact(reference)
+    if kind == 'image.qc':
+        plan = context['artifacts'][payload['generation_plan_id']].get('payload')
+        if isinstance(plan, dict):
+            references = []
+            for field in ('source_artifact_ids', 'target_artifact_ids'):
+                values = plan.get(field, [])
+                if not isinstance(values, list) or len(values) > 100 or any(not isinstance(v, str) or not v for v in values):
+                    raise DomainError('invalid_input', 'Invalid generation plan original references')
+                references.extend(values)
+            for reference in references:
+                if reference not in context['artifacts']:
+                    context['artifacts'][reference] = client.artifact(reference)
     return context
 
 

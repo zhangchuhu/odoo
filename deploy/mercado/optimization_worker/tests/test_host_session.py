@@ -219,3 +219,112 @@ class HostSessionTests(unittest.TestCase):
                 'checks': [{'name': 'garment', 'status': 'passed', 'evidence_ids': ['v']}]}
         with self.assertRaises(ValueError):
             self.store.submit('qc-1', body, caps())
+
+    def test_stale_old_request_does_not_shadow_live_work_and_keeps_unknown(self):
+        self.prepare()
+        action = self.store.next()
+        self.store.dispatch('request-1', caps(), action['input_digests'])
+        self.store.error('request-1', 'unknown')
+        self.store.enqueue('request-new', 'research.keywords', {'schema_version': '1', 'facts_artifact_id': '3', 'site_id': 'MLM'}, self.context)
+        self.store.synchronize([{'request_id': 'request-1', 'done': True, 'outcome': 'lease_lost'}, {'request_id': 'request-new', 'claim': {'id': 30}}])
+        self.assertEqual(self.store.next()['request_id'], 'request-new')
+        audit = self.store.inspect('request-1')
+        self.assertTrue(audit['retired'])
+        self.assertEqual(audit['state'], 'unknown')
+        self.assertFalse(self.store.dispatch('request-1', caps(), action['input_digests'])['should_invoke'])
+        path = self.root / 'late.png'
+        path.write_bytes(png('blue'))
+        self.store.archive_image('request-1', path)
+        self.assertTrue(Path(self.store.inspect('request-1')['late_result_path']).is_file())
+
+    def test_moderation_or_known_failure_finishes_original_worker_and_next_claim(self):
+        for outcome in ('failed', 'moderation_blocked'):
+            with self.subTest(outcome=outcome):
+                fixture = Fixture()
+                self.addCleanup(fixture.close)
+                client = Client(fixture.url, 'fixture-key')
+                store = hs.SessionStore(self.root / (outcome + '-host.sqlite'), client.identity)
+                worker = Worker(client, self.root / (outcome + '-worker.sqlite'), providers={'research.keywords': hs.SessionProvider(store)})
+                self.assertEqual(worker.once(), 'host_pending')
+                action = store.next()
+                store.error(action['request_id'], outcome)
+                self.assertEqual(worker.once(), 'failed')
+                failures = [event[1]['body'] for event in fixture.events if event[0] == 'fail']
+                self.assertEqual(failures[0]['code'], outcome)
+                self.assertEqual(store.next()['action'], 'idle')
+                fixture.state = 'queued'
+                fixture.claim['id'] += 1
+                self.assertEqual(worker.once(), 'host_pending')
+                self.assertNotEqual(store.next()['request_id'], action['request_id'])
+
+    def test_concurrent_retirement_and_dispatch_never_reactivates_retired_request(self):
+        from concurrent.futures import ThreadPoolExecutor
+        action = self.prepare()
+        def retire():
+            self.store.synchronize([])
+        def dispatch():
+            return self.store.dispatch('request-1', caps(), action['input_digests'])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            retired = pool.submit(retire)
+            claim = pool.submit(dispatch)
+            retired.result()
+            claim.result()
+        self.assertTrue(self.store.inspect('request-1')['retired'])
+        self.assertFalse(self.store.dispatch('request-1', caps(), action['input_digests'])['should_invoke'])
+        self.assertEqual(self.store.next()['action'], 'idle')
+
+    def test_standalone_qc_prepare_resolves_bound_plan_source_and_target_originals(self):
+        from optimization_worker.handlers import prepare
+        class Inputs:
+            def snapshot(inner, ref):
+                return {'payload': {}}
+            def artifact(inner, ref):
+                if ref == '3':
+                    return {'payload': {'operation': 'garment_swap', 'source_artifact_ids': ['2'], 'target_artifact_ids': ['4']}}
+                return {'data': 'verified-' + ref}
+        context = prepare(Inputs(), {'task_type': 'image.qc', 'snapshot_id': 15,
+            'payload': {'schema_version': '1', 'image_artifact_id': '1', 'generation_plan_id': '3'}})
+        self.assertEqual(set(context['artifacts']), {'1', '2', '3', '4'})
+
+    def test_live_synchronization_skips_stale_fence_and_does_not_retire_concurrent_enqueue(self):
+        from optimization_worker.journal import Journal
+        from optimization_worker.client import APIError
+        journal_path = self.root / 'live-sync.sqlite'
+        journal = Journal(journal_path, 'identity')
+        journal.save({'claim': {'id': 21, 'input_hash': 'a', 'lease_epoch': 1}, 'request_id': 'request-1'})
+        journal.close()
+        self.prepare()
+        store = self.store
+        context = self.context
+        class RejectedLease:
+            def heartbeat(inner, claim):
+                # A Worker can save/enqueue a fresh request after the host's
+                # authoritative snapshot but before it applies retirement.
+                store.enqueue('concurrent-new', 'research.keywords', {'schema_version': '1', 'facts_artifact_id': '3', 'site_id': 'MLM'}, context)
+                raise APIError(409)
+        hs.synchronize_live(RejectedLease(), store, journal_path)
+        self.assertTrue(store.inspect('request-1')['retired'])
+        self.assertFalse(store.inspect('concurrent-new').get('retired', False))
+        self.assertEqual(store.next()['request_id'], 'concurrent-new')
+
+    def test_retired_upload_can_reconcile_existing_receipt_without_unretiring(self):
+        action = self.prepare()
+        self.store.dispatch('request-1', caps(), action['input_digests'])
+        path = self.root / 'late-result.png'
+        path.write_bytes(png('blue'))
+        class Lost:
+            def create_artifact(inner, *args, **kwargs):
+                raise OSError('response lost')
+            def artifact(inner, ref):
+                return {'data': base64.b64encode(png('blue')).decode(), 'mime_type': 'image/png'}
+        client = Lost()
+        with self.assertRaises(OSError):
+            self.store.image('request-1', path, client)
+        self.store.synchronize([])
+        self.store.reconcile('request-1', 'candidate', '95', client)
+        retired = self.store.inspect('request-1')
+        self.assertEqual(retired['uploads']['candidate']['artifact_id'], '95')
+        self.assertTrue(retired['retired'])
+        self.assertEqual(self.store.next()['action'], 'idle')
+        with self.assertRaises(ValueError):
+            self.store.image('request-1', path, client)

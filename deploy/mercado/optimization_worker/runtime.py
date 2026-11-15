@@ -9,7 +9,7 @@ from .client import APIError
 from .domain import DomainError, canonical_hash
 from .handlers import CapabilityMissing, TASK_TYPES, prepare, product_facts, validate_output
 from .journal import Journal
-from .host_session import SessionPending
+from .host_session import SessionPending, SessionFailure
 
 
 class LeaseLost(Exception):
@@ -49,6 +49,9 @@ class Worker:
         journal = Journal(self.journal_path, self.client.identity)
         try:
             active = journal.active()
+            for provider in {id(p): p for p in self.providers.values()}.values():
+                if getattr(provider, 'durable_session', False):
+                    provider.synchronize(active)
             if active:
                 record = active[0]
             else:
@@ -59,7 +62,12 @@ class Worker:
                 journal.save(record)
             return self._run(journal, record)
         finally:
-            journal.close()
+            try:
+                for provider in {id(p): p for p in self.providers.values()}.values():
+                    if getattr(provider, 'durable_session', False):
+                        provider.synchronize(journal.active())
+            finally:
+                journal.close()
 
     def loop(self, stop=None, poll_seconds=5):
         stop = stop or threading.Event()
@@ -141,6 +149,8 @@ class Worker:
                     try:
                         results.put(('ok', provider.run(claim['task_type'], copy.deepcopy(claim['payload']),
                                      copy.deepcopy(record['context']), record['request_id'])))
+                    except SessionFailure as exc:
+                        results.put(('terminal', exc.code))
                     except SessionPending:
                         results.put(('host_pending', None))
                     except CapabilityMissing:
@@ -153,13 +163,17 @@ class Worker:
                 except queue.Empty:
                     outcome, output = 'unknown', None
                 pulse.check()
-                if outcome == 'host_pending':
+                if outcome == 'terminal':
+                    record['provider_failed'] = output
+                    record['phase'] = 'provider_terminal'
+                    save()
+                elif outcome == 'host_pending':
                     record['phase'] = 'host_pending'
                     save()
                     return 'host_pending'
-                if outcome == 'unknown':
+                elif outcome == 'unknown':
                     return status('wait', 'external_result_unknown', 'Provider outcome unknown; operator reconciliation required')
-                if outcome == 'missing':
+                elif outcome == 'missing':
                     record['provider_missing'] = True
                     record['phase'] = 'provider_missing'
                     save()
@@ -174,6 +188,8 @@ class Worker:
                     record['output'] = output
                     record['phase'] = 'result'
                     save()
+            if record['phase'] == 'provider_terminal':
+                checkpoint('failed')
             if record['phase'] == 'provider_missing':
                 checkpoint('failed')
             if record['phase'] == 'result':
@@ -187,6 +203,8 @@ class Worker:
                 checkpoint('failed' if record.get('invalid') else 'succeeded')
             if record.get('provider_missing'):
                 return status('wait', 'capability_missing', 'Provider reports unavailable capability')
+            if record.get('provider_failed'):
+                return status('fail', record['provider_failed'], 'Host confirmed terminal outcome; preserved original request, no retry')
             if record.get('invalid'):
                 return status('fail', 'invalid_result', 'Provider output failed domain or artifact validation')
             submit('complete', record['output'])

@@ -29,6 +29,13 @@ class SessionPending(Exception):
     """Host work is durably prepared and can be polled without redispatch."""
 
 
+class SessionFailure(Exception):
+    """A confirmed terminal host outcome; never retry the native invocation."""
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
 def _read_json(path):
     path = Path(path)
     if path.stat().st_size > 256 * 1024:
@@ -150,11 +157,42 @@ class SessionStore:
             raise ValueError('Original views/digests required; input changed')
         return expected
 
+    def synchronize(self, worker_records, observed_ids=None):
+        """Retire departed leases without altering their unknown/paid history."""
+        active = {r['request_id'] for r in worker_records if not r.get('done')}
+        with self._db() as db:
+            records = [json.loads(row[0]) for row in db.execute('SELECT record FROM requests')]
+            for r in records:
+                if (observed_ids is None or r['request_id'] in observed_ids) and r['request_id'] not in active and not r.get('retired'):
+                    r.update(retired=True, retirement_reason='original_worker_lease_inactive')
+                    self._put(db, r)
+
+    def request_ids(self):
+        with self._db() as db:
+            return {row[0] for row in db.execute('SELECT id FROM requests')}
+
+    def inspect(self, request_id):
+        with self._db() as db:
+            return self._get(db, request_id)
+
+    def archive_image(self, request_id, path):
+        """Preserve a late native output locally, even after lease retirement."""
+        raw, _, _, _ = _raster(path)
+        digest = hashlib.sha256(raw).hexdigest()
+        with self._db() as db:
+            r = self._get(db, request_id)
+            if r['task_type'] != 'image.generate' or r['state'] not in ('dispatched', 'unknown'):
+                raise ValueError('Only an original unresolved edit can receive a late output')
+            if r.get('late_result_sha256') and r['late_result_sha256'] != digest:
+                raise ValueError('Late result already immutable')
+            r.update(late_result_path=self._file(raw), late_result_sha256=digest)
+            self._put(db, r)
+
     def next(self):
         with self._db() as db:
             records = [json.loads(r[0]) for r in db.execute('SELECT record FROM requests ORDER BY rowid')]
         for r in records:
-            if r['state'] == 'resolved':
+            if r['state'] in ('resolved', 'terminal') or r.get('retired'):
                 continue
             paths = list(r['images'].values())
             action = {'request_id': r['request_id'], 'task_type': r['task_type'], 'payload': r['payload'],
@@ -215,7 +253,7 @@ class SessionStore:
     def dispatch(self, request_id, capabilities, viewed_digests):
         with self._db() as db:
             r = self._get(db, request_id)
-            if r['state'] != 'prepared' or r['task_type'] != 'image.generate':
+            if r.get('retired') or r['state'] != 'prepared' or r['task_type'] != 'image.generate':
                 return {'should_invoke': False, 'request_id': request_id, 'state': r['state']}
             _capabilities(capabilities, 'image.generate')
             self._verify_views(r, viewed_digests, r['ordered_image_paths'])
@@ -233,18 +271,18 @@ class SessionStore:
             raise ValueError('Unsupported host outcome')
         with self._db() as db:
             r = self._get(db, request_id)
-            if r['state'] == 'resolved':
-                raise ValueError('Resolved result immutable')
+            if r['state'] in ('resolved', 'terminal'):
+                raise ValueError('Settled outcome immutable')
             if r['state'] != 'waiting':
                 r['resume_state'] = r['state']
-            r.update(state='unknown' if outcome == 'unknown' else 'waiting', reason=outcome)
+            r.update(state='terminal' if outcome in ('failed', 'moderation_blocked') else 'unknown' if outcome == 'unknown' else 'waiting', reason=outcome)
             self._put(db, r)
 
     def resume(self, request_id):
         """Restore a missing capability/QC checkpoint without clearing any receipt."""
         with self._db() as db:
             r = self._get(db, request_id)
-            if r['state'] != 'waiting' or r.get('reason') not in ('unavailable', 'candidate_qc_unsettled'):
+            if r.get('retired') or r['state'] != 'waiting' or r.get('reason') not in ('unavailable', 'candidate_qc_unsettled'):
                 raise ValueError('Only capability or QC waiting can resume')
             r['state'] = r.get('resume_state', 'qc_pending')
             self._put(db, r)
@@ -288,6 +326,8 @@ class SessionStore:
         digest = hashlib.sha256(raw).hexdigest()
         with self._db() as db:
             r = self._get(db, request_id)
+            if r.get('retired'):
+                raise ValueError('Retired lease cannot upload')
             uploads = r.setdefault('uploads', {})
             existing = uploads.get(key)
             if existing:
@@ -381,22 +421,53 @@ class SessionProvider:
     def __init__(self, store):
         self.store = store
 
+    def synchronize(self, worker_records):
+        self.store.synchronize(worker_records)
+
     def run(self, task_type, payload, context, request_id):
         self.store.enqueue(request_id, task_type, payload, context)
+        record = self.store.inspect(request_id)
+        if record.get('retired'):
+            raise SessionPending()
+        if record['state'] == 'terminal':
+            raise SessionFailure(record['reason'])
         result = self.store.result(request_id)
         if result is None:
             raise SessionPending()
         return result
 
 
-def fence(client, journal_path, request_id):
-    """Read the existing worker receipt and renew its exact lease before effects."""
+def worker_records(journal_path):
+    """Read authoritative Worker history without taking its writer lock."""
     uri = Path(journal_path).expanduser().resolve().as_uri() + '?mode=ro'
     db = sqlite3.connect(uri, uri=True, timeout=10)
     try:
         records = [json.loads(row[0]) for row in db.execute('SELECT record FROM runs')]
     finally:
         db.close()
+    return records
+
+
+def synchronize_live(client, store, journal_path):
+    from .client import APIError
+    observed_ids = store.request_ids()
+    active = []
+    for record in worker_records(journal_path):
+        if record.get('done'):
+            continue
+        try:
+            client.heartbeat(record['claim'])
+        except APIError as exc:
+            if exc.status not in (403, 404, 409):
+                raise
+        else:
+            active.append(record)
+    store.synchronize(active, observed_ids)
+
+
+def fence(client, journal_path, request_id):
+    """Renew the exact original lease before any new external effect."""
+    records = worker_records(journal_path)
     matches = [r for r in records if r.get('request_id') == request_id and not r.get('done')]
     if len(matches) != 1:
         raise ValueError('Original active worker lease required')
@@ -406,7 +477,7 @@ def fence(client, journal_path, request_id):
 def main():
     from .client import Client
     parser = argparse.ArgumentParser(description='Codex host-session bridge; no tool calls from Python')
-    parser.add_argument('command', choices=('next', 'plan', 'dispatch', 'submit', 'image', 'gallery', 'qc', 'error', 'reconcile', 'resume'))
+    parser.add_argument('command', choices=('next', 'plan', 'dispatch', 'submit', 'image', 'gallery', 'qc', 'error', 'reconcile', 'resume', 'inspect', 'archive-image'))
     parser.add_argument('--request-id')
     parser.add_argument('--file', type=Path)
     parser.add_argument('--capabilities', type=Path)
@@ -423,9 +494,13 @@ def main():
         if command != 'next' and not request:
             raise ValueError('Request ID required')
         output = {'accepted': True}
-        if command in ('dispatch', 'image', 'gallery', 'submit', 'reconcile'):
+        if command == 'next':
+            synchronize_live(client, store, os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite'))
+        if command in ('dispatch', 'image', 'gallery', 'submit'):
             fence(client, os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite'), request)
         if command == 'next': output = store.next()
+        elif command == 'inspect': output = store.inspect(request)
+        elif command == 'archive-image': store.archive_image(request, args.file)
         elif command == 'plan': store.plan(request, _read_json(args.file))
         elif command == 'dispatch': output = store.dispatch(request, _read_json(args.capabilities), _read_json(args.views))
         elif command == 'submit': store.submit(request, _read_json(args.file), _read_json(args.capabilities))

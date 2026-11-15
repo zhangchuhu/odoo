@@ -113,3 +113,28 @@ never clears dispatch. For failed/uncertain candidate QC, resume reopens QC for
 the same imported candidate. Standalone image.qc submissions must also include
 `viewed_digests` for all supplied originals. Explicit moderation/terminal failures
 cannot resume into another edit through this command.
+
+Queue retirement and terminal tool outcomes:
+
+- `next` reconciles mailbox rows with authoritative Worker history and verifies
+  current leases. Cancelled/expired/lease-lost rows retire from active selection;
+  their original state, request, candidates, upload receipts and unknown outcome
+  remain intact. Rows enqueued concurrently after the reconciliation snapshot
+  are excluded from that retirement pass. Retired rows can never redispatch.
+- `error --request-id ID --outcome failed` and `moderation_blocked` are confirmed
+  terminal outcomes. Worker checkpoints failed and fails that task with the
+  explicit outcome code, then continues the queue. These never invoke another
+  edit. `unknown` remains awaiting_result; `unavailable` remains resumable waiting.
+- `inspect --request-id ID` reads preserved audit state, including retired rows.
+  A late original native output can be preserved locally with
+  `archive-image --request-id ID --file /actual/late-output.png`; this performs no
+  upload and retains the original ambiguity/history. Repeated identical bytes
+  are idempotent; conflicting bytes are refused.
+- `reconcile` only reads an already existing Odoo artifact and binds its verified
+  receipt locally, so it remains available for retired original requests without
+  renewing an expired Worker lease. It never uploads, un-retires, or dispatches.
+  New image/gallery uploads and result submissions still require the exact active
+  original lease. Operator handling in Odoo is required to settle retired work.
+- Standalone image.qc now materializes source_artifact_ids and target_artifact_ids
+  from its immutable generation plan alongside the candidate and source snapshot
+  images. Its viewed-digest submission must cover all supplied originals.
