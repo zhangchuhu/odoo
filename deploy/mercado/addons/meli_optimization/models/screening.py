@@ -7,6 +7,7 @@ from odoo.addons.meli_bff.service import authorize
 from odoo.addons.meli_bff.protocol import Operation
 from odoo.addons.meli_platform_adapter import transport
 from .optimization import PREFIX, ExactJson, bounded
+from ..domain.screening_resume import ReplayReads, CollectionPending
 from ..domain.screening import parse_criteria, screen_products, collect_shop, timestamp
 
 
@@ -70,7 +71,7 @@ class ScreeningWorkbench(models.Model):
             semantics='sales_units <= sales_max AND sum(all SKU available_quantity) >= stock_min; paid orders created in [start,end); cancellations excluded, returns/refunds not deducted; unknown excluded' + ('; every listed SKU has verified SIZE and stock > 0; no variations requires explicit one-size; unlisted intended sizes are not inferred' if criteria.get('require_all_skus_in_stock') else ''),
             execute_tool='optimization_screen_execute', batch_id=row.batch_id.id or None)
 
-    def _screen_collect(self, shop, criteria):
+    def _screen_collect(self, shop, criteria, checkpoint=None):
         token = shop._token()
         def get(path, query=()):
             response = transport.send('GET', path, token=token, query=query, timeout=30)
@@ -79,6 +80,8 @@ class ScreeningWorkbench(models.Model):
                 response.close()
                 raise ValidationError(f'店铺完整数据不可用 (HTTP {status})；未创建优化批次，请核验账户接口权限')
             return response.json()
+        if checkpoint is not None:
+            get = ReplayReads(checkpoint, get).get
         identity = get('/users/me')
         if str(identity.get('id')) != shop.seller_id:
             raise ValidationError('授权令牌与店铺主 Seller 不匹配；未采集商品或创建批次')
@@ -106,12 +109,33 @@ class ScreeningWorkbench(models.Model):
             raise ValidationError('请先展示解析后的预览，并传入原始 digest')
         if row.batch_id:
             return row.outcome
-        # No row/advisory lock or batch writes while waiting for Mercado Libre.
+        # One bounded read per step. Nonblocking cross-process lock prevents
+        # duplicate fetches; no detached work survives the HTTP request.
+        self.env.cr.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))', [f'screen-step:{row.id}'])
+        if not self.env.cr.fetchone()[0]:
+            return {'preview_id': row.id, 'job_state': 'running', 'code': 'step_in_progress', 'resume_action': 'execute_same_preview'}
+        row.invalidate_recordset()
+        if row.batch_id:
+            return row.outcome
+        previous = row.outcome if isinstance(row.outcome, dict) else {}
+        checkpoint = previous.get('job_checkpoint', {}) if previous.get('job_state') == 'running' else {}
+        started = previous.get('started_at') if checkpoint else datetime.now(timezone.utc).isoformat()
         try:
-            products, orders, source = self._screen_collect(shop, row.criteria)
+            products, orders, source = self._screen_collect(shop, row.criteria, checkpoint)
+            source = dict(source, collection_started_at=started)
             result = screen_products(products, orders, row.criteria, row.seller_id, source.get('orders_complete'))
-        except (ValueError, TypeError, KeyError) as exc:
-            raise ValidationError('完整销售/库存证据不可验证：' + str(exc)) from exc
+        except CollectionPending:
+            state = {'preview_id': row.id, 'job_state': 'running', 'completed_reads': len(checkpoint.get('responses', [])), 'started_at': started,
+                'resume_action': 'execute_same_preview', 'job_checkpoint': checkpoint}
+            row._set({'outcome': state})
+            return {k: v for k, v in state.items() if k != 'job_checkpoint'}
+        except (ValueError, TypeError, KeyError, AttributeError, ValidationError, transport.BffError):
+            # Discard incomplete observations. Retrying recollects the same frozen
+            # window with fresh reads; no partial result can be mistaken for zero.
+            state = {'preview_id': row.id, 'job_state': 'failed', 'code': 'collection_failed',
+                'message': '完整销售/库存证据不可验证；未创建批次。核验账户权限或数据变化后重试原预览。', 'resume_action': 'execute_same_preview_recollects'}
+            row._set({'outcome': state})
+            return state
         observed_at = datetime.now(timezone.utc).isoformat()
         with self.env.cr.savepoint():
             row._lock()
@@ -137,5 +161,5 @@ class ScreeningWorkbench(models.Model):
     @api.model
     def screening_history(self):
         self._authorize('worker')
-        return [{'id': r.id, 'shop_id': r.shop_id.id, 'criteria': r.criteria, 'digest': r.digest, 'batch_id': r.batch_id.id or None, 'outcome': r.outcome}
+        return [{'id': r.id, 'shop_id': r.shop_id.id, 'criteria': r.criteria, 'digest': r.digest, 'batch_id': r.batch_id.id or None, 'outcome': {k: v for k, v in (r.outcome or {}).items() if k != 'job_checkpoint'}}
             for r in self.env[PREFIX + 'screening'].search([], order='id desc', limit=100)]

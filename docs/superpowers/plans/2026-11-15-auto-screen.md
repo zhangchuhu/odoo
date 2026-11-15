@@ -42,3 +42,11 @@
 - [x] GREEN: verify each listed SKU has known positive stock and a supported SIZE attribute, preserve per-SKU size evidence. Reject missing or contradictory size metadata as unknown. Do not infer an unlisted intended size range.
 - [x] Preserve item-level attributes in the live provider and compare on both passes; update MCP optional boolean, preview semantics and documentation.
 - [x] Run pure/MCP/disposable Odoo tests, commit scoped files; parent handles review and live validation.
+
+### Follow-up: durable bounded execution
+
+- Reproduce the synchronous 120-second timeout from server logs; parent checked preview1 has no batch and old request was reloaded.
+- Add pure TDD replay reader: one remote GET per execute call, private sanitized ordered checkpoints, both observation passes remain separate; refuse oversized or divergent checkpoints.
+- Reuse immutable request outcome JSON for private running state (no schema change). Nonblocking advisory lock prevents concurrent collection steps. Each HTTP step is bounded by one 30-second GET; retries retain original criteria/window/digest. No detached threads or hidden process lifetime.
+- HTTP execute returns running/progress until complete; same tool polls/resumes. History exposes safe status without checkpoint data. Completion uses existing atomic batch transaction and stable identity.
+- Test replay/restart, drift, concurrency, sanitized persistence, HTTP progress and completion. Update MCP/skill contract and docs; parent coordinates deployment and actual preview1 execution.

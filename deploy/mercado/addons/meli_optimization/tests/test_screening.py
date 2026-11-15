@@ -45,6 +45,50 @@ class ScreeningCase(TransactionCase):
         self.assertEqual([row['size']['value_name'] for row in payload['sku_size_evidence']], ['S', 'M'])
         self.assertEqual(payload['sales_units'], 0)
 
+    def test_execute_checkpoints_progress_without_exposing_private_cache(self):
+        from ..domain.screening_resume import CollectionPending
+        preview = self.preview()
+        def collect(model, shop, criteria, checkpoint=None):
+            if not checkpoint.get('responses'):
+                checkpoint['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]
+                raise CollectionPending()
+            return self.collected()
+        with patch.object(type(self.ui), '_screen_collect', collect):
+            running = self.ui.screening_execute(preview['id'], preview['digest'])
+            self.assertEqual(running['job_state'], 'running')
+            self.assertNotIn('job_checkpoint', running)
+            self.assertNotIn('job_checkpoint', self.ui.screening_history()[0]['outcome'])
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+            self.assertEqual(result['matched'], 1)
+            self.assertEqual(self.ui.screening_execute(preview['id'], preview['digest']), result)
+
+    def test_concurrent_step_returns_progress_without_remote_call(self):
+        from odoo import sql_db
+        preview = self.preview()
+        with sql_db.db_connect(self.env.cr.dbname).cursor() as other:
+            other.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', [f"screen-step:{preview['id']}"])
+            with patch.object(type(self.ui), '_screen_collect', side_effect=AssertionError('duplicate remote fetch')):
+                state = self.ui.screening_execute(preview['id'], preview['digest'])
+            self.assertEqual(state['code'], 'step_in_progress')
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            self.assertEqual(self.ui.screening_execute(preview['id'], preview['digest'])['matched'], 1)
+
+    def test_failed_collection_retries_fresh_without_duplicate_batch(self):
+        preview = self.preview()
+        checkpoints = []
+        def collect(model, shop, criteria, checkpoint):
+            checkpoints.append(dict(checkpoint))
+            if len(checkpoints) == 1:
+                checkpoint['responses'] = [{'unverified': True}]
+                raise ValueError('source changed')
+            return self.collected()
+        with patch.object(type(self.ui), '_screen_collect', collect):
+            failed = self.ui.screening_execute(preview['id'], preview['digest'])
+            self.assertEqual(failed['job_state'], 'failed')
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        self.assertEqual(checkpoints[1], {})
+        self.assertEqual(result['matched'], 1)
+
     def test_atomic_batch_rollback(self):
         preview = self.preview()
         count = self.env['meli.optimization.batch'].search_count([])
@@ -96,8 +140,15 @@ class ScreeningHTTPCase(HttpCase):
         wrong = self.url_open(path, json={'digest': 'changed'}, headers=headers)
         self.assertEqual(wrong.status_code, 409, wrong.text)
         def collect(*args):
+            from ..domain.screening_resume import CollectionPending
+            if not args[-1].get('responses'):
+                args[-1]['responses'] = [{'path': '/users/me', 'query': [], 'data': {'id': 8}}]
+                raise CollectionPending()
             return ([dict(id='MLM1', seller_id='9', site_id='MLM', title='Dress', available_quantity=20, variations=[])], [], dict(orders_complete=True, provider='isolated-test'))
         with patch.object(type(self.env['meli.optimization.case']), '_screen_collect', collect):
+            pending = self.url_open(path, json={'digest': row['digest']}, headers=headers)
+            self.assertEqual(pending.json()['data']['job_state'], 'running')
+            self.assertNotIn('job_checkpoint', pending.text)
             executed = self.url_open(path, json={'digest': row['digest']}, headers=headers)
         self.assertEqual(executed.status_code, 200, executed.text)
         self.assertEqual(executed.json()['data']['matched'], 1)
