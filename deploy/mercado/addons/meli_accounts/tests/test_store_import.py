@@ -199,12 +199,12 @@ class TestStoreImport(TransactionCase):
     def test_absent_description_is_optional_but_auth_error_is_not(self):
         response = requests.Response()
         response.status_code = 404
-        with patch('odoo.addons.meli_accounts.importing.requests.get', return_value=response):
+        with patch('odoo.addons.meli_accounts.importing.platform_api.request', return_value=response):
             self.assertEqual(self.stores[0]._import_get('/marketplace/items/CBT900001/description', 'test'), {})
             with self.assertRaises(UserError):
                 self.stores[0]._import_get('/items/CBT900001', 'test')
         response.status_code = 403
-        with patch('odoo.addons.meli_accounts.importing.requests.get', return_value=response):
+        with patch('odoo.addons.meli_accounts.importing.platform_api.request', return_value=response):
             with self.assertRaises(UserError):
                 self.stores[0]._import_get('/marketplace/items/CBT900001/description', 'test')
 

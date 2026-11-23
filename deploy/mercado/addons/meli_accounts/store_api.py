@@ -1,9 +1,9 @@
+from odoo.addons.meli_platform_adapter import api as platform_api, oauth
 import requests
 from odoo import models
 from odoo.exceptions import UserError
 from .credentials import credential_token
 
-API = 'https://api.mercadolibre.com'
 
 class StoreAPI(models.Model):
     _inherit = 'meli.independent.store'
@@ -13,7 +13,7 @@ class StoreAPI(models.Model):
 
     def _get(self, path, params=None):
         try:
-            r = requests.get(API + path, headers={'Authorization':'Bearer '+self._token()}, params=params, timeout=30)
+            r = platform_api.request('GET', path, token=self._token(), params=params, timeout=30)
             if not r.ok:
                 raise UserError('美客多读取失败（HTTP %s），请稍后重试。' % r.status_code)
             return r.json()

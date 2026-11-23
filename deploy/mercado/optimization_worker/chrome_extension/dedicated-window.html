@@ -1,0 +1,4 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>爆款采集专用窗口</title>
+<style>body{font:16px system-ui,sans-serif;color:#24334b;margin:48px;max-width:720px}button{padding:10px 16px;margin:8px 8px 8px 0;border:1px solid #356ce1;border-radius:5px;background:#356ce1;color:white;cursor:pointer}button:disabled{background:#dfe5ee;border-color:#dfe5ee;color:#75839a;cursor:not-allowed}#status{padding:14px;background:#f0f5ff;border-radius:5px}</style></head>
+<body><h1>爆款采集控制页</h1><p>这是采集专用窗口，请保留此标签以便浏览器重启后恢复。</p><p>先确认当前任务与窗口，再打开该任务的专属标签；在目标平台核验后打开采集器。</p><button id="register">确认当前任务与窗口</button><button id="create" disabled>打开任务专属标签</button><p id="status" role="status" aria-live="polite">尚未连接任务</p><details><summary>窗口登记诊断记录</summary><pre id="diagnostics" aria-live="polite">暂无诊断记录</pre></details><script src="collector-trace.js"></script><script src="dedicated-window-ui.js"></script></body></html>

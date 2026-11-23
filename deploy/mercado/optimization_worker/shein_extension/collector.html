@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SHEIN Evidence Collector</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 20px; color: #191919; }
+    label { display: block; margin: 12px 0; }
+    input, select, textarea, button { box-sizing: border-box; font: inherit; width: 100%; }
+    input, select, textarea { margin-top: 4px; padding: 8px; }
+    button { margin-top: 10px; padding: 9px; }
+    #error { color: #a40000; white-space: pre-wrap; }
+    #status { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>SHEIN evidence</h1>
+  <form id="setup">
+    <label>Task record ID <input id="record-id" required pattern="rec[A-Za-z0-9_-]+"></label>
+    <label>Platform <select id="platform"><option value="shein-us">SHEIN US</option></select></label>
+    <label>Codex query 1 <input class="query" required></label>
+    <label>Codex query 2 <input class="query" required></label>
+    <label>Codex query 3 <input class="query" required></label>
+    <label>Cards per query (30–50) <input id="card-limit" type="number" min="30" max="50" value="30" required></label>
+    <label>Task result limit <input id="result-limit" type="number" min="1" value="2" required></label>
+    <button type="submit">Begin collection</button>
+  </form>
+  <section id="controls" hidden>
+    <p id="next-product" role="status"></p>
+    <button id="open-next-candidate" type="button" hidden>在任务标签打开下一候选</button>
+    <button id="collect-search" type="button">Collect current search query</button>
+    <label>Detail status
+      <select id="detail-status"><option value="qualified">Qualified</option><option value="rejected">Rejected</option></select>
+    </label>
+    <label>Rejection reason <select id="detail-reason"><option value=""></option><option>visual_category_mismatch</option><option>imagery_ambiguous_or_inaccessible</option><option>metric_missing_or_ambiguous</option><option>threshold_failure</option><option>identity_changed</option><option>detail_inaccessible</option></select></label>
+    <label>Visual category <select id="visual-category-code"><option value="">Unknown</option><option>dress</option><option>formal_gown</option><option>jumpsuit</option><option>overalls</option><option>womens_pants_set</option><option>womens_shorts_set</option><option>womens_skirt_set</option><option>womens_suit</option><option>top</option><option>blouse</option><option>shirt</option><option>vest</option><option>blazer</option><option>jacket</option><option>coat</option><option>sweater</option><option>cardigan</option><option>pants</option><option>shorts</option><option>skirt</option><option>shoes</option></select></label>
+    <label>Match level <select id="match-level"><option value=""></option><option>同款</option><option>高度相似</option><option>类似竞品</option></select></label>
+    <label>Visible visual features, one per line <textarea id="visual-features"></textarea></label>
+    <button id="collect-detail" type="button">Collect current detail</button>
+    <button id="stage-evidence" type="button">回传当前任务证据</button>
+    <button id="export" type="button">Download evidence.json</button>
+  </section>
+  <section id="gallery-capture" hidden data-platform="shein-us">
+    <h2>回传候选主图库</h2>
+    <p>在商品详情中放大当前规格的主图，按页面顺序逐张核验原图。</p>
+    <label>合格候选的商品 ID <input id="capture-product"></label>
+    <label>当前规格在页面显示的图片总数 <input id="capture-total" type="number" min="1" max="100"></label>
+    <label>当前查看的图片序号 <input id="capture-position" type="number" min="1" value="1"></label>
+    <label>原图网址（同时显示多张大图时填写）<input id="capture-source" type="url"></label>
+    <button id="capture-inspect" type="button">查看当前原图</button>
+    <p id="capture-preview" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></p>
+    <button id="capture-add" type="button">记录当前可见原图</button>
+    <button id="capture-restore" type="button">查看此候选已记录的原图</button>
+    <button id="capture-submit" type="button">回传有序图库清单与详情截图</button>
+    <button id="capture-download" type="button" hidden>保存此候选全部原图并入库</button>
+    <p id="capture-status" role="status" aria-live="polite"></p>
+    <ol id="capture-links"></ol>
+  </section>
+  <button id="binding-connect" type="button">连接当前任务</button>
+  <button id="recover-session" type="button">恢复本任务采集进度</button>
+  <button id="binding-activate" type="button">切换到已绑定任务标签</button>
+  <p id="binding-status" role="status">尚未连接任务</p>
+  <p id="binding-identity" role="status">标签身份待核验</p>
+  <p id="status" role="status"></p>
+  <p id="error" role="alert"></p>
+  <script src="query_gate.js"></script>
+  <script src="binding_validation.js"></script>
+  <script src="peer_handshake.js"></script>
+  <script src="native_guard.js"></script>
+  <script src="activation.js"></script>
+  <script src="candidate_navigation.js"></script>
+  <script src="gallery_binding.js"></script>
+  <script src="binding.js"></script>
+  <script src="gallery_download.js"></script>
+  <script src="gallery_capture.js"></script>
+  <script src="session_persistence.js"></script>
+  <script src="evidence_download.js"></script>
+  <script src="detail_inputs.js"></script>
+  <script src="collector.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "host": "127.0.0.1",
+  "port": 8071,
+  "erpBaseUrl": "http://127.0.0.1:8069",
+  "credentials": [
+    { "mcpToken": "replace-with-a-separate-long-random-mcp-token", "odooApiKey": "replace-with-odoo-api-key" }
+  ]
+}

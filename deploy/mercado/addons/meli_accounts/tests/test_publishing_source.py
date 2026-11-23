@@ -126,15 +126,15 @@ class TestPublishingSource(TransactionCase):
         response.status_code = 201
         response._content = json.dumps({'id': 'CBT899999'}).encode()
         submitted = []
-        def post(url, **kwargs):
-            self.assertEqual(url, 'https://api.mercadolibre.com/global/items')
+        def post(method, path, **kwargs):
+            self.assertEqual((method, path), ('POST', '/global/items'))
             submitted.append(kwargs['json'])
             return response
         with self.network(), patch.object(type(self.target), '_publishing_target', return_value=self.target_data), \
              patch.object(type(self.target), '_token', return_value='test-only-token'), \
              patch.object(type(job), '_upload_images', return_value=['uploaded-picture']), \
              patch.object(self.env.cr, 'commit', side_effect=self.env.flush_all), \
-             patch('odoo.addons.meli_accounts.publishing.requests.post', side_effect=post):
+             patch('odoo.addons.meli_accounts.publishing.platform_api.request', side_effect=post):
             job.action_check()
             job.action_publish()
             job._publish_one()

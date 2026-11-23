@@ -86,22 +86,21 @@ wait. Only a database conflict before sending a refresh request can retry. Refre
 does not commit caller business changes. Save new shops before calling `_token()`;
 do not hold the same store row lock while acquiring credentials.
 
-## Verification
+## Platform adapter and verification
 
-From the Odoo checkout, with PostgreSQL available to the current Unix user:
+Platform mapping, HTTP transport and OAuth lifecycle now belong to
+`meli_platform_adapter`. BFF authentication, permissions and resource ownership
+checks remain in this addon. `meli_accounts` supplies credential persistence.
+
+From the Odoo checkout:
 
 ```bash
-.venv/bin/python deploy/mercado/tests/run_bff.py
-.venv/bin/python deploy/mercado/tests/run_bff.py --unit-only
+.venv/bin/python deploy/mercado/tests/run_unit.py
 ```
 
-The runner creates a unique `meli_bff_test_*` database, uses `/dev/null` configuration,
-disables cron, and retains the database and printed temporary artifact directory.
-It never loads production configuration or production tokens. To upgrade and rerun
-the same disposable database, use `--reuse <printed-artifact-directory>`.
-Tests simulate Mercado Libre; no real product writes have been exercised.
+For the explicitly configured local database deployment and integration tests,
+see `deploy/mercado/README.md`. The local upgrade runner modifies localhost
+`mercado:5433`, creates no separate test database, and blocks external network
+connections. Back up the local database and stop local Odoo before running it.
 
-Mappings rechecked using mercadolibre-mcp-server (CBT/en_us):
-[create/update](https://global-selling.mercadolibre.com/devsite/global-selling-item-create-update-global-items),
-[description](https://global-selling.mercadolibre.com/devsite/item-description).
 No `/api/proxy/platform`, Amazon, shipping batch or generic proxy endpoints exist.

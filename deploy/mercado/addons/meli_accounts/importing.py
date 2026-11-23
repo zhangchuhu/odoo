@@ -1,3 +1,4 @@
+from odoo.addons.meli_platform_adapter import api as platform_api, oauth
 """Read-only Mercado Libre imports, scoped to an independently authorized seller."""
 import base64
 import logging
@@ -9,7 +10,6 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .models import MANAGER
-from .store_api import API
 
 _logger = logging.getLogger(__name__)
 ITEM = re.compile(r'(CBT|MLM)\d+\Z')
@@ -54,7 +54,7 @@ class StoreImportEntry(models.Model):
         # A token is acquired before the batch transaction. Never rotate tokens
         # (which commits) inside an item's savepoint.
         try:
-            response = requests.get(API + path, headers={'Authorization': 'Bearer ' + token},
+            response = platform_api.request('GET', path, token=token,
                                     params=params, timeout=30)
             if response.status_code == 404 and path.endswith('/description'):
                 return {}

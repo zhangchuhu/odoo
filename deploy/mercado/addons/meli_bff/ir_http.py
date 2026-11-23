@@ -56,6 +56,15 @@ class IrHttp(models.AbstractModel):
             raw_target = request.httprequest.environ.get('RAW_URI') or request.httprequest.environ.get('REQUEST_URI') or request.httprequest.path
             if '%' in raw_target.split('?', 1)[0]:
                 raise BffError(404, 'Encoded paths are not supported')
+            path = request.httprequest.path
+            if ((path == '/api/meli/operations' and request.httprequest.method == 'GET') or
+                    (re.fullmatch(r'/api/meli/operations/[a-z][a-z0-9_.]*/execute', path)
+                     and request.httprequest.method == 'POST')):
+                request.httprequest.max_content_length = MAX_BODY
+                request._meli_body = request.httprequest.get_data(cache=True)
+                if len(request._meli_body) > MAX_BODY:
+                    raise BffError(413, 'Request body is too large')
+                return super()._pre_dispatch(rule, args)
             operation = resolve_route(request.httprequest.method, request.httprequest.path[len('/api/meli'):])
             store = authorize(request.env, operation)
             request._meli_company = store.company_id.id if store is not None else request.env.companies.ids

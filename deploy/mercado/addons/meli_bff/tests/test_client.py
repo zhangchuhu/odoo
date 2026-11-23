@@ -4,7 +4,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-from .. import client
+from odoo.addons.meli_platform_adapter import transport as client
 from ..protocol import BffError
 
 
@@ -87,6 +87,19 @@ class TestClient(unittest.TestCase):
         self.addCleanup(result.close)
         self.assertEqual(result.status, 302)
         self.assertEqual(len(self.server.received), 1)
+
+    def test_platform_headers_are_strictly_allowlisted(self):
+        client.send('GET', '/headers', token='test-token', extra_headers={'x-format-new': 'true'}).close()
+        self.assertEqual(self.server.received[-1][1]['x-format-new'], 'true')
+        for headers in ({'Authorization': 'Bearer attacker'}, {'x-format-new': 'false'}, {'X-Forwarded-Host': 'evil'}):
+            with self.assertRaises(BffError):
+                client.send('GET', '/headers', token='test-token', extra_headers=headers)
+
+    def test_oversized_platform_response_is_rejected_before_delivery(self):
+        with patch.object(client, 'MAX_RESPONSE_BYTES', 3, create=True):
+            with self.assertRaises(BffError) as raised:
+                client.send('GET', '/large', token='test-token')
+            self.assertEqual(raised.exception.status, 502)
 
     def test_unsafe_path_and_network_failure(self):
         for path in ['https://evil.test', '//evil.test', '/items/../oauth/token', '/items?access_token=x']:

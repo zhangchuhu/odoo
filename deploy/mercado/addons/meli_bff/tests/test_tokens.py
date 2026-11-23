@@ -24,6 +24,7 @@ class TestTokens(TransactionCase):
                 'group_ids': [(6, 0, [env.ref('meli_oerp.group_mercadolibre_manager').id])],
             })
             self.token_uid = user.id
+            self.token_partner_id = user.partner_id.id
             store = env['meli.independent.store'].create({
                 'name': 'BFF credential test', 'seller_id': '987650001', 'state': 'connected',
                 'access_token': 'old-access', 'refresh_token': 'old-refresh',
@@ -36,6 +37,7 @@ class TestTokens(TransactionCase):
         with self.db.cursor() as cr:
             api.Environment(cr, SUPERUSER_ID, {})['meli.independent.store'].browse(self.store_id).unlink()
             api.Environment(cr, SUPERUSER_ID, {})['res.users'].browse(self.token_uid).unlink()
+            api.Environment(cr, SUPERUSER_ID, {})['res.partner'].browse(self.token_partner_id).unlink()
             cr.commit()
         super().tearDown()
 

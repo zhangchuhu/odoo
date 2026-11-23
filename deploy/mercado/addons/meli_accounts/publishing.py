@@ -1,3 +1,4 @@
+from odoo.addons.meli_platform_adapter import api as platform_api, oauth
 import hashlib
 import json
 import re
@@ -5,7 +6,6 @@ from urllib.parse import urlparse
 import requests
 from odoo import api, fields, models
 from odoo.exceptions import UserError
-from .store_api import API
 
 STATES = [('draft','待检查'),('blocked','需补资料'),('ready','检查通过'),('queued','等待发布'),('sending','发布中'),('done','已创建刊登'),('failed','发布失败'),('uncertain','待核对结果')]
 LOCKED = {'queued','sending','done','uncertain'}
@@ -257,7 +257,7 @@ class Publication(models.Model):
                     if size>15*1024*1024:
                         raise UserError('商品图片超过 15 MB。')
                     parts.append(chunk)
-            r=requests.post(API+'/pictures/items/upload',headers={'Authorization':'Bearer '+token},
+            r=platform_api.request('POST', '/pictures/items/upload', token=token,
                 files={'file':('product.jpg',b''.join(parts),'image/jpeg')},timeout=45)
             if not r.ok or not r.json().get('id'):
                 raise UserError('上传商品图片失败，请稍后重新检查并发布。')
@@ -290,7 +290,7 @@ class Publication(models.Model):
         self._set({'state':'sending','submitted_at':fields.Datetime.now(),'payload':body,'result':'已开始提交；结果不确定时不会自动重发。'})
         self.env.cr.commit() # Durable intent prevents duplicate POST after worker crash.
         try:
-            r=requests.post(API+'/global/items',headers={'Authorization':'Bearer '+token},json=body,timeout=60)
+            r=platform_api.request('POST', '/global/items', token=token,json=body,timeout=60)
             d=r.json()
         except (requests.RequestException,ValueError):
             self._set({'state':'uncertain','result':'网络中断或响应无法解析。请先在新店后台核对，勿重复发布。'})

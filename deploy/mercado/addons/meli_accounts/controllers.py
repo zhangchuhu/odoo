@@ -1,3 +1,4 @@
+from odoo.addons.meli_platform_adapter import api as platform_api, oauth
 import base64
 import hashlib
 import secrets
@@ -61,18 +62,17 @@ class StoreAuthorization(MercadoLibreLogin):
             return reply('Authorization was cancelled or denied. Please retry from the store page.')
         company = store.company_id.sudo()
         try:
-            response = requests.post('https://api.mercadolibre.com/oauth/token', data={
+            response = oauth.exchange({
                 'grant_type': 'authorization_code', 'client_id': company.mercadolibre_client_id,
                 'client_secret': company.mercadolibre_secret_key, 'code': codes['code'],
-                'redirect_uri': pending['redirect_uri'], 'code_verifier': pending['verifier']}, timeout=30)
+                'redirect_uri': pending['redirect_uri'], 'code_verifier': pending['verifier']})
             response.raise_for_status()
             token = response.json()
             seller = str(token.get('user_id') or '')
             store._check_seller(seller)
             if not token.get('access_token') or not token.get('refresh_token'):
                 return reply('Authorization returned incomplete credentials. Please retry.')
-            response = requests.get('https://api.mercadolibre.com/users/me', headers={
-                'Authorization': 'Bearer ' + token['access_token']}, timeout=30)
+            response = platform_api.request('GET', '/users/me', token=token['access_token'], timeout=30)
             response.raise_for_status()
             profile = response.json()
             if str(profile.get('id')) != seller or profile.get('site_id') != 'CBT':
