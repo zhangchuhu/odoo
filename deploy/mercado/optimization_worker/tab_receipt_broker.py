@@ -502,6 +502,8 @@ class Broker:
                                 'guard_active':guard_required and (not self.anchor_origin or anchor_active) and self._tab_guard_connected(self.session)}
                         if self.gallery_binding and fenced:
                             result.update(gallery_phase=True,gallery_binding_required=bool(matches and not gallery_ready))
+                        if matches and getattr(self, 'task_id', None) is not None:
+                            result['task_id'] = self.task_id
                         if fenced and self.anchor_origin:
                             result.update(platform=self.challenge['platform'], anchor_extension_id=urlsplit(self.anchor_origin).hostname,
                                           peer_extension_id=urlsplit(self.peer_origin).hostname if self.peer_origin else None)

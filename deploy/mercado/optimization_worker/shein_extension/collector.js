@@ -388,9 +388,8 @@
     if (Number.isInteger(tabId) && tabId > 0) return true;
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
     if (!Number.isInteger(tab?.id) || !tab.url?.startsWith("https://us.shein.com/")) throw new Error("open the target us.shein.com tab before launching the collector");
-    const url = new URL(chrome.runtime.getURL("collector.html"));
-    url.searchParams.set("tab", String(tab.id));
-    await chrome.windows.create({url: url.href, type: "popup", width: 520, height: 760});
+    const opened = await chrome.runtime.sendMessage({type: "open_collector_popup", tab_id: tab.id});
+    if (opened?.ok !== true) throw new Error("Could not open collector popup");
     window.close();
     return false;
   }

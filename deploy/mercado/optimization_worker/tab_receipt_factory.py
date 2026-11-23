@@ -96,6 +96,7 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
                   expected_session=existing['session_id'] if existing else None,
                   reconcile=reconcile if rebind else None, rebind_check=reconcile if existing or gallery else None,watch_only=bool(watch_only or gallery),anchor_origin=anchor_origin,peer_origin=peer_origin,
                   gallery_binding=gallery,gallery_downloads=downloads,gallery_capture=capture_gallery, progress_plan=(plan, task_config(record.get('context', {}).get('snapshot', {}), plan)) if 'result_limit' in plan else None)
+    broker.task_id = claim['id']
     if dedicated_required and watch_only and not gallery and plan['platform']=='mercado-libre-mx':
         from .visual_candidate import VisualCandidate
         preview = VisualCandidate(ledger, (request_id,digest,claim['lease_epoch']), plan,

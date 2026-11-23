@@ -9,13 +9,15 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import stat
 import struct
 import sys
+from contextlib import closing
 from datetime import datetime, timezone
 
 def trace_native(path, operation, stage, request_id=None, unused=None, *, code='ok', message='', transport_error=None):
-    allowed={'guard_open','gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','checkpoint_detail','collector_progress','next_candidate','query_cards_complete','stage_evidence','binding_status','anchor_challenge','anchor_confirm','anchor_guard_open','task_tab_challenge','task_tab_confirm','activation_challenge','activation_confirm'}
+    allowed={'guard_open','gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','checkpoint_detail','collector_progress','collector_completion','next_candidate','query_cards_complete','stage_evidence','binding_status','anchor_challenge','anchor_confirm','anchor_guard_open','task_tab_challenge','task_tab_confirm','activation_challenge','activation_confirm'}
     if operation not in allowed or stage not in {'received','forwarded','failed','guard_response','broker_received','broker_result'}: return
     checkpoint_codes = {'checkpoint_binding_invalid', 'checkpoint_identity_changed', 'checkpoint_anchor_pending', 'checkpoint_index_invalid', 'checkpoint_cards_missing',
                         'checkpoint_guard_pending', 'detail_index_invalid', 'detail_checkpoint_conflict',
@@ -133,12 +135,48 @@ def forward_guard(sock_path, first, source, destination, *, trace_path=None):
                 write_message(destination,response)
                 if response.get('ok') is not True: return
 
+def collector_completion(private, message):
+    """Read the persisted Odoo completion receipt after the live broker exits."""
+    task = message.get('task_id')
+    request = message.get('request_id')
+    if (set(message) != {'operation', 'task_id', 'request_id'}
+            or message['operation'] != 'collector_completion'
+            or type(task) is not int or not 0 < task <= 2**53 - 1
+            or not isinstance(request, str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', request)):
+        return {'ok': False}
+    result = dict(ok=True, complete=False, request_id=request, task_id=task)
+    for name in ('research-scoped-worker.sqlite', 'research-worker.sqlite', f'research-task{task}-worker.sqlite'):
+        path = private / name
+        try:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                continue
+            with closing(sqlite3.connect(path.as_uri()+'?mode=ro', uri=True, timeout=0.5)) as db:
+                rows = db.execute("""SELECT 1 FROM runs WHERE id GLOB ?
+                    AND json_extract(record,'$.request_id') = ?
+                    AND json_extract(record,'$.claim.id') = ?
+                    AND json_extract(record,'$.claim.task_type') = 'research.bestseller'
+                    AND json_extract(record,'$.done') = 1
+                    AND json_extract(record,'$.outcome') = 'succeeded' LIMIT 1""", (f'{task}:*', request, task))
+                if rows.fetchone():
+                    return dict(result, complete=True)
+        except (OSError, sqlite3.Error):
+            continue
+    return result
+
 def main():
     private=Path(__file__).resolve().parents[3]/'.local/optimization-codex-worker'
     config=private_config(private/'collector-native.json')
     if len(sys.argv)<2 or not validate_origin(sys.argv[1],config.get('extension_ids',config.get('extension_id'))): raise ValueError('Unauthorized extension origin')
     while (value:=read_message(sys.stdin.buffer)) is not None:
         op=value.get('operation'); req=value.get('request_id'); trace=private/'collector-window-trace.jsonl'
+        if op == 'collector_completion':
+            completion = collector_completion(private, value)
+            write_message(sys.stdout.buffer, completion)
+            if completion.get('complete') is True:
+                trace_native(trace, op, 'forwarded', req)
+            continue
         trace_native(trace,op,'received',req)
         if value.get('operation') in ('guard_open','anchor_guard_open'):
             if value['operation']=='anchor_guard_open':

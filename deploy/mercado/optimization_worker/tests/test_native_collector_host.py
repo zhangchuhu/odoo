@@ -1,6 +1,27 @@
 import io, json, struct, unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from optimization_worker.native_collector_host import read_message, write_message, validate_origin
 class NativeCollectorHostTests(unittest.TestCase):
+ def test_completion_requires_durable_success_for_the_original_research_request(self):
+  from optimization_worker.journal import Journal
+  from optimization_worker.native_collector_host import collector_completion
+  with TemporaryDirectory() as folder:
+   private=Path(folder)
+   request='8ef82438-a6e9-4358-a47d-a67eb233c95c'
+   message=dict(operation='collector_completion', request_id=request, task_id=228)
+   record=dict(claim=dict(id=228,input_hash='test',lease_epoch=1,task_type='research.bestseller'),
+               request_id=request,phase='terminal_checkpoint')
+   journal=Journal(private/'research-scoped-worker.sqlite')
+   try:
+    for done,outcome in [(False,None),(True,'waiting'),(True,'lease_lost'),(True,'failed'),(True,'succeeded')]:
+     journal.save(dict(record,done=done,outcome=outcome))
+     self.assertEqual(collector_completion(private,message),
+                      dict(ok=True,complete=outcome=='succeeded',request_id=request,task_id=228))
+    self.assertFalse(collector_completion(private,dict(message,task_id=229))['complete'])
+    self.assertFalse(collector_completion(private,dict(message,request_id='5'+request[1:]))['complete'])
+   finally:
+    journal.close()
  def test_frame_roundtrip(self):
   buf=io.BytesIO(); write_message(buf, {'operation':'poll'});buf.seek(0);self.assertEqual(read_message(buf),{'operation':'poll'})
  def test_short_or_oversized_frame_refused(self):

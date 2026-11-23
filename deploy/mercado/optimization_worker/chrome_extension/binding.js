@@ -6,7 +6,9 @@
   const HOST='local.odoo.collector_binding';
   const target=Number(new URL(location.href).searchParams.get('tab'));
   if (!Number.isSafeInteger(target) || target<=0) return;
-  let busy=false, selected=false, enabled=false, requestId=null, reconnecting=false, activationPending=false;
+  const popupRequest = new URL(location.href).searchParams.get('request');
+  const trackPopup = globalThis.CollectorPopup?.monitor(chrome, HOST, window, target);
+  let busy=false, selected=false, enabled=false, requestId=popupRequest, reconnecting=false, activationPending=false;
   const status=document.getElementById("binding-status");
   const connect=document.getElementById("binding-connect");
   const identity=document.getElementById("binding-identity");
@@ -79,6 +81,7 @@
           if (!state) return;
         }
         await trace('binding_identity',state.ok===true?'ok':'unverified');
+        trackPopup?.(state, session);
         if(identity) identity.textContent=state?.ok ? `任务 ${requestId}；当前标签 ${target}；任务标签 ${state.bound_tab_id ?? "待绑定"}；${state.bound_tab_id == null ? "等待首组绑定" : state.matches ? "匹配" : "不匹配，请返回任务标签"}` : `当前标签 ${target}；后台身份待核验`;
       if (selected && state.ok !== true) throw new Error("binding_unavailable");
       if (selected) {
@@ -119,6 +122,7 @@
         }
         if(identity) identity.textContent=`任务 ${requestId}；当前标签 ${target}；任务标签 ${confirmed.bound_tab_id ?? "待绑定"}；${confirmed.bound_tab_id == null ? "等待首组绑定" : confirmed.matches ? "匹配" : "不匹配，请返回任务标签"}`;
         state=confirmed;
+        trackPopup?.(confirmed, session);
         await restoreGuard(confirmed,tab);
         show('已登记窗口，可以新建标签');
       }

@@ -176,7 +176,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('连接当前任务后首先点击“恢复本任务采集进度”', prompt)
         self.assertIn('首次任务会按已绑定的计划初始化', prompt)
         self.assertIn('不得覆盖已有进度', prompt)
-        self.assertIn('仅关闭旧采集器窗口', prompt)
+        self.assertIn('保留旧采集器弹窗及其进度', prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]
@@ -539,7 +539,7 @@ class ResearchSearchSessionPromptTests(unittest.TestCase):
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})
-        for phrase in ('每次新任务','打开任务专属标签','不关闭或改写既有标签','搜索框','逐字','首条查询','完全可见','新采集会话','三组','旧任务','网址 slug','检查点'):
+        for phrase in ('每次新任务','打开任务专属标签','不关闭或改写既有标签','搜索框','逐字','首条查询','完全可见','复用当前任务的采集器弹窗','三组','旧任务','网址 slug','检查点'):
             self.assertIn(phrase,prompt)
 
 class ResearchStagePromptTests(unittest.TestCase):

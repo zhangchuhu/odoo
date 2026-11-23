@@ -26,6 +26,7 @@ function worker({rotated=false,tab=7,platform='mercado-libre-mx'}={}) {
     tabs:{onCreated:{addListener(){}},get:async id=>({id,windowId:3,url:platform==='shein-us'?'https://us.shein.com/':'https://www.mercadolibre.com.mx/'})},storage:{session:{get:async()=>({collector_session_id:session})}},
   };
   const context={chrome,URL,Date,Uint8Array,setTimeout:fn=>setImmediate(fn),importScripts(){},NativeGuard:{onMessage(){}},
+    CollectorPopup:require('../chrome_extension/collector_popup.js'),
     CollectorTrace:{append:async()=>{},appendError:async()=>{}},
     DedicatedWindow:{ensureWindow:async()=>{events.push('window_proof');return {windowId:3,tabId:33,marker:'f'.repeat(32)}}},
     AnchorGuard:{openAnchorGuard(){guard=true;events.push('anchor_guard_open');return {ready:Promise.resolve(),alive:()=>guard,close(){guard=false}}}},

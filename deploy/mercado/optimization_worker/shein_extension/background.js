@@ -1,9 +1,10 @@
 'use strict';
-importScripts('native_guard.js');
+importScripts('native_guard.js', 'collector_popup.js');
 chrome.runtime.onMessage.addListener(NativeGuard.onMessage);
 // Observe native UI-created tabs. This cannot distinguish the user from CUA;
 // the broker must reject ambiguous candidates and fence the original lease.
 const HOST='local.odoo.collector_binding';
+const openCollectorPopup = CollectorPopup.opener(chrome, HOST, sessionId);
 let sessionPromise;
 function sessionId(){
  if (!sessionPromise) sessionPromise=(async()=>{
@@ -15,6 +16,12 @@ function sessionId(){
  return sessionPromise;
 }
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
+ if (message?.type === 'open_collector_popup' && sender.id === chrome.runtime.id
+     && sender.url === chrome.runtime.getURL('collector.html')) {
+  Promise.resolve().then(() => openCollectorPopup(message.tab_id))
+    .then(() => respond({ok: true}), () => respond({ok: false}));
+  return true;
+ }
  if (message?.type!=='collector_session_id' || sender.id!==chrome.runtime.id) return false;
  sessionId().then(id=>respond({session_id:id}),()=>respond({error:'session_unavailable'}));return true;
 });

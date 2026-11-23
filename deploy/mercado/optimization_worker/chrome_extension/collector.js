@@ -348,9 +348,8 @@
     let home = false;
     try { const page = new URL(tab.url); home = page.protocol === 'https:' && page.hostname === 'www.mercadolibre.com.mx' && !page.port && !page.username && !page.password && page.pathname === '/'; } catch (_) {}
     if (!Number.isInteger(tab?.id) || !(home || isSearchPage(tab.url) || canonicalProductId(tab.url))) throw new Error("open the target Mercado homepage, search, or product tab before launching the collector");
-    const url = new URL(chrome.runtime.getURL("collector.html"));
-    url.searchParams.set("tab", String(tab.id));
-    await chrome.windows.create({url: url.href, type: "popup", width: 520, height: 760});
+    const opened = await chrome.runtime.sendMessage({type: "open_collector_popup", tab_id: tab.id});
+    if (opened?.ok !== true) throw new Error("Could not open collector popup");
     window.close();
     return false;
   }

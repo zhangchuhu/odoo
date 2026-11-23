@@ -1,5 +1,5 @@
 'use strict';
-importScripts('native_guard.js');
+importScripts('native_guard.js', 'collector_popup.js');
 chrome.runtime.onMessage.addListener(NativeGuard.onMessage);
 importScripts('collector-trace.js');
 importScripts('dedicated_window.js');
@@ -10,6 +10,7 @@ importScripts('anchor_reconnect.js');
 // Observe native UI-created tabs. This cannot distinguish the user from CUA;
 // the broker must reject ambiguous candidates and fence the original lease.
 const HOST='local.odoo.collector_binding';
+const openCollectorPopup = CollectorPopup.opener(chrome, HOST, sessionId);
 let sessionPromise;
 let anchorGuard;
 let anchorReconnect;
@@ -134,6 +135,12 @@ function sessionId(){
  return sessionPromise;
 }
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
+ if (message?.type === 'open_collector_popup' && sender.id === chrome.runtime.id
+     && sender.url === chrome.runtime.getURL('collector.html')) {
+  Promise.resolve().then(() => openCollectorPopup(message.tab_id))
+    .then(() => respond({ok: true}), () => respond({ok: false}));
+  return true;
+ }
  const ownControl=sender.id===chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('collector.html')) || sender.url?.startsWith(chrome.runtime.getURL('dedicated-window.html')));
  if (message?.type==='dedicated_current_request' && ownControl && sender.tab?.id>0) {
   (async()=>{const session=await sessionId(),tab=await chrome.tabs.get(sender.tab.id);await CollectorTrace.append('native_binding_status','sent');const result=await chrome.runtime.sendNativeMessage(HOST,{operation:'binding_status',tab_id:tab.id,window_id:tab.windowId,session_id:session});await CollectorTrace.append('native_binding_status',typeof result?.request_id==='string'?'request_received':'request_unavailable');return result;})().then(respond,async()=>{await CollectorTrace.append('native_binding_status','transport_error');respond({error:'unavailable'})});return true;
