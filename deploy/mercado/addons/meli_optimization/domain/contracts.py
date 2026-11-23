@@ -225,6 +225,8 @@ def validate_research_candidates(result):
         _require(key not in identities, 'invalid_result', 'Duplicate research item')
         identities.add(key)
         _require(_timestamp(item.get('observed_at')), 'invalid_result', 'Invalid observed_at')
+        if 'observation_time_scope' in item:
+            _require(item['observation_time_scope'] in ('detail', 'batch'), 'invalid_result', 'Invalid observation time scope')
         for field in ('sold_lower_bound', 'sold_upper_bound', 'review_count', 'position'):
             _require(field in item and (item[field] is None or _integer(item[field], 1 if field == 'position' else 0)),
                      'invalid_result', 'Invalid ' + field)

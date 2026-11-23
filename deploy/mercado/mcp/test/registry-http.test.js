@@ -13,6 +13,8 @@ async function fixture(t){
   if(req.url==='/api/meli/operations'){return res.end(JSON.stringify({contract_version:version,operations:[{operation_id:'items.read',domain:'items',title:'Read item',description:'Read',permission:'read',scope:'shop',request_kind:'json',response_kind:'json',exposure:'mcp',input_schema:{type:'object',properties:{item_id:{type:'string',pattern:'^CBT[0-9]+$'}},required:['item_id'],additionalProperties:false}},{operation_id:'pictures.upload',domain:'pictures',title:'Upload',description:'Upload',permission:'write',scope:'shop',request_kind:'multipart',response_kind:'json',exposure:'mcp',input_schema:{type:'object',properties:{},additionalProperties:false}},{operation_id:'shipments.label',domain:'shipments',title:'Label',description:'Label',permission:'read',scope:'shop',request_kind:'json',response_kind:'binary',exposure:'mcp',input_schema:{type:'object',properties:{},additionalProperties:false}}]}));}
   if(req.url==='/api/meli/operations/items.read/execute'){if(conflict){res.writeHead(409);return res.end(JSON.stringify({success:false,error:conflict===true?'Operation contract version changed':conflict}));}return res.end(JSON.stringify({owner:req.headers.authorization,version:JSON.parse(body).contract_version}));}
   if(req.url==='/api/meli/optimization/screening/1/execute')return res.end(JSON.stringify({success:true,data:{preview_id:1,job_state:'running',completed_reads:3,resume_action:'execute_same_preview'}}));
+  if(req.url==='/api/meli/optimization/bestseller-import/step')return res.end(JSON.stringify({success:true,data:{job_state:'running',items:[],resume_action:'execute_same_import'}}));
+  if(req.url==='/api/meli/optimization/bestseller-import/batch/26')return res.end(JSON.stringify({success:true,data:{batch_id:26,items:[{item_id:'MLM123'}]}}));
   if(req.url==='/api/meli/shops')return res.end(JSON.stringify({shops:[{id:42,name:req.headers.authorization}]}));
   if(req.url==='/api/meli/operations/pictures.upload/execute')return res.end('{"uploaded":true}');
   res.writeHead(404);res.end('{}');
@@ -26,7 +28,7 @@ async function fixture(t){
 }
 test('real Streamable HTTP tools use the authorized catalog and per-user identity',async t=>{
  const f=await fixture(t),a=await f.connect(tA),b=await f.connect(tB);
- assert.equal((await a.listTools()).tools.length,8);
+ assert.equal((await a.listTools()).tools.length,10);
  const shopA=unpack(await a.callTool({name:'listing_shops',arguments:{}}));
  assert.equal(shopA.shops[0].name,'Bearer key-a');
  const list=unpack(await a.callTool({name:'listing_list_operations',arguments:{}}));assert.equal(list.operations[0].operation_id,'items.read');
@@ -34,6 +36,19 @@ test('real Streamable HTTP tools use the authorized catalog and per-user identit
  const [ra,rb]=await Promise.all([invoke(a),invoke(b)]);assert.equal(unpack(ra).owner,'Bearer key-a');assert.equal(unpack(rb).owner,'Bearer key-b');
  assert.equal(f.calls.filter(x=>x.path.endsWith('/execute')).length,2);
  f.setVersion('v2');assert.equal(unpack(await invoke(a)).version,'v2');
+});
+
+test('batch import tool forwards one idempotent step with authorized identity',async t=>{
+ const f=await fixture(t),c=await f.connect(tA);
+ const args={batch_id:26,request_key:'batch-26-v1',config:{platform:'mercado-libre-mx',result_limit:5,min_sold:100,min_reviews:0,min_rating:0},retry_failed:true};
+ const r=await c.callTool({name:'optimization_bestseller_import',arguments:args});
+ assert.equal(unpack(r).data.job_state,'running');
+ const call=f.calls.at(-1);assert.equal(call.path,'/api/meli/optimization/bestseller-import/step');assert.equal(call.auth,'Bearer key-a');assert.deepEqual(JSON.parse(call.body),args);
+});
+test('batch details use scoped BFF identity',async t=>{
+ const f=await fixture(t),c=await f.connect(tA);
+ const r=await c.callTool({name:'optimization_bestseller_batch',arguments:{batch_id:26}});
+ assert.equal(unpack(r).data.items[0].item_id,'MLM123');assert.equal(f.calls.at(-1).auth,'Bearer key-a');
 });
 test('contract conflict is reported without replaying an operation',async t=>{
  const f=await fixture(t),c=await f.connect(tA);f.setConflict(true);

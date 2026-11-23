@@ -1,0 +1,104 @@
+"""Create a broker for one current task and its immutable collector plan."""
+import secrets
+from pathlib import Path
+from .domain import canonical_hash
+from .collector_cli import task_config
+from .host_session import worker_records, fence
+from .tab_receipt_broker import Broker
+from .tab_receipt_store import TabReceiptStore
+
+
+def can_rebind(record, run):
+    if (not isinstance(record,dict) or not isinstance(run,dict) or record.get('retired')
+            or record.get('task_type')!='research.bestseller' or run.get('phase')!='host_pending'
+            or run.get('pending') or run.get('recovery_pending')): return False
+    if record.get('state')=='prepared':
+        return not any(record.get(k) for k in ('collector_pending','collector_evidence','collector_artifact_id','candidate_uploads','gallery_manifests','uploads','result'))
+    if record.get('state')!='candidate_images_pending' or not str(record.get('collector_artifact_id','')).isdigit() or not isinstance(record.get('collector_evidence'),dict): return False
+    pending=record.get('collector_pending')
+    if not isinstance(pending,dict) or not isinstance(pending.get('result'),dict): return False
+    uploads=pending.get('candidate_uploads',{})
+    return isinstance(uploads,dict) and all(isinstance(v,dict) and v.get('state')=='confirmed' and str(v.get('artifact_id','')).isdigit() for v in uploads.values())
+
+
+def build_native_broker(path, ledger, request_id, query_index, store, client, journal, *, rebind=False, watch_only=False, dedicated_required=False):
+    from .native_collector_host import private_config, validate_origin
+    try: config=private_config(Path(path).parent/'collector-native.json')
+    except (OSError,ValueError): config={}
+    anchor_id=config.get('anchor_extension_id')
+    configured=config.get('extension_ids',config.get('extension_id'))
+    anchor_origin='chrome-extension://'+anchor_id+'/' if isinstance(anchor_id,str) else None
+    if not anchor_origin or not validate_origin(anchor_origin,configured):
+        anchor_origin=None
+    if dedicated_required and not anchor_origin:
+        raise ValueError('Dedicated anchor configuration required')
+    peer_id=config.get('peer_extension_id')
+    peer_origin='chrome-extension://'+peer_id+'/' if isinstance(peer_id,str) else None
+    if not peer_origin or not validate_origin(peer_origin,configured) or peer_origin==anchor_origin:peer_origin=None
+    def current(task_id=None):
+        rows=[r for r in worker_records(journal, task_id=task_id) if r.get('request_id')==request_id and not r.get('done')]
+        if len(rows)!=1 or rows[0]['claim'].get('task_type')!='research.bestseller': raise ValueError('Active original task required')
+        return rows[0]['claim']
+    def renew():
+        fence(client,journal,request_id,task_id=claim['id'])
+        now=current(claim['id'])
+        return now['lease_epoch']==claim['lease_epoch'] and now['input_hash']==claim['input_hash']
+    claim=current(); fence(client,journal,request_id,task_id=claim['id'])
+    record=store.inspect(request_id); binding=record.get('collector_plan') or {}; signed=dict(binding); digest=signed.pop('digest',None)
+    plan=binding.get('plan') or {}; queries=plan.get('queries')
+    if dedicated_required and plan.get('platform') == 'shein-us' and not peer_origin:
+        raise ValueError('Dedicated SHEIN peer configuration required')
+    if (record.get('retired') or record.get('task_type')!='research.bestseller' or not (record.get('state')=='prepared' or (record.get('state')=='candidate_images_pending' and isinstance(record.get('collector_pending'),dict) and isinstance(record['collector_pending'].get('result'),dict)))
+            or digest != canonical_hash(signed) or binding.get('request_id')!=request_id
+            or binding.get('snapshot_id')!=claim['snapshot_id'] or binding.get('company_id')!=claim['company_id']
+            or binding.get('input_hash')!=claim['input_hash'] or plan.get('platform') not in ('mercado-libre-mx','shein-us')
+            or not isinstance(queries,list) or len(queries)!=3 or type(query_index) is not int or not 0<=query_index<3):
+        raise ValueError('Valid signed current plan required')
+    challenge={'version':1,'request_id':request_id,'nonce':secrets.token_hex(16),'lease_epoch':claim['lease_epoch'],
+               'plan_digest':digest,'platform':plan['platform'],'query_index':query_index,'query':queries[query_index]}
+    rows=[r for r in worker_records(journal, task_id=claim['id']) if r.get('request_id')==request_id and not r.get('done')]
+    if record.get('state')=='candidate_images_pending' and not watch_only and (len(rows)!=1 or not can_rebind(record,rows[0])):
+        raise ValueError('Rebind requires reconciled candidate uploads')
+    receipts = TabReceiptStore(str(ledger))
+    current_binding=receipts.current_binding(request_id)
+    if current_binding and (current_binding.get('plan_digest')!=digest or current_binding.get('platform')!=plan['platform']):
+        raise ValueError('Existing tab belongs to another plan')
+    gallery = None
+    downloads = None
+    if (dedicated_required and record['state']=='candidate_images_pending' and getattr(client,'research_ledger_enabled',False) is True
+            and record.get('collector_pending',{}).get('result',{}).get('candidates') != []):
+        from .gallery_binding import GalleryBinding, gallery_target_reader
+        def outstanding():
+            runs = [r for r in worker_records(journal, task_id=claim['id']) if r.get('request_id')==request_id and not r.get('done')]
+            return runs[0] if len(runs)==1 else None
+        gallery = GalleryBinding(gallery_target_reader(store,client,claim,request_id,record,outstanding))
+        from .gallery_download import GalleryDownloads
+        preview_reader = None
+        if plan['platform']=='mercado-libre-mx':
+            from .visual_candidate import VisualCandidate
+            preview = VisualCandidate(ledger, (request_id,digest,claim['lease_epoch']), plan,
+                                      None, claim)
+            preview_reader = lambda identity,source,variant: preview.reuse_first_photo(store,identity,source,variant)
+        downloads = GalleryDownloads(store,client,claim,Path.home()/'Downloads',preview_reader)
+    if query_index and not gallery and not current_binding: raise ValueError('First query tab binding required')
+    if watch_only and not gallery and (not current_binding or rebind or receipts.next_query_index(request_id,digest,queries,claim['lease_epoch']) != 3): raise ValueError('Complete existing binding required for live session check')
+    def reconcile():
+        rows=[r for r in worker_records(journal, task_id=claim['id']) if r.get('request_id')==request_id and not r.get('done')]
+        return len(rows)==1 and renew() and can_rebind(store.inspect(request_id),rows[0])
+    if rebind and not gallery and (query_index!=0 or not current_binding or not reconcile()): raise ValueError('Rebind requires a reconciled original request')
+    def capture_gallery(event, ensure_current):
+        from .candidate_image_upload import capture_native_gallery
+        return capture_native_gallery(store, request_id, current(claim['id']), event, ensure_current)
+
+    existing=None if rebind or gallery else current_binding
+    broker = Broker(path,ledger,challenge,existing['tab_id'] if existing else None,renew,
+                  expected_window_id=existing['window_id'] if existing else None,
+                  expected_session=existing['session_id'] if existing else None,
+                  reconcile=reconcile if rebind else None, rebind_check=reconcile if existing or gallery else None,watch_only=bool(watch_only or gallery),anchor_origin=anchor_origin,peer_origin=peer_origin,
+                  gallery_binding=gallery,gallery_downloads=downloads,gallery_capture=capture_gallery, progress_plan=(plan, task_config(record.get('context', {}).get('snapshot', {}), plan)) if 'result_limit' in plan else None)
+    if dedicated_required and watch_only and not gallery and plan['platform']=='mercado-libre-mx':
+        from .visual_candidate import VisualCandidate
+        preview = VisualCandidate(ledger, (request_id,digest,claim['lease_epoch']), plan,
+                                  broker.progress_plan[1], claim)
+        broker.visual_photo = lambda b,e: preview.native(b,e,store,Path.home()/'Downloads')
+    return broker

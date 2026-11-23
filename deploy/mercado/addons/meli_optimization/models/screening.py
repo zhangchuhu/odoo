@@ -180,6 +180,15 @@ class ScreeningWorkbench(models.Model):
                     'digest': bounded({'body': facts, 'execution': 'local_snapshot', 'screening_id': row.id}),
                     'receipt': receipt, 'worker_uid': self.env.uid})
                 scoped.workbench_archive(case.id, task.id, result_hash)
+                # Preserve immediately usable observations while a separate
+                # queued task enriches this exact immutable snapshot with vision.
+                self.env[PREFIX + 'task'].with_company(shop.company_id).create({
+                    'case_id': case.id, 'snapshot_id': snapshot.id,
+                    'task_type': 'product.facts', 'payload': {
+                        'schema_version': '1', 'product_snapshot_id': str(snapshot.id),
+                        'screening_visual_enrichment': row.id,
+                    },
+                })
                 cases.append(case.id)
             outcome = dict(preview_id=row.id, batch_id=batch.id, case_ids=cases, matched=len(cases), unknown=result['unknown'], evaluated=result['evaluated'], source=source, observed_at=observed_at, committed_at=committed_at)
             bounded(outcome)

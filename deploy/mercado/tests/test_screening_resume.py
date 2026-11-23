@@ -10,6 +10,15 @@ class ResumeTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('resume', PATH)
         self.m = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.m)
 
+    def test_item_checkpoint_preserves_ordered_public_picture_fields(self):
+        raw = {'id': 'MLM1', 'pictures': [
+            {'id': 'a', 'secure_url': 'https://http2.mlstatic.com/a.jpg', 'private': 'secret'},
+            {'id': 'b', 'secure_url': 'https://http2.mlstatic.com/b.jpg'}]}
+        actual = self.m.minimized('/marketplace/items/MLM1', raw)
+        self.assertEqual(actual['pictures'], [
+            {'id': 'a', 'secure_url': 'https://http2.mlstatic.com/a.jpg'},
+            {'id': 'b', 'secure_url': 'https://http2.mlstatic.com/b.jpg'}])
+
     def test_each_call_bounds_io_and_resume_preserves_second_pass(self):
         checkpoint = {}
         calls = []
@@ -49,7 +58,8 @@ class ResumeTests(unittest.TestCase):
             calls.append(path)
             if path.endswith('/items/search'): return dict(seller_id='9', results=['MLM1'], paging=dict(total=1, limit=50, offset=0))
             if path.endswith('/orders/search'): return dict(results=[], paging=dict(total=0, limit=50))
-            return dict(id='MLM1', seller_id=9, site_id='MLM', title='Dress', variations=[], attributes=[dict(id='SIZE', value_name='Unitalla')], available_quantity=2)
+            return dict(id='MLM1', seller_id=9, site_id='MLM', title='Dress', variations=[], attributes=[dict(id='SIZE', value_name='Unitalla')], available_quantity=2,
+                        pictures=[{'id': 'p1', 'secure_url': 'https://http2.mlstatic.com/p1.jpg'}, {'id': 'p2', 'secure_url': 'https://http2.mlstatic.com/p2.jpg'}])
         for _ in range(10):
             try:
                 products, orders, source = domain.collect_shop(self.m.ReplayReads(checkpoint, remote).get, '9', criteria)
@@ -58,6 +68,7 @@ class ResumeTests(unittest.TestCase):
         else: self.fail('collection never completed')
         self.assertEqual(calls.count('/marketplace/items/MLM1'), 2)
         self.assertEqual(len(calls), 6)
+        self.assertEqual([p['id'] for p in products[0]['pictures']], ['p1', 'p2'])
         self.assertEqual(len(domain.screen_products(products, orders, criteria, '9', source['orders_complete'])['matches']), 1)
 
     def test_expired_final_checkpoint_does_not_replay_or_fetch(self):

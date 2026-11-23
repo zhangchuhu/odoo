@@ -3,6 +3,7 @@ from unittest.mock import patch
 from pathlib import Path
 from odoo.tests import HttpCase, tagged
 from odoo.tests.common import ChromeBrowser
+from ..domain import canonical_hash
 
 
 @tagged('post_install', '-at_install', 'optimization_browser')
@@ -13,8 +14,18 @@ class WorkbenchBrowserCase(HttpCase):
         self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref('meli_optimization.group_editor').id)]})
         ui = self.env['meli.optimization.case']
         detail = ui.workbench_create({'shop': '演示店铺', 'item_id': 'MLM-DEMO', 'title': 'Vestido elegante', 'seller_sku': 'SKU-A', 'batch_name': 'TEST BATCH NAV 3'})
-        task = self.env['meli.optimization.task'].create({'case_id': detail['id'], 'snapshot_id': detail['snapshot']['id'],
-            'task_type': 'title.generate', 'payload': {'schema_version': '1', 'facts_artifact_id': 'fixture', 'keywords_artifact_id': 'fixture', 'language': 'es-MX'}})
+        evidence = [{'id':'fixture', 'source':'test fixture', 'observed_at':'2026-11-15T00:00:00Z'}]
+        facts = self.env['meli.optimization.task'].browse(ui.workbench_task(detail['id'], 'product.facts', {}))
+        claim = facts.claim(['product.facts'])
+        facts_result = {'schema_version':'1', 'evidence':evidence, 'facts':[{'name':'title','value':'Vestido elegante','evidence_ids':['fixture']}], 'uncertainties':[]}
+        facts.complete(claim['lease_token'], claim['lease_epoch'], 'facts-fixture', facts_result)
+        facts_id = ui.workbench_archive(detail['id'], facts.id, canonical_hash(facts_result))
+        keywords = self.env['meli.optimization.task'].browse(ui.workbench_task(detail['id'], 'research.keywords', {'facts_artifact_id':str(facts_id),'site_id':'MLM'}))
+        claim = keywords.claim(['research.keywords'])
+        keywords_result = {'schema_version':'1', 'evidence':evidence, 'status':'complete', 'keywords':[{'text':'Vestido','evidence_ids':['fixture']}]}
+        keywords.complete(claim['lease_token'], claim['lease_epoch'], 'keywords-fixture', keywords_result)
+        keywords_id = ui.workbench_archive(detail['id'], keywords.id, canonical_hash(keywords_result))
+        task = self.env['meli.optimization.task'].browse(ui.workbench_task(detail['id'], 'title.generate', {'facts_artifact_id':str(facts_id), 'keywords_artifact_id':str(keywords_id), 'language':'es-MX'}))
         claim = task.claim(['title.generate'])
         task.complete(claim['lease_token'], claim['lease_epoch'], 'browser-fixture', {'schema_version': '1',
             'evidence': [{'id': 'fixture', 'source': 'test fixture', 'observed_at': '2026-11-15T00:00:00Z'}],
@@ -92,9 +103,12 @@ class WorkbenchBrowserCase(HttpCase):
                     [...document.querySelectorAll('.mw-task')].find(el=>el.textContent.includes('关键词研究')).querySelector('.primary').click();
                     await wait(()=>!document.querySelector('.mw-loading'));
                     await createKind('title.generate');selects=document.querySelectorAll('.mw-form select');
-                    if(selects[2].options.length<3)throw Error('Keyword archival missing from selector');
+                    const keywordOptions=[...selects[2].options].filter(o=>o.value);
+                    if(keywordOptions.length!==1 || keywordOptions[0].value===factsArtifact)throw Error('Keyword selector must contain only the keyword archival');
+                    const factOptions=[...selects[1].options].filter(o=>o.value);
+                    if(factOptions.length!==1 || factOptions[0].value!==factsArtifact)throw Error('Facts selector contains an incorrect archival');
                     set(selects[1],factsArtifact,'change');
-                    const keywordArtifact=[...selects[2].options].find(o=>o.value && o.value!==factsArtifact).value;
+                    const keywordArtifact=keywordOptions[0].value;
                     set(selects[2],keywordArtifact,'change');button('加入执行队列').click();
                     await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('.mw-task')?.textContent.includes('生成标题候选'));
                     console.log('workbench-shot-fresh-chain');await new Promise(r=>setTimeout(r,300));
@@ -103,14 +117,18 @@ class WorkbenchBrowserCase(HttpCase):
                     await wait(()=>document.querySelector('.mw-form input'));
                     let collectionInputs=document.querySelectorAll('.mw-form input');
                     set(collectionInputs[0],'TEST ONLY standalone collection');set(collectionInputs[1],'Test-only dress reference');
-                    set(collectionInputs[2],'https://example.test/garment');
+                    set(collectionInputs[2],'TEST-SOURCE-SKU');set(collectionInputs[3],'https://example.test/garment');
+                    const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC';
+                    const fileInput=document.querySelector('.mw-form input[type=file]');
+                    const files=new DataTransfer();files.items.add(new File([Uint8Array.from(atob(png),c=>c.charCodeAt(0))],'source.png',{type:'image/png'}));
+                    fileInput.files=files.files;fileInput.dispatchEvent(new Event('change',{bubbles:true}));
+                    await wait(()=>!button('创建独立采集任务').disabled);
                     console.log('workbench-shot-independent-form');await new Promise(r=>setTimeout(r,300));
                     button('创建独立采集任务').click();
                     await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('h1')?.textContent.includes('TEST ONLY standalone'));
                     const collections=await rpc('meli.optimization.case','workbench_collections',[]);
                     const collection=collections.find(c=>c.name==='TEST ONLY standalone collection');
                     if(!collection)throw Error('Standalone collection not persisted');
-                    const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC';
                     const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(atob(png),c=>c.charCodeAt(0))))).map(x=>x.toString(16).padStart(2,'0')).join('');
                     const archived=await rpc('meli.optimization.artifact','create',[[{case_id:collection.id,data:png,mime_type:'image/png',digest}]]);
                     const archivedId=Array.isArray(archived)?archived[0]:archived;
@@ -120,22 +138,30 @@ class WorkbenchBrowserCase(HttpCase):
                         schema_version:'1',evidence:[{id:'fixture',source:'https://example.test/fixture',observed_at:'2026-11-15T00:00:00Z'}],
                         reference_item_id:'TEST-LIBRARY-REF',selected_variant:{seller_sku:'TEST-ONLY-SKU'},observed_at:'2026-11-15T00:00:00Z',
                         gallery_manifest_hash:'a'.repeat(64),completeness_status:'complete',images:[{image_id:'TEST ONLY IMAGE',order:0,role:'front',artifact_id:String(archivedId),source:'https://example.test/fixture',evidence_ids:['fixture'],mime_type:'image/png',width:1,height:1,sha256:digest}]}]);
-                    button('刷新').click();await wait(()=>!document.querySelector('.mw-loading'));button('目标图库').click();
+                    button('刷新').click();await wait(()=>!document.querySelector('.mw-loading'));button('类似爆款').click();
                     await wait(()=>button('保存已验证图片到公司图库'));button('保存已验证图片到公司图库').click();
                     await wait(()=>[...document.querySelectorAll('.o_notification_content')].some(n=>n.textContent.includes('已验证图片已保存')));button('公司图片库').click();
-                    await wait(()=>document.querySelector('.mw-candidate')?.textContent.includes('TEST-LIBRARY-REF'));
+                    await wait(()=>document.querySelector('.mw-library-table tbody tr')?.textContent.includes('TEST-SOURCE-SKU'));
                     document.querySelectorAll('.o_notification_close').forEach(el=>el.click());
                     console.log('workbench-shot-persistent-library');await new Promise(r=>setTimeout(r,300));
                     button('查看图片与来源').click();await wait(()=>document.querySelector('.mw-library-dialog'));
                     if(!document.querySelector('.mw-library-dialog').textContent.includes('TEST-ONLY-SKU'))throw Error('Library provenance missing');
                     document.querySelector('[aria-label="关闭对话框"]').click();
-                    const garment=await rpc('meli.optimization.case','workbench_upload_garment',[caseId,png,'image/png']);
-                    button('商品优化').click();await wait(()=>document.querySelector('.mw-table .mw-link'));
-                    [...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes('FRESH-CHAIN')).querySelector('.mw-link').click();
-                    await wait(()=>button('图片与质检'));button('图片与质检').click();await wait(()=>button('从公司图库选择换装目标'));button('从公司图库选择换装目标').click();
+                    let sourceDetail=await rpc('meli.optimization.case','workbench_detail',[caseId]);
+                    sourceDetail=await rpc('meli.optimization.case','workbench_snapshot_source_image',[caseId,png,'image/png',sourceDetail.revision]);
+                    sourceDetail=await rpc('meli.optimization.case','workbench_snapshot_source_image',[caseId,png,'image/png',sourceDetail.revision]);
+                    const sourceRefs=sourceDetail.snapshot.source_images.map(i=>String(i.artifact_id));
+                    if(sourceRefs.length!==2 || sourceRefs[0]===sourceRefs[1])throw Error('Snapshot gallery did not retain two source images');
+                    button('商品优化').click();
+                    const sourceRow=await wait(()=>[...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes('FRESH-CHAIN') && r.textContent.includes('共 2 张') && r.querySelector('img[alt="商品首图"]')?.getAttribute('src').includes('/'+sourceRefs[0]+'/') && !button('刷新').disabled));
+                    if(!sourceRow || !sourceRow.textContent.includes('共 2 张') || !sourceRow.querySelector('img[alt="商品首图"]')?.getAttribute('src').includes('/'+sourceRefs[0]+'/'))throw Error('List must show first source image and count');
+                    sourceRow.querySelector('.mw-link').click();
+                    await wait(()=>document.querySelectorAll('.mw-source-images img').length===2);
+                    const displayed=[...document.querySelectorAll('.mw-source-images img')].map(i=>i.getAttribute('src'));
+                    if(!displayed.every((url,i)=>url.includes('/'+sourceRefs[i]+'/')))throw Error('Source gallery order changed');
+                    await wait(()=>button('图片与质检'));button('图片与质检').click();await wait(()=>button('从公司图库选择换装目标'));if(!document.body.textContent.includes('文本宿主心跳不代表图片能力可用'))throw Error('Missing image host capability guidance');button('从公司图库选择换装目标').click();
                     await wait(()=>button('TEST-LIBRARY-REF'));button('TEST-LIBRARY-REF').click();
                     await wait(()=>document.querySelector('.mw-library-dialog .mw-choice input'));document.querySelector('.mw-library-dialog .mw-choice input').click();
-                    set(document.querySelector('.mw-library-dialog select'),String(garment),'change');
                     document.querySelectorAll('.o_notification_close').forEach(el=>el.click());
                     const dialog=document.querySelector('.mw-modal');dialog.scrollTop=dialog.scrollHeight;
                     if(dialog.scrollWidth>dialog.clientWidth+1)throw Error('Library modal horizontal overflow');
@@ -145,7 +171,7 @@ class WorkbenchBrowserCase(HttpCase):
                     const swapped=await rpc('meli.optimization.task','search_read',[[['case_id','=',caseId],['task_type','=','image.generate']],['payload']]);
                     if(swapped.length!==1)throw Error('Selected scope is not exactly one generation task');
                     const plans=await rpc('meli.optimization.artifact','read',[[Number(swapped[0].payload.generation_plan_id)],['payload']]);
-                    if(plans[0].payload.target_count!==1 || plans[0].payload.case_id!==caseId)throw Error('Plan did not freeze destination and target count');
+                    if(plans[0].payload.target_count!==1 || plans[0].payload.case_id!==caseId || JSON.stringify(plans[0].payload.source_artifact_ids.map(String))!==JSON.stringify(sourceRefs))throw Error('Plan did not freeze destination, source images and target count');
                     button('优化批次').click();
                     await wait(()=>document.querySelector('.mw-batch'));
                     const batchButton=[...document.querySelectorAll('.mw-batch')].find(b=>b.textContent.includes('TEST BATCH NAV 3'));
@@ -220,3 +246,39 @@ class WorkbenchBrowserCase(HttpCase):
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=70)
+
+    def test_title_flow_button_starts_facts_once(self):
+        self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref('meli_optimization.group_editor').id)]})
+        self.env['meli.optimization.case'].workbench_create({'shop':'Test shop', 'item_id':'FLOW-UI', 'title':'Flow UI product', 'site_id':'MLM'})
+        action_id = self.env.ref('meli_optimization.workbench_action').id
+        spawn = ChromeBrowser._spawn_chrome
+        def fixed_port_spawn(browser, cmd):
+            Path(browser.user_data_dir, 'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            return spawn(browser, cmd)
+        with patch.object(ChromeBrowser, 'remote_debugging_port', 55441), patch.object(ChromeBrowser, '_spawn_chrome', fixed_port_spawn):
+            self.browser_js('/odoo/action-%s' % action_id, r"""
+                (async () => {
+                    const wait = async fn => { for (let i=0;i<150;i++){const v=fn();if(v)return v;await new Promise(r=>setTimeout(r,100));}throw Error('UI timeout'); };
+                    const button = text => [...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(text));
+                    const row=await wait(()=>[...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes('FLOW-UI')));
+                    row.querySelector('button').click(); await wait(()=>button('任务队列'));button('任务队列').click();
+                    await wait(()=>button('一键标题优化'));button('一键标题优化').click();
+                    await wait(()=>[...document.querySelectorAll('.mw-task')].some(t=>t.textContent.includes('整理商品事实')));
+                    await wait(()=>!button('一键标题优化').disabled);button('一键标题优化').click();
+                    await new Promise(r=>setTimeout(r,500));
+                    if([...document.querySelectorAll('.mw-task')].filter(t=>t.textContent.includes('整理商品事实')).length!==1)throw Error('Duplicate facts task');
+                    button('商品快照').click(); await wait(()=>button('上传源图并创建新快照'));button('上传源图并创建新快照').click();
+                    const input=await wait(()=>document.querySelector('.mw-modal input[type=file]'));
+                    const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg=='),c=>c.charCodeAt(0));
+                    const transfer=new DataTransfer();transfer.items.add(new File([bytes],'source.png',{type:'image/png'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+                    const save=await wait(()=>{const b=button('创建新快照并绑定源图');return b && !b.disabled && b;});save.click();
+                    await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('.mw-card-heading h2')?.textContent.includes('v2'));
+                    const image=await wait(()=>document.querySelector('img[alt="商品原图 1"]'));
+                    await wait(()=>image.complete && image.naturalWidth>0);
+                    const rpc=async(model,method,args)=>{const r=await(await fetch('/web/dataset/call_kw/'+model+'/'+method,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'call',id:1,params:{model,method,args,kwargs:{}}})})).json();if(r.error)throw Error(r.error.data.message);return r.result;};
+                    const cases=await rpc('meli.optimization.case','search_read',[[['name','ilike','FLOW-UI']],['id']]);
+                    const snaps=await rpc('meli.optimization.snapshot','search_read',[[['case_id','=',cases[0].id]],['payload']]);
+                    if(snaps.length!==2 || !snaps.some(s=>!s.payload.source_image_artifact_ids) || !snaps.some(s=>s.payload.source_image_artifact_ids?.length===1))throw Error('Snapshot history not preserved');
+                    console.log('test successful');
+                })().catch(e=>console.error(e));
+            """, login='admin', timeout=60)

@@ -53,6 +53,10 @@ def minimized(path, data):
         def attrs(values):
             return [{k: value.get(k) for k in ('id', 'name', 'value_id', 'value_name')} for value in values] if isinstance(values, list) else None
         result = {k: data.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'thumbnail', 'seller_custom_field')}
+        pictures = data.get('pictures')
+        result['pictures'] = [{k: picture[k] for k in ('id', 'secure_url', 'url') if k in picture}
+                              if isinstance(picture, dict) else None
+                              for picture in pictures] if isinstance(pictures, list) else None
         result['attributes'] = attrs(data.get('attributes'))
         variations = data.get('variations')
         result['variations'] = [dict(id=v.get('id'), available_quantity=v.get('available_quantity'), attributes=attrs(v.get('attributes', [])), attribute_combinations=attrs(v.get('attribute_combinations', []))) for v in variations] if isinstance(variations, list) else None

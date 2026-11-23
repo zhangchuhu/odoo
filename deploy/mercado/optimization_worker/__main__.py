@@ -12,15 +12,32 @@ from .providers import OfflineProvider
 from .runtime import Worker
 
 
+def session_providers(provider, interactive=False):
+    # Only the unattended text host has been verified and deployed. Browser
+    # and image requests must wait for a separately verified executor instead
+    # of remaining indefinitely in the durable-session mailbox.
+    kinds = (kind for kind in TASK_TYPES if kind != 'product.facts') if interactive else ('research.keywords', 'title.generate')
+    return {kind: provider for kind in kinds}
+
+
 def main():
     parser = argparse.ArgumentParser(description='Provider-injected durable optimization Worker')
     parser.add_argument('mode', choices=('once', 'loop'))
     parser.add_argument('--session', action='store_true', help='Use durable native Codex host-session bridge')
+    parser.add_argument('--interactive-host', action='store_true', help='Allow other task types only when an interactive Codex host is present')
+    parser.add_argument('--task-id', type=int, help='Claim only this task')
+    parser.add_argument('--task-type', choices=('research.bestseller', 'gallery.collect', 'image.generate', 'image.qc'), default='research.bestseller', help='Type of targeted interactive task')
     parser.add_argument('--offline', action='store_true', help='Explicitly enable user-supplied fixture results')
     parser.add_argument('--fixture', type=Path, help='JSON mapping of task types to offline results')
     args = parser.parse_args()
     if args.session and args.offline:
         parser.error('--session and --offline are mutually exclusive')
+    if args.interactive_host and not args.session:
+        parser.error('--interactive-host requires --session')
+    if args.task_id is not None and (args.task_id < 1 or not args.interactive_host):
+        parser.error('--task-id requires --interactive-host and a positive ID')
+    if args.task_type != 'research.bestseller' and args.task_id is None:
+        parser.error('--task-type requires --task-id')
     if args.fixture and not args.offline:
         parser.error('--fixture requires --offline')
     try:
@@ -41,9 +58,10 @@ def main():
             from .host_session import SessionProvider, SessionStore
             store = SessionStore(os.environ.get('OPTIMIZATION_HOST_SESSION', '~/.local/state/optimization-worker/host.sqlite'), client.identity)
             provider = SessionProvider(store)
-            providers = {kind: provider for kind in TASK_TYPES if kind != 'product.facts'}
+            providers = session_providers(provider, interactive=args.interactive_host)
         path = Path(os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite')).expanduser()
-        worker = Worker(client, path, providers=providers)
+        worker = Worker(client, path, providers=providers, task_id=args.task_id,
+                        **({'capabilities': (args.task_type,)} if args.task_id is not None else {}))
         if args.mode == 'once':
             print(worker.once())
         else:

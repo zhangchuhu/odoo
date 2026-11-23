@@ -216,7 +216,7 @@ def collect_shop(get, seller_id, criteria):
             if product.get('id') != item or product.get('site_id') != criteria['site_id'] or str(product.get('seller_id')) != str(seller_id):
                 raise ValueError('Product ownership mismatch')
             # Keep only fields needed by the immutable snapshot; never persist buyer data.
-            products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'attributes', 'thumbnail', 'seller_custom_field')})
+            products.append({k: product.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'variations', 'attributes', 'thumbnail', 'pictures', 'seller_custom_field')})
         return products
     products = read_products()
     orders = read_orders()

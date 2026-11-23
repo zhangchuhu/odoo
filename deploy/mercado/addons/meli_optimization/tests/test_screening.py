@@ -6,6 +6,140 @@ from odoo.exceptions import AccessError, ValidationError
 
 @tagged('post_install', '-at_install')
 class ScreeningCase(TransactionCase):
+    def test_bestseller_import_rejects_invalid_batch(self):
+        config = {'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        with self.assertRaises(ValidationError):
+            self.ui.import_bestseller_batch(999999999, 'import-test', config)
+
+    def test_bestseller_import_existing_image_is_idempotent(self):
+        preview = self.preview()
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        case = self.ui.browse(result['case_ids'][0])
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        aid = self.ui.workbench_upload_garment(case.id, image, 'image/png')
+        original = self.ui._wb_snapshot(case)
+        payload = dict(original.payload, source_image_artifact_ids=[str(aid)])
+        self.env['meli.optimization.snapshot'].with_user(self.ui.env.user).create({'case_id':case.id,'payload':payload})
+        config = {'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        first = self.ui.import_bestseller_batch(result['batch_id'], 'import-test', config)
+        self.assertEqual(first['job_state'],'completed')
+        self.assertEqual(first['items'][0]['item_id'],'MLM1')
+        self.assertEqual(first['items'][0]['status'],'success')
+        again = self.ui.import_bestseller_batch(result['batch_id'], 'import-test', config)
+        self.assertEqual(first, again)
+        target = self.ui.workbench_detail(first['items'][0]['collection_id'])
+        self.assertEqual(target['snapshot']['payload']['collection_config'], config)
+        self.assertEqual(target['snapshot']['payload']['source_sku'],'MLM1')
+        with self.assertRaises(ValidationError):
+            self.ui.import_bestseller_batch(result['batch_id'], 'import-test', dict(config, min_sold=500))
+
+    def test_bestseller_import_failed_item_explicit_retry_and_batch_details(self):
+        preview = self.preview()
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        case = self.ui.browse(result['case_ids'][0])
+        config = {'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        details = self.ui.bestseller_batch_details(result['batch_id'])
+        self.assertEqual(details['items'][0]['item_id'], 'MLM1')
+        with patch.object(type(self.ui), '_bestseller_first_image', side_effect=ValidationError('test missing image')):
+            failed = self.ui.import_bestseller_batch(result['batch_id'], 'retry-test', config)
+        self.assertEqual(failed['job_state'], 'partial')
+        self.assertEqual(failed['items'][0]['status'], 'failed')
+        self.assertEqual(self.ui.import_bestseller_batch(result['batch_id'], 'retry-test', config), failed)
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        aid = self.ui.workbench_upload_garment(case.id, image, 'image/png')
+        original = self.ui._wb_snapshot(case)
+        self.env['meli.optimization.snapshot'].with_user(self.ui.env.user).create({'case_id':case.id,'payload':dict(original.payload,source_image_artifact_ids=[str(aid)])})
+        done = self.ui.import_bestseller_batch(result['batch_id'], 'retry-test', config, True)
+        self.assertEqual(done['job_state'], 'completed')
+        self.assertEqual(done['items'][0]['item_id'], 'MLM1')
+        outsider = self.env['res.users'].create({'name':'Import outsider','login':'import-outsider'})
+        with self.assertRaises(AccessError):
+            self.ui.with_user(outsider).bestseller_batch_details(result['batch_id'])
+        with self.assertRaises(AccessError):
+            self.ui.with_user(outsider).import_bestseller_batch(result['batch_id'], 'unauthorized', config)
+        with self.assertRaises(AccessError):
+            self.ui.create({'name':'forged', 'batch_id':result['batch_id'], 'collection_import_key':'retry-test','collection_import_source_id':case.id})
+
+    def test_bestseller_import_advances_past_failed_item(self):
+        preview=self.preview()
+        products, orders, source=self.collected()
+        products.append(dict(products[0],id='MLM2',title='Second'))
+        with patch.object(type(self.ui), '_screen_collect', return_value=(products, orders, source)):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        second=self.ui.browse(result['case_ids'][1])
+        image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        aid=self.ui.workbench_upload_garment(second.id,image,'image/png')
+        snap=self.ui._wb_snapshot(second)
+        self.env['meli.optimization.snapshot'].with_user(self.ui.env.user).create({'case_id':second.id,'payload':dict(snap.payload,source_image_artifact_ids=[str(aid)])})
+        config={'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        with patch.object(type(self.ui),'_bestseller_first_image',side_effect=ValidationError('image unavailable')):
+            first=self.ui.import_bestseller_batch(result['batch_id'],'two-items',config)
+        self.assertEqual(first['job_state'],'running')
+        self.assertEqual(first['items'][0]['status'],'failed')
+        second_step=self.ui.import_bestseller_batch(result['batch_id'],'two-items',config)
+        self.assertEqual(second_step['job_state'],'partial')
+        self.assertEqual([r['status'] for r in second_step['items']],['failed','success'])
+        self.assertEqual(second_step['items'][1]['item_id'],'MLM2')
+
+    def test_bestseller_import_network_error_is_sanitized_and_retryable(self):
+        import requests
+        preview=self.preview()
+        with patch.object(type(self.ui),'_screen_collect',self.collected):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        config={'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        with patch.object(type(self.ui),'_bestseller_first_image',side_effect=requests.ConnectionError('private-token')):
+            failed=self.ui.import_bestseller_batch(result['batch_id'],'network-error',config)
+        self.assertEqual(failed['job_state'],'partial')
+        self.assertEqual(failed['items'][0]['status'],'failed')
+        self.assertNotIn('private-token',str(failed))
+        self.assertEqual(self.ui.import_bestseller_batch(result['batch_id'],'network-error',config),failed)
+
+    def test_bestseller_import_fetches_only_first_image_without_new_snapshot(self):
+        import base64
+        preview=self.preview()
+        with patch.object(type(self.ui),'_screen_collect',self.collected):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        case=self.ui.browse(result['case_ids'][0]); before=self.ui._wb_snapshot(case).id
+        image=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        class Response:
+            status=200
+            def __init__(self,data): self.data=data
+            def json(self): return self.data
+            def close(self): pass
+        urls=['https://http2.mlstatic.com/a.jpg','https://http2.mlstatic.com/b.jpg']
+        def send(method,path,**kwargs):
+            return Response({'/users/me':{'id':'8'},'/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]},'/marketplace/items/MLM1':{'id':'MLM1','seller_id':'9','site_id':'MLM','pictures':[{'secure_url':u} for u in urls]}}[path])
+        mod='odoo.addons.meli_optimization.models.bestseller_import'
+        config={'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
+        with patch.object(type(self.shop),'_token',return_value='synthetic'),patch(mod+'.transport.send',side_effect=send),patch(mod+'.fetch',return_value=(image,'image/png')) as download:
+            completed=self.ui.import_bestseller_batch(result['batch_id'],'first-image',config)
+        self.assertEqual(completed['job_state'],'completed')
+        self.assertEqual(download.call_count,1)
+        self.assertEqual(download.call_args.args[0],urls[0])
+        self.assertEqual(self.ui._wb_snapshot(case).id,before)
+
+    def test_bestseller_first_image_uses_explicit_proxy(self):
+        import base64
+        preview=self.preview()
+        with patch.object(type(self.ui),'_screen_collect',self.collected):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        case=self.ui.browse(result['case_ids'][0]); image=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        class Response:
+            status=200
+            def __init__(self,data): self.data=data
+            def json(self): return self.data
+            def close(self): pass
+        def send(method,path,**kwargs):
+            return Response({'/users/me':{'id':'8'},'/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]},'/marketplace/items/MLM1':{'id':'MLM1','seller_id':'9','site_id':'MLM','pictures':[{'secure_url':'https://http2.mlstatic.com/a.jpg'}]}}[path])
+        def fetch(url,get):
+            get(url,timeout=1)
+            return image,'image/png'
+        mod='odoo.addons.meli_optimization.models.bestseller_import'
+        with patch.object(type(self.shop),'_token',return_value='synthetic'),patch(mod+'.transport.send',side_effect=send),patch(mod+'.fetch',side_effect=fetch),patch(mod+'.requests.get') as get,patch.dict('os.environ',{'MERCADO_API_HTTPS_PROXY':'http://127.0.0.1:7890'}):
+            self.ui._bestseller_first_image(case,self.shop,'MLM1')
+        self.assertEqual(get.call_args.kwargs['proxies'],{'https':'http://127.0.0.1:7890'})
     def setUp(self):
         super().setUp()
         operator = self.env['res.users'].create({'name': 'Screen operator', 'login': 'screen-operator', 'group_ids': [(6, 0, [self.env.ref(g).id for g in ('meli_bff.group_reader', 'meli_optimization.group_editor', 'meli_oerp.group_mercadolibre_manager')])]})
@@ -19,6 +153,75 @@ class ScreeningCase(TransactionCase):
 
     def collected(self, *args):
         return ([dict(id='MLM1', seller_id='9', site_id='MLM', title='Dress', available_quantity=20, variations=[])], [], dict(orders_complete=True, provider='isolated-test'))
+
+    def test_historical_gallery_shop_resolution_is_exact_and_authorized(self):
+        detail = self.ui.workbench_create({'shop': self.shop.name, 'site_id': 'MLM', 'item_id': 'MLM1', 'title': 'Dress'})
+        case = self.ui.browse(detail['id'])
+        with patch.object(type(self.ui), '_screen_shop', return_value=self.shop) as authorize:
+            self.assertEqual(self.ui._gallery_shop(case, detail['snapshot']['payload']), self.shop)
+            authorize.assert_called_once_with(self.shop.id)
+        with patch.object(type(self.ui), '_screen_shop', side_effect=AccessError('denied')):
+            with self.assertRaises(AccessError): self.ui._gallery_shop(case, detail['snapshot']['payload'])
+        with self.assertRaises(ValidationError): self.ui._gallery_shop(case, dict(detail['snapshot']['payload'], site_id='MLB'))
+        other = self.env['res.company'].create({'name': 'Other gallery company'})
+        self.env['meli.independent.store'].create({'name': self.shop.name, 'seller_id': '8', 'marketplace_seller_id': '9', 'site': 'MLM', 'company_id': other.id})
+        with patch.object(type(self.ui), '_screen_shop', return_value=self.shop):
+            self.assertEqual(self.ui._gallery_shop(case, detail['snapshot']['payload']), self.shop)
+        self.env['meli.independent.store'].create({'name': self.shop.name, 'seller_id': '8', 'marketplace_seller_id': '9', 'site': 'MLM'})
+        with self.assertRaises(ValidationError): self.ui._gallery_shop(case, detail['snapshot']['payload'])
+
+    def test_snapshot_gallery_sync_fences_platform_and_preserves_order(self):
+        import base64
+        preview = self.preview()
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        case = self.ui.browse(result['case_ids'][0])
+        current = self.ui.workbench_detail(case.id)
+        urls = ['https://http2.mlstatic.com/a.jpg', 'https://http2.mlstatic.com/b.jpg']
+        product = {'id':'MLM1', 'seller_id':'9', 'site_id':'MLM', 'pictures':[{'secure_url':u} for u in urls]}
+        image = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        class Response:
+            status = 200
+            def __init__(self, data): self.data = data
+            def json(self): return self.data
+            def close(self): pass
+        def send(method, path, **kwargs):
+            return Response({'/users/me':{'id':'8'}, '/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]}, '/marketplace/items/MLM1':product}[path])
+        downloads=[]
+        def fetch(url, get): downloads.append(url); return image, 'image/png'
+        mod='odoo.addons.meli_optimization.models.snapshot_gallery'
+        before=self.env['meli.optimization.artifact'].search_count([('case_id','=',case.id)])
+        with patch.object(type(self.shop), '_token', return_value='synthetic'), patch(mod+'.transport.send', side_effect=send), patch(mod+'.fetch', side_effect=[(image,'image/png'), ValueError('download failed')]):
+            with self.assertRaises(ValidationError): self.ui.workbench_archive_snapshot_gallery(case.id, current['revision'])
+        self.assertEqual(self.env['meli.optimization.artifact'].search_count([('case_id','=',case.id)]),before)
+        self.assertEqual(self.ui.workbench_detail(case.id)['snapshot']['id'], current['snapshot']['id'])
+        with self.assertRaises(ValidationError): self.ui.workbench_archive_snapshot_gallery(case.id, current['revision']-1)
+        with patch.object(type(self.shop), '_token', return_value='synthetic'), patch(mod+'.transport.send', side_effect=send), patch(mod+'.fetch', side_effect=fetch):
+            updated=self.ui.workbench_archive_snapshot_gallery(case.id, current['revision'])
+        self.assertEqual(downloads, urls)
+        self.assertEqual(updated['snapshot']['payload']['pictures'], product['pictures'])
+        self.assertEqual(len(updated['snapshot']['payload']['source_image_artifact_ids']), 2)
+        self.assertNotEqual(updated['snapshot']['id'], current['snapshot']['id'])
+
+    def test_snapshot_gallery_rejects_wrong_seller_without_artifacts(self):
+        preview = self.preview()
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        case=self.ui.browse(result['case_ids'][0]); current=self.ui.workbench_detail(case.id)
+        class Response:
+            status=200
+            def __init__(self, data): self.data=data
+            def json(self): return self.data
+            def close(self): pass
+        def send(method,path,**kwargs):
+            return Response({'/users/me':{'id':'8'}, '/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]}, '/marketplace/items/MLM1':{'id':'MLM1','seller_id':'99','site_id':'MLM','pictures':[{'secure_url':'https://http2.mlstatic.com/a.jpg'}]}}[path])
+        mod='odoo.addons.meli_optimization.models.snapshot_gallery'
+        before=self.env['meli.optimization.artifact'].search_count([('case_id','=',case.id)])
+        with patch.object(type(self.shop), '_token', return_value='synthetic'), patch(mod+'.transport.send', side_effect=send), patch(mod+'.fetch') as fetch:
+            with self.assertRaises(ValidationError): self.ui.workbench_archive_snapshot_gallery(case.id, current['revision'])
+            fetch.assert_not_called()
+        self.assertEqual(self.env['meli.optimization.artifact'].search_count([('case_id','=',case.id)]),before)
+        self.assertEqual(self.ui.workbench_detail(case.id)['snapshot']['id'], current['snapshot']['id'])
 
     def test_preview_execution_idempotency_and_visibility(self):
         preview = self.preview()
@@ -47,8 +250,12 @@ class ScreeningCase(TransactionCase):
         self.assertEqual(result['matched'], 2)
         for case_id in result['case_ids']:
             detail = self.ui.workbench_detail(case_id)
-            self.assertEqual(len(detail['tasks']), 1, 'Every screened product needs completed facts immediately')
-            task = detail['tasks'][0]
+            self.assertEqual(len(detail['tasks']), 2)
+            task = next(t for t in detail['tasks'] if t['state'] == 'succeeded')
+            enhanced = next(t for t in detail['tasks'] if t['state'] == 'queued')
+            self.assertEqual(enhanced['task_type'], 'product.facts')
+            self.assertEqual(enhanced['snapshot_id'], detail['snapshot']['id'])
+            self.assertEqual(self.env['meli.optimization.task'].browse(enhanced['id']).payload['screening_visual_enrichment'], preview['id'])
             self.assertEqual((task['task_type'], task['state']), ('product.facts', 'succeeded'))
             self.assertEqual(task['snapshot_id'], detail['snapshot']['id'])
             validate_result('product.facts', task['result'])
@@ -77,6 +284,24 @@ class ScreeningCase(TransactionCase):
             self.assertFalse(self.env['meli.optimization.attempt'].search([('task_id', '=', task['id'])]))
             keyword_id = self.ui.workbench_task(case_id, 'research.keywords', {'facts_artifact_id': artifact['id'], 'site_id': 'MLM'})
             self.assertEqual(self.env['meli.optimization.task'].browse(keyword_id).payload['facts_artifact_id'], str(artifact['id']))
+
+    def test_screening_visual_facts_auto_archive_is_idempotent(self):
+        preview = self.preview()
+        with patch.object(type(self.ui), '_screen_collect', self.collected):
+            result = self.ui.screening_execute(preview['id'], preview['digest'])
+        case = self.ui.browse(result['case_ids'])
+        tasks = self.env['meli.optimization.task'].search([('case_id', '=', case.id), ('state', '=', 'queued')])
+        self.assertEqual(len(tasks), 1)
+        claim = tasks.claim(['product.facts'])
+        from ..domain.facts import product_facts_from_snapshot
+        body = product_facts_from_snapshot({'snapshot_id': tasks.snapshot_id.id, 'payload': tasks.snapshot_id.payload})
+        tasks.complete(claim['lease_token'], claim['lease_epoch'], 'visual-complete', body)
+        self.assertEqual(self.env['meli.optimization.artifact'].search_count([('result_task_id', '=', tasks.id)]), 1,
+                         'Completing the worker task must automatically archive its result')
+        tasks._run_derived()
+        artifacts = self.env['meli.optimization.artifact'].search([('result_task_id', '=', tasks.id)])
+        self.assertEqual(len(artifacts), 1)
+        self.assertFalse(self.env['meli.optimization.task'].search([('case_id', '=', case.id), ('task_type', '=', 'research.keywords')]))
 
     def test_facts_archive_failure_rolls_back_entire_screening_and_retry(self):
         preview = self.preview()

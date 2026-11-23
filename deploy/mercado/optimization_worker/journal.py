@@ -37,6 +37,17 @@ class Journal:
                         (':'.join(str(record['claim'].get(k, '')) for k in ('id', 'input_hash', 'lease_epoch')), json.dumps(record, allow_nan=False)))
         self.db.commit()
 
+    def replace_claim(self, record, claim):
+        old = ':'.join(str(record['claim'].get(k, '')) for k in ('id', 'input_hash', 'lease_epoch'))
+        updated = dict(record, claim=claim)
+        new = ':'.join(str(claim.get(k, '')) for k in ('id', 'input_hash', 'lease_epoch'))
+        with self.db:
+            cursor = self.db.execute('DELETE FROM runs WHERE id=?', (old,))
+            if cursor.rowcount != 1 or old == new:
+                raise ValueError('Original lease journal entry required')
+            self.db.execute('INSERT INTO runs VALUES (?,?)', (new, json.dumps(updated, allow_nan=False)))
+        record['claim'] = claim
+
     def active(self):
         return [value for (raw,) in self.db.execute('SELECT record FROM runs ORDER BY id')
                 if not (value := json.loads(raw)).get('done')]

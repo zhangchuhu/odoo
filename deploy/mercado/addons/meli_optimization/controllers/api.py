@@ -51,6 +51,17 @@ def operation(callback):
 
 
 class OptimizationAPI(http.Controller):
+    @http.route('/api/meli/optimization/bestseller-import/batch/<int:batch_id>', type='http', auth='meli_optimization', methods=['GET'], csrf=False)
+    def bestseller_import_batch_details(self, batch_id):
+        return operation(lambda: reply(request.env[PREFIX + 'case'].bestseller_batch_details(batch_id)))
+    @http.route('/api/meli/optimization/bestseller-import/step', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def bestseller_import_step(self):
+        def run():
+            data = body()
+            if not {'batch_id','request_key','config'} <= set(data) or set(data) - {'batch_id','request_key','config','retry_failed'}:
+                raise ValueError('Invalid import request')
+            return reply(request.env[PREFIX + 'case'].import_bestseller_batch(data['batch_id'], data['request_key'], data['config'], data.get('retry_failed', False)))
+        return operation(run)
     @http.route('/api/meli/optimization/screening/preview', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def screening_preview(self):
         def run():
@@ -124,7 +135,31 @@ class OptimizationAPI(http.Controller):
             artifact = record('artifact', artifact_id)
             artifact._authorize('worker')
             data = artifact.data
-            return reply({'artifact_id': artifact.id, 'digest': artifact.digest, 'payload': artifact.payload, 'data': data.decode('ascii') if isinstance(data, bytes) else data, 'mime_type': artifact.mime_type})
+            return reply({'artifact_id': artifact.id, 'case_id': artifact.case_id.id, 'company_id': artifact.company_id.id, 'digest': artifact.digest, 'payload': artifact.payload, 'data': data.decode('ascii') if isinstance(data, bytes) else data, 'mime_type': artifact.mime_type})
+        return operation(run)
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/research-artifacts', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_artifact(self, task_id):
+        def run():
+            data = body(MAX_BINARY * 2)
+            if set(data) != {'lease_token', 'lease_epoch', 'request_id', 'intent_id', 'artifact'}: raise ValueError('Invalid request')
+            return reply(record('task', task_id).research_artifact(data['lease_token'], data['lease_epoch'], data['request_id'], data['intent_id'], data['artifact']))
+        return operation(run)
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/research-intents/query', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_intent_query(self, task_id):
+        def run():
+            data = body()
+            if set(data) != {'lease_token', 'lease_epoch', 'request_id', 'intent_id'}: raise ValueError('Invalid request')
+            return reply(record('task', task_id).research_intent_query(data['lease_token'], data['lease_epoch'], data['request_id'], data['intent_id']))
+        return operation(run)
+
+    @http.route('/api/meli/optimization/tasks/<int:task_id>/research-intents/reconcile', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_intent_reconcile(self, task_id):
+        def run():
+            data = body()
+            if set(data) != {'request_id', 'intent_id'}: raise ValueError('Invalid request')
+            return reply(record('task', task_id).research_intent_reconcile(data['request_id'], data['intent_id']))
         return operation(run)
 
     @http.route('/api/meli/optimization/cases/<int:case_id>/proposals', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
@@ -142,15 +177,66 @@ class OptimizationAPI(http.Controller):
             return reply({'confirmation_id': confirmation.id, 'valid': confirmation.is_valid()})
         return operation(run)
 
+    @http.route('/internal/meli-optimization/research-queue', type='http', auth='meli_optimization', methods=['GET'], csrf=False)
+    def research_queue_precheck(self):
+        return operation(lambda: reply(request.env[PREFIX+'task'].research_queue_precheck()))
+
+    @http.route('/internal/meli-optimization/research-retry-unknown', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_retry_unknown(self):
+        return operation(lambda: reply(request.env[PREFIX+'task'].retry_unknown_research_batch(limit=body()['limit'])))
+
+    @http.route('/internal/meli-optimization/research-retry-expired', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_retry_expired(self):
+        def run():
+            data=body()
+            if set(data)!={'task_id','lease_token','lease_epoch','request_id'} or type(data['task_id']) is not int: raise ValueError('Original request required')
+            task=request.env[PREFIX+'task'].browse(data['task_id']).exists()
+            if not task: raise ValueError('Task unavailable')
+            return reply(task.retry_expired_unknown_research(data['lease_token'],data['lease_epoch'],data['request_id']))
+        return operation(run)
+
+    @http.route('/internal/meli-optimization/retry-unknown-tasks', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def retry_unknown_tasks(self):
+        def run():
+            data = body()
+            if set(data) != {'task_types', 'limit'}: raise ValueError('Invalid request')
+            return reply(request.env[PREFIX+'task'].retry_unknown_tasks_batch(data['task_types'], data['limit']))
+        return operation(run)
+
     @http.route('/internal/meli-optimization/claim', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def claim(self):
-        return operation(lambda: reply(request.env[PREFIX + 'task'].claim(body()['capabilities'])))
+        def run():
+            data = body()
+            target = data.get('task_id')
+            if target is not None and (type(target) is not int or target < 1):
+                raise ValueError('Invalid target task')
+            tasks = record('task', target) if target is not None else request.env[PREFIX + 'task']
+            return reply(tasks.claim(data['capabilities']))
+        return operation(run)
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/claim', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def claim_target(self, task_id):
+        return operation(lambda: reply(record('task', task_id).claim(body()['capabilities'])))
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/recover-lease', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def recover_lease(self, task_id):
+        def run():
+            data = body()
+            return reply(record('task', task_id).recover_lease(data['request_id'], data['lease_token'], data['lease_epoch'], data['recovery_intent_id']))
+        return operation(run)
 
     @http.route('/internal/meli-optimization/tasks/<int:task_id>/heartbeat', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def heartbeat(self, task_id):
         def run():
             data = body()
             return reply(record('task', task_id).heartbeat(data['lease_token'], data['lease_epoch']))
+        return operation(run)
+
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/host-progress', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def host_progress(self, task_id):
+        def run():
+            data = body()
+            return reply(record('task', task_id).host_progress(data['lease_token'], data['lease_epoch'], data['request_id'], data['stage'], data.get('intent_id'), data.get('review_seq'), data.get('review_kind'), data.get('candidate_artifact_id'), data.get('candidate_sha256'), data.get('candidate_attempt_id'), data.get('candidate_attempt_number')))
         return operation(run)
 
     @http.route('/internal/meli-optimization/tasks/<int:task_id>/checkpoint', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
@@ -174,6 +260,13 @@ class OptimizationAPI(http.Controller):
         def run():
             body()
             return reply(record('task', task_id).resume())
+        return operation(run)
+
+    @http.route('/api/meli/optimization/tasks/<int:task_id>/reconcile-interrupted-research', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def reconcile_interrupted_research(self, task_id):
+        def run():
+            data = body()
+            return reply(record('task', task_id).reconcile_interrupted_research(data['request_id'], data['idempotency_key'], data['evidence']))
         return operation(run)
 
     @http.route('/api/meli/optimization/tasks/<int:task_id>/cancel', type='http', auth='meli_optimization', methods=['POST'], csrf=False)

@@ -26,10 +26,17 @@ HTTP uses bearer headers, HTTPS except loopback, a 15 second socket timeout, bou
 | `title.generate` | Resolve facts/keywords, validate exactly ten unique grounded titles | No platform length limit invented; no title publication |
 | `research.bestseller` | Resolve facts/keywords, validate explicit complete/partial/empty status, evidence, raw sales and nullable metrics | No browser/vendor integration; no sales inferred from display text |
 | `gallery.collect` | Validate selected SKU identity, manifest, completeness, unique image order, metadata and referenced binary artifacts | No gallery scraper, download, or main-SKU inference |
-| `image.generate` | Resolve source/target/plan artifacts, persist external intent, verify request binding, validate image metadata and binary artifact digest/MIME | No paid generation endpoint or binary upload adapter configured |
+| `image.generate` | Resolve source/target/plan artifacts, persist external intent, verify request binding, validate image metadata and binary artifact digest/MIME | Codex CLI host uses the native image tool after a capability probe; candidate QC may require manual review |
 | `image.qc` | Resolve image/plan artifacts, validate image binding, named checks and passed/failed/review consistency | No visual model or human QC; no pixel truth guarantee |
 
 The claim capabilities list registers implemented handler contracts. Missing configured providers explicitly put claimed tasks in `waiting` with `capability_missing`; they never silently use fixtures. Production CLI supplies only built-in snapshot facts. A service embedding `Worker(..., providers={task_type: provider})` may inject implementations of `Provider.run(task_type, payload, context, request_id)`. The context contains digest-verified snapshot/artifact envelopes and no HTTP client or credentials. The provider returns a schema 1 domain result; provider exceptions/timeouts are conservatively unknown outcomes, and providers must bound their own I/O. `CapabilityMissing` means the provider did not dispatch any external work.
+
+`browser_provider.BrowserResearchProvider` provides an explicit callable adapter
+boundary for `research.bestseller`. It validates and copies the returned domain
+body; it does not provide a browser, access platform data, verify observations,
+or register itself with the CLI. A missing adapter raises `CapabilityMissing`.
+Its offline fixture tests do not establish live access. Use only after an actual
+browser adapter and evidence provenance have been independently verified.
 
 Providers for image/gallery results must arrange storage through a separately configured artifact adapter before returning real decimal Odoo artifact IDs; the runtime does not invent remote storage or accept arbitrary URLs as artifacts. `Client.create_artifact` exposes the documented JSON/binary artifact API for that adapter, without automatic retry. Artifact upload itself has no idempotency key; reconcile an ambiguous upload separately. Domain references are opaque in the pure contract, but this HTTP deployment resolves dependency/artifact references only as positive decimal Odoo IDs. Reference existence, byte digest and MIME are checked; image decoding, dimensions and evidence truth are producer responsibilities. A QC `failed` result can be a successfully completed task: task execution success does not mean image approval.
 

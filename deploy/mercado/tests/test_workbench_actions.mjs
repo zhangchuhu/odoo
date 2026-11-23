@@ -11,6 +11,91 @@ function fixture() {
     ui.notification = {add(){}};
     return ui;
 }
+test('expired lease is displayed as interrupted rather than running', () => {
+    const ui=fixture();
+    assert.equal(ui.taskStatusLabel({state:'running',lease_expired:true}), '租约已过期');
+    assert.equal(ui.taskStatusClass({state:'running',lease_expired:true}), 'waiting');
+    assert.equal(ui.taskStatusLabel({state:'running',lease_expired:false}), '执行中');
+    assert.equal(ui.taskStatusLabel({state:'succeeded',lease_expired:true}), '已完成');
+});
+test('library recollection targets the clicked record and reuses a pending task', async () => {
+    const ui=fixture(), calls=[], notices=[];
+    ui.notification={add:(message)=>notices.push(message)};
+    ui.rpc=async(method,args)=>{calls.push([method,args]); return {task_id:51,reused:true};};
+    ui.fetchLibraryPage=async()=>calls.push(['refresh']);
+    await ui.recollectLibrary({id:205});
+    assert.deepEqual(calls,[['workbench_library_recollect',[205]],['refresh']]);
+    assert.match(notices[0],/复用.*等待人工采集/);
+    assert.equal(ui.state.loading,false);
+});
+test('research with pending image import does not present as completed', async () => {
+    const ui=fixture();
+    assert.equal(ui.taskStatusLabel({task_type:'research.bestseller',state:'succeeded',status_detail:{code:'research_images_pending',message:'图片入库失败'}}),'结果待入库');
+    assert.equal(ui.taskStatusLabel({task_type:'research.bestseller',state:'succeeded'}),'已完成');
+    assert.equal(ui.taskStatusLabel({task_type:'research.bestseller',state:'succeeded',result:{candidates:[]}}),'未找到候选商品');
+    assert.equal(ui.taskStatusLabel({task_type:'research.keywords',state:'running'}),'执行中');
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
+    assert.equal((xml.match(/t-esc="taskStatusLabel\(task\)"/g)||[]).length,2);
+    assert.ok((xml.match(/t-esc="task.status_detail.message"/g)||[]).length >= 2);
+});
+test('independent research import failure is not displayed as complete', async () => {
+    const ui=fixture(), task={task_type:'research.bestseller',state:'succeeded',status_detail:{code:'derived_action_failed',message:'图库写入失败'}};
+    ui.state.detail.collection=true;
+    assert.equal(ui.taskStatusLabel(task),'入库失败／待重试');
+    assert.equal(ui.taskStatusClass(task),'failed');
+    ui.state.detail.collection=false;
+    assert.equal(ui.taskStatusLabel(task),'已完成');
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
+    assert.equal((xml.match(/t-esc="task.status_detail.message"/g)||[]).length,2);
+    assert.equal((xml.match(/this.retryDerived\(task\)/g)||[]).length,2);
+    assert.equal((xml.match(/taskStatusClass\(task\)/g)||[]).length,2);
+});
+test('independent collection supplies platform and numeric criteria', async () => {
+    const ui=fixture(), calls=[];
+    ui.collectionForm();
+    assert.deepEqual([ui.state.form.platform,ui.state.form.min_sold,ui.state.form.min_reviews,ui.state.form.min_rating,ui.state.form.result_limit],['mercado-libre-mx',500,50,4.1,15]);
+    Object.assign(ui.state.form,{source_sku:'MLM1',garment:'dress',min_sold:'0',min_reviews:'50',min_rating:'4.1',result_limit:'15'});
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {id:1}};ui.load=async()=>{};
+    await ui.saveCollection();
+    const v=calls[0][1][0];assert.equal(v.source_sku,'MLM1');assert.equal(v.min_sold,0);assert.equal(v.min_reviews,50);assert.equal(v.min_rating,4.1);assert.equal(v.result_limit,15);
+});
+test('research dependency options only include current snapshot matching result type', () => {
+    const ui=fixture();ui.state.detail.snapshot={id:9};
+    ui.state.detail.tasks=[{id:2,task_type:'product.facts',state:'succeeded'},{id:3,task_type:'research.keywords',state:'succeeded'},{id:4,task_type:'product.facts',state:'cancelled'},{id:5,task_type:'research.keywords',state:'succeeded',result:{status:'empty'}}];
+    ui.state.detail.artifacts=[{id:20,result_task_id:[2,'facts'],result_snapshot_id:[9,'v']},{id:30,result_task_id:[3,'kw'],result_snapshot_id:[9,'v']},{id:40,result_task_id:[2,'facts'],result_snapshot_id:[8,'old']},{id:50,result_task_id:[4,'cancelled'],result_snapshot_id:[9,'v']},{id:60,result_task_id:[5,'empty'],result_snapshot_id:[9,'v']}];
+    assert.deepEqual(ui.artifactsFor('facts_artifact_id').map(x=>x.id),[20]);
+    assert.deepEqual(ui.artifactsFor('keywords_artifact_id').map(x=>x.id),[30]);
+});
+test('collection groups keep distinct source records and isolate missing identifiers', () => {
+    const ui=fixture();ui.state.collections=[{id:1,company_id:1,name:'a',snapshot:{source_sku:'SKU-1'}},{id:2,company_id:1,name:'b',snapshot:{source_sku:'SKU-1'}},{id:3,company_id:1,name:'c',snapshot:{}},{id:4,company_id:1,name:'d',snapshot:{}},{id:5,company_id:2,name:'e',snapshot:{source_sku:'SKU-1'}},{id:6,name:'f',snapshot:{source_sku:'SKU-1'}}];
+    const groups=ui.collectionGroups;
+    assert.deepEqual(groups.map(g=>g.records.map(r=>r.id)),[[1,2],[3],[4],[5],[6]]);
+    assert.equal(groups[0].source,'SKU-1');
+});
+test('collection filters apply and reset using returned fields only', () => {
+    const ui=fixture();ui.state.collections=[{id:1,name:'Summer',company_id:1,snapshot:{source_sku:'SKU-1',garment:'dress',collection_config:{platform:'shein-us'}}},{id:2,name:'Winter',company_id:1,snapshot:{source_sku:'SKU-2',collection_config:{platform:'mercado-libre-mx'}}}];
+    ui.state.collectionFilters={query:'sku-1',platform:'shein-us'};ui.state.collectionApplied={};
+    assert.equal(ui.collectionGroups.length,2);ui.applyCollectionFilters();assert.deepEqual(ui.collectionGroups.flatMap(g=>g.records.map(r=>r.id)),[1]);
+    ui.state.collectionFilters.query='winter';assert.equal(ui.collectionGroups.length,1);
+    ui.resetCollectionFilters();assert.equal(ui.collectionGroups.length,2);
+});
+test('collection table resolves first source image safely and presents columns', async () => {
+    const ui=fixture();
+    assert.equal(ui.collectionSourceImage({snapshot:{source_image_artifact_ids:[42,99]}}),'/web/image/meli.optimization.artifact/42/data');
+    assert.equal(ui.collectionSourceImage({snapshot:{source_image_artifact_ids:['12']}}),'/web/image/meli.optimization.artifact/12/data');
+    assert.equal(ui.collectionSourceImage({snapshot:{source_image_artifact_ids:['../unsafe']}}),'');
+    assert.equal(ui.collectionSourceImage({}), '');
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
+    for(const name of ['原图','任务名称 / 记录','平台','服装描述','来源','操作']) assert.ok(xml.includes(`<th scope="col">${name}</th>`));
+    assert.ok(xml.includes('暂无原图'));assert.ok(xml.includes('collectionSourceImage(row)'));
+});
+test('one-click collection start binds snapshot and ignores stale navigation', async () => {
+    const ui=fixture();ui.navigationVersion=0;ui.state.detail.collection=true;ui.state.detail.snapshot.payload={collection_config:{platform:'shein-us'}};let resolve;const calls=[];
+    ui.rpc=(method,args)=>{calls.push([method,args]);return new Promise(r=>resolve=r)};ui.load=async()=>{};
+    const pending=ui.startCollection();assert.deepEqual(calls,[['workbench_collection_start',[1,1,1]]]);
+    ui.back();ui.state.detail={id:2,revision:1,snapshot:{id:2}};resolve({});await pending;assert.equal(ui.state.detail.id,2);assert.notEqual(ui.state.tab,'tasks');
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');assert.ok(xml.includes('一键开始采集'));assert.ok(xml.includes('t-on-click="startCollection"'));
+});
 test('late proposal never opens after navigating away', async () => {
     const ui = fixture(); let resolve;
     ui.rpc = () => new Promise(r=>resolve=r);
@@ -42,14 +127,14 @@ test('late proposal is discarded after reopening same case or disposing action',
         assert.equal(ui.state.modal,'');
     }
 });
-test('library selection submits exact indices and source garment separately', async () => {
+test('library selection submits target indices and uses current snapshot sources', async () => {
     const ui=fixture(), calls=[];
     ui.state.librarySelection={id:20,payload:{images:[{artifact_id:'8'}]}};
     ui.state.libraryIndices=[0];ui.state.garmentArtifact='9';ui.state.libraryContext={case_id:1,revision:1};
     ui.load=async()=>{};
     ui.rpc=async (...args)=>{calls.push(args);return {task_ids:[30]};};
     await ui.saveLibrarySelection();
-    assert.deepEqual(calls,[['workbench_library_generate',[1,20,[0],[9],1]]]);
+    assert.deepEqual(calls,[['workbench_library_generate',[1,20,[0],[],1]]]);
     assert.equal(ui.state.modal,'');
 });
 test('late library chooser does not reopen after leaving a product', async () => {
@@ -85,4 +170,122 @@ test('rapid batch switches install only final scope after pending refresh', asyn
     ui.rpc=async(method,args)=>{seen.push(args[2]);return seen.length===1?new Promise(r=>resolveOld=r):{rows:[{id:args[2]}]};};
     const request=ui.refresh();ui.openBatch(2);ui.openBatch(3);resolveOld({rows:[{id:1}]});await request;
     assert.deepEqual(seen,[1,3]);assert.deepEqual(ui.state.data.rows,[{id:3}]);
+});
+test('library queries and pages are sent to server', async () => {
+    const ui=fixture(); ui.state.libraryFilters={query:'vestido',platform:'SHEIN US',dateFrom:'',dateTo:''}; ui.state.libraryPage=0; ui.state.libraryPageSize=50; const calls=[];
+    ui.rpc=async (...args)=>{calls.push(args);return {rows:[{id:51}],total:80,limit:50};};
+    await ui.applyLibraryFilters();
+    assert.deepEqual(calls[0],['workbench_library',['','',ui.state.libraryFilters,0]]);
+    assert.equal(ui.state.libraryTotal,80);
+    await ui.libraryPageBy(1);
+    assert.equal(calls[1][1][3],50);
+});
+test('busy library request cannot install filters it did not fetch', async () => {
+    const ui=fixture(); let done; ui.state.libraryFilters={query:'first'};ui.state.libraryApplied={};ui.state.libraryPage=0;ui.state.libraryPageSize=50;
+    ui.rpc=()=>new Promise(r=>{done=r;}); const pending=ui.applyLibraryFilters();
+    ui.state.libraryFilters={query:'second'}; await ui.applyLibraryFilters();
+    assert.deepEqual(ui.state.libraryApplied,{query:'first'});
+    done({rows:[],total:0,limit:50});await pending;
+});
+test('title optimization starts for the current case and does not change a later view', async () => {
+    const ui=fixture(); ui.navigationVersion=0; const calls=[]; let resolve;
+    ui.rpc=(method,args)=>{calls.push([method,args]); return new Promise(r=>resolve=r);};
+    ui.load=async()=>{};
+    const pending=ui.startTitleFlow();
+    ui.back(); ui.state.detail={id:2,revision:1}; ui.state.tab='snapshot';
+    resolve({stage:'facts'}); await pending;
+    assert.deepEqual(calls,[['workbench_title_flow',[1]]]);
+    assert.equal(ui.state.tab,'snapshot');
+});
+test('offline host hint is limited to active text tasks and a known offline heartbeat', () => {
+    const ui=fixture();
+    ui.state.detail.tasks=[{state:'running',task_type:'research.keywords'}];
+    assert.equal(ui.hostOfflineHint, false);
+    ui.state.detail.host_status={online:false};
+    assert.equal(ui.hostOfflineHint, true);
+    ui.state.detail.host_status.online=true;
+    assert.equal(ui.hostOfflineHint, false);
+    ui.state.detail.host_status.online=false;
+    ui.state.detail.tasks=[{state:'running',task_type:'image.generate'}];
+    assert.equal(ui.hostOfflineHint, false);
+});
+test('source image upload binds original case and snapshot revision without navigating later view', async () => {
+    const ui=fixture(); ui.navigationVersion=0; ui.state.form={image_data:'aGVsbG8=',image_mime:'image/jpeg'};
+    ui.state.sourceImageContext={version:0,case_id:1,revision:1}; let resolve; const calls=[];
+    ui.rpc=(method,args)=>{calls.push([method,args]);return new Promise(r=>resolve=r);};
+    const pending=ui.saveSnapshotImage(); ui.back();ui.state.detail={id:2,revision:1};
+    resolve({id:1,revision:2}); await pending;
+    assert.deepEqual(calls,[['workbench_snapshot_source_image',[1,'aGVsbG8=','image/jpeg',1]]]);
+    assert.equal(ui.state.detail.id,2);
+});
+test('source image selection ignores earlier file reads and a reopened dialog', async () => {
+    const ui=fixture(); ui.navigationVersion=0; ui.snapshotImageForm();
+    const readers=[]; globalThis.FileReader=class { readAsDataURL() { readers.push(this); } };
+    const a=ui.readSnapshotImage({target:{files:[{size:1,type:'image/jpeg'}]}});
+    const b=ui.readSnapshotImage({target:{files:[{size:1,type:'image/png'}]}});
+    readers[1].result='data:image/png;base64,Qg==';readers[1].onload(); await b;
+    readers[0].result='data:image/jpeg;base64,QQ==';readers[0].onload();await a;
+    assert.equal(ui.state.form.image_data,'Qg==');
+    const c=ui.readSnapshotImage({target:{files:[{size:1,type:'image/jpeg'}]}});
+    ui.snapshotImageForm(); readers[2].result='data:image/jpeg;base64,Qw==';readers[2].onload();await c;
+    assert.equal(ui.state.form.image_data,undefined);
+});
+test('collection image reads cannot overwrite newer choice or reopened form', async () => {
+    const ui=fixture();ui.collectionForm();const readers=[];globalThis.FileReader=class {readAsDataURL(){readers.push(this);}};
+    const a=ui.readGarment({target:{files:[{size:1,type:'image/jpeg'}]}});const b=ui.readGarment({target:{files:[{size:1,type:'image/png'}]}});
+    readers[1].result='data:image/png;base64,Qg==';readers[1].onload();await b;readers[0].result='data:image/jpeg;base64,QQ==';readers[0].onload();await a;assert.equal(ui.state.form.image_data,'Qg==');
+    const c=ui.readGarment({target:{files:[{size:1,type:'image/jpeg'}]}});ui.collectionForm();readers[2].result='data:image/jpeg;base64,Qw==';readers[2].onload();await c;assert.equal(ui.state.form.image_data,undefined);
+});
+test('late open cannot override navigation or report stale errors', async () => {
+    const ui=fixture();ui.navigationVersion=0;let resolve,reject;ui.rpc=()=>new Promise((r,j)=>{resolve=r;reject=j});
+    let pending=ui.open(1);ui.back();ui.state.section='library';resolve({id:1,collection:true});await pending;assert.equal(ui.state.detail,null);assert.equal(ui.state.section,'library');
+    pending=ui.open(2);ui.back();ui.state.section='cases';reject(new Error('old error'));await pending;assert.notEqual(ui.state.error,'old error');
+});
+test('library garment upload binds file and case before and after asynchronous reads', async () => {
+    const ui=fixture();ui.navigationVersion=0;ui.state.modal='library-select';ui.state.form={};ui.state.libraryContext={version:0,case_id:1,revision:1};const readers=[];globalThis.FileReader=class {readAsDataURL(){readers.push(this);}};
+    const calls=[];ui.rpc=async(method,args)=>{calls.push([method,args]);return 123};ui.load=async()=>{};
+    let pending=ui.uploadGarment({target:{files:[{size:1,type:'image/png'}]}});readers[0].result='data:image/png;base64,QQ==';readers[0].onload();await pending;
+    assert.deepEqual(calls[0][1],[1,'QQ==','image/png']);assert.equal(ui.state.garmentArtifact,'123');
+    pending=ui.uploadGarment({target:{files:[{size:1,type:'image/png'}]}});ui.back();ui.state.detail={id:2,revision:1};ui.state.modal='library-select';readers[1].result='data:image/png;base64,Qg==';readers[1].onload();await pending;assert.equal(calls.length,1);
+    ui.state.detail={id:3,revision:1};ui.state.libraryContext={version:ui.navigationVersion,case_id:3,revision:1};let resolve;ui.rpc=()=>new Promise(r=>resolve=r);ui.state.garmentArtifact='';
+    pending=ui.uploadGarment({target:{files:[{size:1,type:'image/png'}]}});readers[2].result='data:image/png;base64,Qw==';readers[2].onload();await new Promise(r=>setTimeout(r,0));ui.back();ui.state.detail={id:4,revision:1};resolve(555);await pending;assert.equal(ui.state.garmentArtifact,'');
+});
+test('library upload locks controls and ignores a second file until finished', async () => {
+    const ui=fixture();ui.navigationVersion=0;ui.state.modal='library-select';ui.state.form={};ui.state.libraryContext={version:0,case_id:1,revision:1};const readers=[];globalThis.FileReader=class {readAsDataURL(){readers.push(this);}};let resolve;const calls=[];ui.rpc=(method,args)=>{calls.push(args);return new Promise(r=>resolve=r)};ui.load=async()=>{};
+    const a=ui.uploadGarment({target:{files:[{size:1,type:'image/png'}]}});assert.equal(ui.state.garmentUploadBusy,true);readers[0].result='data:image/png;base64,QQ==';readers[0].onload();await new Promise(r=>setTimeout(r,0));
+    await ui.uploadGarment({target:{files:[{size:1,type:'image/jpeg'}]}});assert.equal(readers.length,1);assert.equal(calls.length,1);resolve(101);await a;assert.equal(ui.state.garmentUploadBusy,false);assert.equal(ui.state.garmentArtifact,'101');
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');assert.ok(xml.includes("服装参考图自动使用当前商品快照的全部原图"));assert.ok(xml.includes("!productImages(state.detail.snapshot).length"));
+});
+test('resume image review submits original task and ignores a later navigation', async () => {
+    const ui=fixture(); ui.navigationVersion=0; let resolve; const calls=[];
+    ui.rpc=(method,args)=>{calls.push([method,args]);return new Promise(r=>resolve=r);};
+    let loaded=false;ui.load=async()=>{loaded=true};
+    const pending=ui.resumeImageReview({id:42,snapshot_id:1,status_detail:{code:'host_review_required'}});
+    ui.back();ui.state.detail={id:2,revision:1};resolve({});await pending;
+    assert.deepEqual(calls,[['workbench_request_host_review_resume',[1,42,null]]]);
+    assert.equal(loaded,false);
+    await ui.resumeImageReview({id:43,snapshot_id:1,status_detail:{code:'other'}});
+    assert.equal(calls.length,1);
+});
+test('review migration requires another click and does not report requested', async () => {
+    const ui=fixture(); ui.navigationVersion=0; const notices=[];
+    ui.notification={add:(message)=>notices.push(message)};ui.load=async()=>{};
+    ui.rpc=async()=>false;
+    await ui.resumeImageReview({id:42,snapshot_id:1,status_detail:{code:'host_review_required'}});
+    assert.deepEqual(notices,['旧复核状态已恢复，请再次点击继续复核']);
+});
+
+test('best review binds current candidate and exact review round', async () => {
+ const ui=fixture();ui.navigationVersion=0;ui.load=async()=>{};const calls=[];ui.rpc=async(...a)=>{calls.push(a);return true;};
+ await ui.resumeImageReview({id:42,snapshot_id:1,status_detail:{code:'host_review_required',review_kind:'best_of_budget',candidate_artifact_id:7,candidate_sha256:'digest',candidate_attempt_id:'run1',candidate_attempt_number:2,review_seq:3}});
+ assert.deepEqual(calls,[['workbench_request_best_review_resume',[1,42,7,'digest','run1',2,3]]]);
+});
+test('snapshot gallery sync is bound to case and revision and gallery keys are unique', async () => {
+    const ui=fixture(), calls=[]; ui.navigationVersion=0; ui.disposed=false;
+    ui.rpc=async (...args)=>{calls.push(args); return {};}; ui.load=async()=>calls.push(['reload']);
+    await ui.syncSnapshotGallery();
+    assert.deepEqual(calls,[['workbench_archive_snapshot_gallery',[1,1]],['reload']]);
+    const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
+    assert.ok(xml.includes('t-on-click="syncSnapshotGallery"'));
+    assert.equal(xml.includes('t-key="image.image_id"'),false);
 });

@@ -1,4 +1,33 @@
 /** @odoo-module **/
+export function visibleCollectionTasks(tasks, detail) {
+    if (!detail?.collection || detail.collection_started !== false) return tasks;
+    const workflow = new Set(['product.facts', 'research.keywords', 'research.bestseller']);
+    return tasks.filter(t => !workflow.has(t.task_type) || ['succeeded', 'cancelled'].includes(t.state));
+}
+// Collapse only explicitly audited retry edges; same snapshot alone is not proof.
+export function groupResearchRetries(tasks, events) {
+    const byId = new Map(tasks.map(t => [t.id, t]));
+    const parent = new Map();
+    for (const event of events || []) {
+        if (event.kind !== 'unknown_research_retry') continue;
+        const source = event.receipt?.source_task_id, target = event.receipt?.task_id;
+        const a = byId.get(source), b = byId.get(target);
+        if (a?.task_type === 'research.bestseller' && b?.task_type === a.task_type && a.snapshot_id === b.snapshot_id && source < target) parent.set(target, source);
+    }
+    const groups = new Map();
+    for (const task of tasks) {
+        let root = task.id;
+        while (parent.has(root)) root = parent.get(root);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root).push(task);
+    }
+    return [...groups.values()].map(items => {
+        items.sort((a,b) => a.id - b.id);
+        const latest = items[items.length - 1];
+        const attempts = items.flatMap(t => (t.attempts || []).map(a => ({...a, task_id: t.id})));
+        return {...latest, ...(items.length > 1 ? {retry_history: items} : {}), ...(attempts.length ? {attempt_history: attempts} : {})};
+    }).sort((a,b) => b.id - a.id);
+}
 export function displayValue(value) {
     if (typeof value === 'boolean') return value ? '是' : '否';
     return value === null || value === undefined ? '未知' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -53,18 +82,38 @@ export function productFactsView(detail) {
     const present = task => {
         const result = task.result || {};
         const evidence = Array.isArray(result.evidence) ? result.evidence : [];
-        return {id:task.id,snapshot_id:task.snapshot_id,
-            facts:(Array.isArray(result.facts) ? result.facts : []).filter(f=>typeof f.name==='string' && !confidentialFact(f.name)).map(f=>({
-                name:factLabel(f.name), rows:factValueRows(f.value),
+        const facts=(Array.isArray(result.facts) ? result.facts : []).filter(f=>typeof f.name==='string' && !confidentialFact(f.name)).map(f=>({
+                name:factLabel(f.name), category:f.category === 'visual' ? 'visual' : 'known', rows:factValueRows(f.value),
                 evidence:(Array.isArray(f.evidence_ids)?f.evidence_ids:[]).map(id=>{
                     const e=evidence.find(e=>e.id===id);
                     return {id,source:e?.source || '来源缺失',observed_at:e?.observed_at || '时间未知'};
                 }),
-            })),
+            }));
+        return {id:task.id,snapshot_id:task.snapshot_id, facts,
+            knownFacts:facts.filter(f=>f.category==='known'), visualFacts:facts.filter(f=>f.category==='visual'),
             uncertainties:Array.isArray(result.uncertainties)?result.uncertainties.filter(v=>typeof v==='string'):[]};
     };
     const current = snapshotId ? completed.find(t=>t.snapshot_id===snapshotId) : null;
     return {status:!snapshotId?'no_snapshot':current?'current':completed.length?'stale':'missing',
         current:current?present(current):null,
         history:completed.filter(t=>t.snapshot_id!==snapshotId).map(present)};
+}
+
+export function filterLibraryRows(rows, filters = {}) {
+    const query = (filters.query || '').trim().toLocaleLowerCase();
+    return (rows || []).filter(row => {
+        const haystack = [row.source_sku, row.title, row.url, row.visual_features].filter(Boolean).join(' ').toLocaleLowerCase();
+        const date = typeof row.listed_at === 'string' ? row.listed_at.slice(0, 10) : '';
+        return (!query || haystack.includes(query)) && (!filters.platform || row.platform === filters.platform) &&
+            (!filters.dateFrom || (date && date >= filters.dateFrom)) && (!filters.dateTo || (date && date <= filters.dateTo));
+    });
+}
+
+export function libraryMetadataOrigin(origin) {
+    return ({import_frozen:'采集时归档', legacy_backfill:'历史记录补显'})[origin] || '未知';
+}
+export function productSourceImages(value) {
+    if (Array.isArray(value?.source_images)) return value.source_images.filter(x => x && (x.artifact_id || x.url));
+    if (Array.isArray(value?.source_image_artifact_ids)) return value.source_image_artifact_ids.map(artifact_id => ({artifact_id}));
+    return [];
 }

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "SHEIN 运营中心绑定版采集器",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://us.shein.com/*"
+  ],
+  "action": {
+    "default_title": "SHEIN 运营中心绑定版",
+    "default_popup": "collector.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://us.shein.com/*"
+      ],
+      "js": [
+        "visible_search.js",
+        "gallery_visible.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

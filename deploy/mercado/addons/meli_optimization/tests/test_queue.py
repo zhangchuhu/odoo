@@ -1,4 +1,7 @@
 from datetime import timedelta
+import base64
+import hashlib
+from unittest.mock import patch
 from odoo import fields
 from odoo.tests import TransactionCase, tagged
 from odoo.exceptions import AccessError, ValidationError
@@ -6,6 +9,330 @@ from odoo.exceptions import AccessError, ValidationError
 
 @tagged('post_install', '-at_install')
 class OptimizationQueueCase(TransactionCase):
+    def test_window_registration_failure_can_resume_original_task(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'window recovery'})
+        case = self.env['meli.optimization.case'].create({'name': 'window recovery', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        task._set({'task_type': 'research.bestseller'}); task.prepare_scoped_research()
+        groups = [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]
+        user = self.env['res.users'].create({'name': 'Window worker', 'login': 'window-recovery-worker', 'company_id': case.company_id.id, 'company_ids': [(6, 0, case.company_id.ids)], 'group_ids': groups})
+        worker = task.with_user(user); claim = worker.claim(['research.bestseller'])
+        token, epoch = claim['lease_token'], claim['lease_epoch']
+        worker.checkpoint(token, epoch, 'window-original', {'request_id': 'window-original', 'state': 'unknown'})
+        worker.checkpoint(token, epoch, 'window-failed', {'request_id': 'window-original', 'state': 'failed'})
+        worker.wait(token, epoch, 'window-wait', {'code': 'window_registration_failed', 'message': 'Window unavailable'})
+        self.assertEqual(task.state, 'waiting')
+        self.assertEqual(task.resume()['state'], 'queued')
+        recovered = worker.claim(['research.bestseller'])
+        self.assertEqual(recovered['id'], task.id)
+        self.assertGreater(recovered['lease_epoch'], epoch)
+        # A prior resume authorization cannot permit another epoch to be claimed.
+        task._set({'state': 'queued', 'lease_token': False, 'lease_expires_at': False, 'worker_uid': False})
+        self.assertFalse(worker.claim(['research.bestseller']))
+
+    def test_window_resume_requires_original_failed_scoped_request(self):
+        groups = [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]
+        user = self.env['res.users'].create({'name': 'Window negative worker', 'login': 'window-negative-worker', 'company_id': self.env.company.id, 'company_ids': [(6, 0, self.env.company.ids)], 'group_ids': groups})
+        for mode in ('missing', 'wrong_epoch', 'unknown'):
+            with self.subTest(mode=mode):
+                batch = self.env['meli.optimization.batch'].create({'name': mode})
+                case = self.env['meli.optimization.case'].create({'name': mode, 'batch_id': batch.id})
+                snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+                task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+                task._set({'task_type': 'research.bestseller'}); task.prepare_scoped_research()
+                worker = task.with_user(user); claim = worker.claim(['research.bestseller']); token, epoch = claim['lease_token'], claim['lease_epoch']
+                if mode != 'missing':
+                    worker.checkpoint(token, epoch, 'initial-' + mode, {'request_id': 'request-' + mode, 'state': 'unknown'})
+                if mode == 'wrong_epoch':
+                    worker.checkpoint(token, epoch, 'failed-' + mode, {'request_id': 'request-' + mode, 'state': 'failed'})
+                    registration = self.env['meli.optimization.event'].sudo().search([('task_id', '=', task.id), ('kind', '=', 'scoped_request_registration')])
+                    registration._set({'payload': {'request_id': 'request-' + mode, 'initial_epoch': epoch + 1}})
+                worker.wait(token, epoch, 'wait-' + mode, {'code': 'window_registration_failed', 'message': 'Window unavailable'})
+                if mode == 'unknown':
+                    task.resume()  # Existing unknown-result reconciliation remains in force.
+                    self.assertFalse(self.env['meli.optimization.event'].sudo().search([('task_id', '=', task.id), ('kind', '=', 'resume')]))
+                else:
+                    with self.assertRaises(ValidationError): task.resume()
+
+    def test_scoped_resume_preflight_requires_original_owner_and_reconciled_request(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'resume scope'})
+        case = self.env['meli.optimization.case'].create({'name': 'resume scope', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        task._set({'task_type':'research.bestseller'}); task.prepare_scoped_research()
+        groups = [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]
+        first = self.env['res.users'].create({'name':'Resume first','login':'resume-scope-first','company_id':case.company_id.id,'company_ids':[(6,0,case.company_id.ids)],'group_ids':groups})
+        second = self.env['res.users'].create({'name':'Resume second','login':'resume-scope-second','company_id':case.company_id.id,'company_ids':[(6,0,case.company_id.ids)],'group_ids':groups})
+        worker = task.with_user(first); claim = worker.claim(['research.bestseller']); token, epoch = claim['lease_token'], claim['lease_epoch']
+        worker.checkpoint(token, epoch, 'initial', {'request_id':'original','state':'unknown'})
+        registration = self.env['meli.optimization.event'].search([('task_id','=',task.id),('kind','=','scoped_request_registration')])
+        self.assertEqual(len(registration), 1)
+        self.assertEqual(registration.payload['request_id'], 'original')
+        self.assertEqual(registration.receipt['coverage'], 'unknown')
+        with self.assertRaises(ValidationError): worker.scoped_resume_preflight(token, epoch, 'original')
+        task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        with self.assertRaises(ValidationError): worker.recover_lease('original', token, epoch, '1234567890abcdef1234567890abcdef')
+        task._set({'lease_expires_at': fields.Datetime.now() + timedelta(seconds=120)})
+        with self.assertRaises(AccessError): task.with_user(second).scoped_resume_preflight(token, epoch, 'original')
+        worker.checkpoint(token, epoch, 'reconciled', {'request_id':'original','state':'succeeded'})
+        with self.assertRaises(ValidationError): worker.scoped_resume_preflight(token, epoch, 'original')
+        worker.checkpoint(token, epoch, 'known', {'request_id':'known','state':'succeeded'})
+        self.assertEqual(worker.scoped_resume_preflight(token, epoch, 'known')['coverage'], 'unknown')
+        with self.assertRaises(ValidationError): worker.scoped_resume_preflight(token, epoch, 'other')
+    def test_scoped_research_requires_fresh_explicit_marker_and_excludes_shared_worker(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'scope fresh'})
+        case = self.env['meli.optimization.case'].create({'name': 'scope fresh', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        def new_task():
+            item = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+            item._set({'task_type': 'research.bestseller'})
+            return item
+        task, legacy = new_task(), new_task()
+        scoped = self.env['res.users'].create({'name':'Scoped fresh', 'login':'scoped-fresh', 'company_id':case.company_id.id, 'company_ids':[(6,0,case.company_id.ids)], 'group_ids':[(6,0,[self.env.ref('meli_optimization.group_research_worker').id])]})
+        shared = self.env['res.users'].create({'name':'Shared fresh', 'login':'shared-fresh', 'company_id':case.company_id.id, 'company_ids':[(6,0,case.company_id.ids)], 'group_ids':[(6,0,[self.env.ref('meli_optimization.group_worker').id])]})
+        self.assertFalse(legacy.with_user(scoped).claim(['research.bestseller']))
+        task.prepare_scoped_research()
+        self.assertFalse(task.with_user(shared).claim(['research.bestseller']))
+        claimed = task.with_user(scoped).claim(['research.bestseller'])
+        self.assertEqual(claimed['id'], task.id)
+        self.assertEqual(task.scoped_coverage, 'unknown')
+        with self.assertRaises(ValidationError): task.prepare_scoped_research()
+        task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        self.assertFalse(task.with_user(scoped).claim(['research.bestseller']))
+    def test_research_only_worker_cannot_use_legacy_artifact_create(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'scope'})
+        case = self.env['meli.optimization.case'].create({'name': 'scope', 'batch_id': batch.id})
+        user = self.env['res.users'].create({'name': 'Scoped Research', 'login': 'scope-research-only', 'company_id': case.company_id.id, 'company_ids': [(6, 0, case.company_id.ids)], 'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]})
+        with self.assertRaises(AccessError):
+            self.env['meli.optimization.artifact'].with_user(user).create({'case_id': case.id, 'payload': {}, 'digest': hashlib.sha256(b'{}').hexdigest()})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        task._set({'task_type': 'research.bestseller'})
+        task.prepare_scoped_research()
+        task = task.with_user(user)
+        claim = task.claim(['research.bestseller'])
+        task.checkpoint(claim['lease_token'], claim['lease_epoch'], 'request', {'request_id': 'r', 'state': 'unknown'})
+        artifact = {'payload': {}, 'digest': hashlib.sha256(b'{}').hexdigest()}
+        result = task.research_artifact(claim['lease_token'], claim['lease_epoch'], 'r', 'i', artifact)
+        self.assertTrue(result['artifact_id'])
+        with self.assertRaises(ValidationError): task.seal_scoped_manifest(claim['lease_token'], claim['lease_epoch'], 'r', ['missing'])
+        sealed = task.seal_scoped_manifest(claim['lease_token'], claim['lease_epoch'], 'r', ['i'])
+        self.assertEqual(sealed['coverage'], 'unknown')
+        task.checkpoint(claim['lease_token'], claim['lease_epoch'], 'success', {'request_id':'r','state':'succeeded'})
+        self.assertEqual(task.seal_scoped_manifest(claim['lease_token'], claim['lease_epoch'], 'r', ['i']), sealed)
+        with self.assertRaises(ValidationError): task.seal_scoped_manifest(claim['lease_token'], claim['lease_epoch'], 'r', ['i', 'missing'])
+    def test_research_artifact_intent_is_atomic_and_query_never_claims_coverage(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'intent'})
+        case = self.env['meli.optimization.case'].create({'name': 'item', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        task._set({'task_type': 'research.bestseller'})
+        claim = task.claim(['research.bestseller'])
+        token, epoch = claim['lease_token'], claim['lease_epoch']
+        task.checkpoint(token, epoch, 'checkpoint', {'request_id': 'request-1', 'state': 'unknown'})
+        raw = b'image'; artifact = {'data': base64.b64encode(raw).decode(), 'digest': hashlib.sha256(raw).hexdigest(), 'mime_type': 'image/png'}
+        first = task.research_artifact(token, epoch, 'request-1', 'intent-1', artifact)
+        self.assertEqual(task.research_artifact(token, epoch, 'request-1', 'intent-1', artifact), first)
+        self.assertEqual(task.research_intent_query(token, epoch, 'request-1', 'intent-1')['artifact_id'], first['artifact_id'])
+        self.assertEqual(task.research_intent_query(token, epoch, 'request-1', 'missing')['coverage'], 'unknown')
+        with self.assertRaises(ValidationError): task.research_artifact(token, epoch, 'request-1', 'intent-1', dict(artifact, mime_type='image/jpeg'))
+        with self.assertRaises(ValidationError): task.research_artifact('bad', epoch, 'request-1', 'intent-2', artifact)
+        self.assertEqual(task.research_intent_query(token, epoch, 'other-request', 'intent-1')['coverage'], 'unknown')
+        self.assertIsNone(task.research_intent_query(token, epoch, 'other-request', 'intent-1')['artifact_id'])
+        count = self.env['meli.optimization.artifact'].search_count([('case_id', '=', case.id)])
+        events = self.env['meli.optimization.event']
+        with self.assertRaises(RuntimeError):
+            with self.env.cr.savepoint():
+                with patch.object(type(events), '_append', side_effect=RuntimeError('event write failed')):
+                    task.research_artifact(token, epoch, 'request-1', 'intent-failed', artifact)
+        self.assertEqual(self.env['meli.optimization.artifact'].search_count([('case_id', '=', case.id)]), count)
+        self.assertIsNone(task.research_intent_query(token, epoch, 'request-1', 'intent-failed')['artifact_id'])
+        task.wait(token, epoch, 'test-wait', {'code': 'external_result_unknown', 'message': 'Awaiting reconciliation'})
+        self.assertFalse(task.lease_token)
+        before = task.lease_epoch
+        result = task.research_intent_reconcile('request-1', 'intent-1')
+        self.assertEqual(result['artifact_id'], first['artifact_id'])
+        self.assertEqual(result['coverage'], 'unknown')
+        self.assertEqual(task.lease_epoch, before)
+        self.assertIsNone(task.research_intent_reconcile('request-1', 'absent')['artifact_id'])
+        with self.assertRaises(ValidationError): task.research_intent_reconcile('other-request', 'intent-1')
+        with self.assertRaises(AccessError): task.with_user(self.env.ref('base.public_user')).research_intent_reconcile('request-1', 'intent-1')
+        worker = self.env['res.users'].create({'name': 'Reconcile Worker', 'login': 'reconcile-worker', 'company_id': case.company_id.id, 'company_ids': [(6, 0, case.company_id.ids)], 'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_worker').id])]})
+        with self.assertRaises(AccessError): task.with_user(worker).research_intent_reconcile('request-1', 'intent-1')
+        other = self.env['res.company'].create({'name': 'Other Reconcile Company'})
+        editor = self.env['res.users'].create({'name': 'Other Reconcile Editor', 'login': 'other-reconcile-editor', 'company_id': other.id, 'company_ids': [(6, 0, other.ids)], 'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_editor').id])]})
+        with self.assertRaises(AccessError): task.with_user(editor).with_context(allowed_company_ids=other.ids).research_intent_reconcile('request-1', 'intent-1')
+    def test_best_of_budget_is_visible_but_not_passed(self):
+        case = self.env['meli.optimization.case'].create({'name':'test','batch_id':self.env['meli.optimization.batch'].create({'name':'test'}).id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{}})
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':['1'],'target_artifact_id':'2','generation_plan_id':'3'}})
+        data=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        image=self.env['meli.optimization.artifact'].create({'case_id':case.id,'data':base64.b64encode(data),'mime_type':'image/png','digest':hashlib.sha256(data).hexdigest()})
+        claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        task.checkpoint(token,epoch,'intent',{'request_id':'original','state':'unknown'})
+        task.host_progress(token,epoch,'original','review_required',review_seq=1,review_kind='best_of_budget',candidate_artifact_id=image.id,candidate_sha256=image.digest,candidate_attempt_id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',candidate_attempt_number=1)
+        self.assertEqual(task.state,'running')
+        self.assertEqual(task.status_detail['review_kind'],'best_of_budget')
+        self.assertEqual(task.status_detail['candidate_artifact_id'],image.id)
+        self.assertNotEqual(task.status_detail.get('status'),'passed')
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id,task.id,1)
+        self.assertEqual(task.status_detail['candidate_artifact_id'],image.id)
+        self.assertEqual(task.request_ids[0].state,'unknown')
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_best_review_resume(case.id,task.id,image.id,image.digest,'wrong',1,1)
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_best_review_resume(case.id,task.id,image.id,image.digest,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,2)
+        self.env['meli.optimization.case'].workbench_request_best_review_resume(case.id,task.id,image.id,image.digest,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,1)
+        self.assertEqual(task.status_detail['candidate_attempt_id'],'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    def test_color_uncertainty_visible_without_replacing_review(self):
+        case = self.env['meli.optimization.case'].create({'name':'color','batch_id':self.env['meli.optimization.batch'].create({'name':'color'}).id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{}})
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':['1'],'target_artifact_id':'2','generation_plan_id':'3'}})
+        claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        task.checkpoint(token,epoch,'intent',{'request_id':'original','state':'unknown'})
+        task.host_progress(token,epoch,'original','color_required',review_seq=1)
+        self.assertEqual(task.status_detail['code'], 'host_color_required')
+        self.assertIn('颜色',task.status_detail['message'])
+        self.assertEqual(task._envelope()['host_progress']['code'], 'host_color_required')
+        task.host_progress(token,epoch,'original','color_required',review_seq=1)
+        task._set({'status_detail':{'code':'host_review_required','request_id':'original','review_seq':1}})
+        with self.assertRaises(ValidationError): task.host_progress(token,epoch,'original','color_required',review_seq=1)
+
+    def test_host_review_resume_preserves_original_request_and_lease(self):
+        case = self.env['meli.optimization.case'].create({'name':'test','batch_id':self.env['meli.optimization.batch'].create({'name':'test'}).id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{}})
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':['1'],'target_artifact_id':'2','generation_plan_id':'3'}})
+        claim = task.claim(['image.generate']); token, epoch = claim['lease_token'], claim['lease_epoch']
+        task.checkpoint(token, epoch, 'intent', {'request_id':'request-1','state':'unknown'})
+        task._set({'status_detail': {'code':'host_resume_requested','request_id':'request-1','message':'legacy'}})
+        self.assertFalse(self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id))
+        self.assertEqual(task.status_detail['code'], 'host_review_required')
+        self.assertNotIn('intent_id', task.status_detail)
+        task._set({'status_detail': {'code':'host_resume_requested','request_id':'request-1','message':'legacy'}})
+        task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=1)
+        self.assertEqual(task.status_detail['code'], 'host_review_required')
+        self.assertEqual(task.status_detail['review_seq'], 1)
+        with self.assertRaises(ValidationError): task.host_progress(token, epoch, 'other', 'review_required', review_seq=1)
+        task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=1)
+        self.assertEqual(task.state, 'running')
+        self.assertEqual(task.status_detail['code'], 'host_review_required')
+        self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id, 1)
+        self.assertEqual(task._envelope()['host_progress']['code'], 'host_resume_requested')
+        intent = task.status_detail['intent_id']
+        self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id, 1)
+        self.assertEqual(task.status_detail['intent_id'], intent)
+        self.assertEqual(task.lease_epoch, epoch)
+        with self.assertRaises(ValidationError): task.host_progress(token, epoch, 'request-1', 'resumed', 'wrong-intent', 1)
+        task.host_progress(token, epoch, 'request-1', 'resumed', intent, 1)
+        task.host_progress(token, epoch, 'request-1', 'resumed', intent, 1)
+        task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=1)
+        self.assertEqual(task.status_detail['code'], 'host_review_resumed')
+        self.assertEqual(task.request_ids[0].state, 'unknown')
+        task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=2)
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id, 1)
+        self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id, 2)
+        self.assertNotEqual(task.status_detail['intent_id'], intent)
+        with self.assertRaises(ValidationError): task.host_progress(token, epoch, 'request-1', 'resumed', intent, 1)
+        with self.assertRaises(ValidationError): task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=1)
+        task.host_progress(token, epoch, 'request-1', 'review_required', review_seq=2)
+        task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id)
+        task._set({'status_detail': {'code':'host_resume_requested','request_id':'request-1','message':'legacy'}})
+        with self.assertRaises(ValidationError):
+            self.env['meli.optimization.case'].workbench_request_host_review_resume(case.id, task.id)
+        self.assertNotIn('review_seq', task.status_detail)
+    def test_recover_expired_research_lease_is_fenced_and_idempotent(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'recovery'})
+        case = self.env['meli.optimization.case'].create({'name': 'item', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        task._set({'task_type': 'research.bestseller'})
+        claim = task.claim(['research.bestseller'])
+        token, epoch = claim['lease_token'], claim['lease_epoch']
+        intent = '1234567890abcdef1234567890abcdef'
+        task.checkpoint(token, epoch, 'original-intent', {'request_id': 'original', 'state': 'unknown'})
+        with self.assertRaises(ValidationError): task.recover_lease('original', token, epoch, intent)
+        task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        with self.assertRaises(ValidationError): task.recover_lease('other', token, epoch, intent)
+        with self.assertRaises(ValidationError): task.recover_lease('original', 'wrong', epoch, intent)
+        recovered = task.recover_lease('original', token, epoch, intent)
+        self.assertEqual(recovered['lease_epoch'], epoch + 1)
+        self.assertNotEqual(recovered['lease_token'], token)
+        self.assertEqual(task.request_ids[0].state, 'unknown')
+        self.assertEqual(task.recover_lease('original', token, epoch, intent), recovered)
+        with self.assertRaises(ValidationError): task.recover_lease('original', token, epoch, 'fedcba0987654321fedcba0987654321')
+        task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        renewed = task.recover_lease('original', token, epoch, intent)
+        self.assertEqual(renewed['lease_epoch'], epoch + 2)
+        self.assertNotEqual(renewed['lease_token'], recovered['lease_token'])
+        self.assertEqual(task.recover_lease('original', token, epoch, intent), renewed)
+        with self.assertRaises(ValidationError): task.heartbeat(recovered['lease_token'], recovered['lease_epoch'])
+        with self.assertRaises(ValidationError): task.heartbeat(token, epoch)
+
+    def test_recover_expired_text_lease_preserves_request_and_owner(self):
+        for kind in ('research.keywords', 'product.facts'):
+            with self.subTest(kind=kind):
+                batch = self.env['meli.optimization.batch'].create({'name': 'text recovery'})
+                case = self.env['meli.optimization.case'].create({'name': 'item', 'batch_id': batch.id})
+                snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+                task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+                task._set({'task_type': kind})
+                claim = task.claim([kind]); token, epoch = claim['lease_token'], claim['lease_epoch']
+                task.checkpoint(token, epoch, 'text-intent', {'request_id': 'text-original', 'state': 'unknown'})
+                task._set({'lease_expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+                with self.assertRaises(ValidationError):
+                    task.recover_lease('wrong', token, epoch, '1' * 32)
+                recovered = task.recover_lease('text-original', token, epoch, '1' * 32)
+                self.assertEqual(recovered['lease_epoch'], epoch + 1)
+                self.assertEqual(task.request_ids[0].state, 'unknown')
+                with self.assertRaises(ValidationError): task.heartbeat(token, epoch)
+
+    def test_recover_waiting_unknown_uses_original_wait_fence(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'wait recovery'})
+        case = self.env['meli.optimization.case'].create({'name': 'item', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id, 'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        task._set({'task_type': 'research.bestseller'})
+        claim = task.claim(['research.bestseller']); token, epoch = claim['lease_token'], claim['lease_epoch']
+        task.checkpoint(token, epoch, 'intent-wait', {'request_id':'r-wait', 'state':'unknown'})
+        task.wait(token, epoch, 'wait-unknown', {'code':'external_result_unknown', 'message':'Interrupted'})
+        recovery_intent = '1234567890abcdef1234567890abcdef'
+        with self.assertRaises(ValidationError): task.recover_lease('r-wait', 'wrong', epoch, recovery_intent)
+        with self.assertRaises(ValidationError): task.recover_lease('other', token, epoch, recovery_intent)
+        result = task.recover_lease('r-wait', token, epoch, recovery_intent)
+        self.assertEqual(result['lease_epoch'], epoch + 1)
+        self.assertEqual(task.state, 'running')
+        self.assertFalse(task.status_detail)
+        self.assertEqual(task.request_ids[0].state, 'unknown')
+        self.assertEqual(task.recover_lease('r-wait', token, epoch, recovery_intent), result)
+        with self.assertRaises(ValidationError): task.heartbeat(token, epoch)
+
+    def test_resume_and_claim_clear_obsolete_status(self):
+        batch = self.env['meli.optimization.batch'].create({'name': 'status recovery'})
+        case = self.env['meli.optimization.case'].create({'name': 'item', 'batch_id': batch.id})
+        snap = self.env['meli.optimization.snapshot'].create({'case_id': case.id, 'payload': {}})
+        task = self.env['meli.optimization.task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': 'product.facts', 'payload': {'schema_version': '1', 'product_snapshot_id': str(snap.id)}})
+        claim = task.claim(['product.facts'])
+        task.wait(claim['lease_token'], claim['lease_epoch'], 'status-wait',
+                  {'code':'capability_missing', 'message':'Old failure'})
+        task.resume()
+        self.assertFalse(task.status_detail)
+        self.assertEqual(task.state, 'queued')
+        task._set({'status_detail': {'code':'capability_missing', 'message':'Old failure'}})
+        task.claim(['product.facts'])
+        self.assertFalse(task.status_detail)
+        self.assertEqual(task.state, 'running')
+        self.assertTrue(self.env['meli.optimization.event'].search_count([
+            ('task_id', '=', task.id), ('kind', '=', 'wait')]))
+
     def test_durable_contract(self):
         self.assertIn('meli.optimization.task', self.env.registry, 'durable optimization implementation is missing')
         batch = self.env['meli.optimization.batch'].create({'name': 'Test'})
@@ -99,6 +426,29 @@ class OptimizationQueueCase(TransactionCase):
         worker.active = False
         with self.assertRaises(AccessError):
             scoped.claim(['product.facts'])
+
+    def test_collection_case_lock_is_skipped_during_claim(self):
+        from odoo import api, SUPERUSER_ID, sql_db
+        db=sql_db.db_connect(self.env.cr.dbname)
+        with db.cursor() as setup:
+            env=api.Environment(setup,SUPERUSER_ID,{})
+            from .test_collection_start import IMAGE
+            cases = env['meli.optimization.case']
+            detail = cases.workbench_collection_create({
+                'garment': 'synthetic', 'source_sku': 'LOCK', 'image_data': IMAGE, 'image_mime': 'image/png',
+                'platform': 'mercado-libre-mx', 'min_sold': 100, 'min_reviews': 0, 'min_rating': 0, 'result_limit': 5,
+            })
+            tid = cases.workbench_collection_start(detail['id'], detail['snapshot']['id'], detail['revision'])['task_id']
+            self.assertTrue(tid)
+            setup.commit()
+        with db.cursor() as first, db.cursor() as second:
+            first.execute('SELECT id FROM meli_optimization_case WHERE id=%s FOR UPDATE',[detail['id']])
+            second.execute("SET LOCAL lock_timeout = '500ms'")
+            claimed=api.Environment(second,SUPERUSER_ID,{})['meli.optimization.task'].browse(tid).claim(['product.facts'])
+            self.assertFalse(claimed)
+        with db.cursor() as cleanup:
+            api.Environment(cleanup,SUPERUSER_ID,{})['meli.optimization.task'].browse(tid).cancel()
+            cleanup.commit()
 
     def test_independent_cursors_skip_locked_claim(self):
         from odoo import api, SUPERUSER_ID, sql_db
@@ -215,17 +565,19 @@ class OptimizationQueueCase(TransactionCase):
                 with self.assertRaises(ValidationError):
                     task.cancel()
 
-    def test_resume_does_not_unblock_unknown_and_control_authorization(self):
+    def test_resume_retries_unknown_and_preserves_control_authorization(self):
         task = self._review_task()
         self.assertTrue(callable(getattr(task, 'wait', None)), 'fenced wait operation missing')
         lease = task.claim(['product.facts'])
         args = (lease['lease_token'], lease['lease_epoch'])
         task.checkpoint(*args, 'unknown', {'request_id': 'remote', 'state': 'unknown'})
         task.wait(*args, 'wait', {'code': 'uncertain', 'message': 'Reconciliation required'})
-        with self.assertRaises(ValidationError):
-            task.resume()
-        self.assertEqual(task.state, 'waiting')
-        self.assertFalse(task.claim(['product.facts']))
+        retry = task.resume()
+        self.assertEqual(task.state, 'queued')
+        self.assertEqual(retry['source_task_id'], task.id)
+        self.assertEqual(retry['task_id'], task.id)
+        self.assertEqual(task.resume()['task_id'], retry['task_id'])
+        self.assertEqual(self.env['meli.optimization.task'].browse(retry['task_id']).state, 'queued')
         worker = self.env['res.users'].create({'name': 'Control worker', 'login': 'control-worker',
             'group_ids': [(6, 0, [self.env.ref('meli_optimization.group_worker').id])]})
         for action in ('resume', 'cancel'):

@@ -35,6 +35,51 @@ class Provider:
             raise self.error
         return copy.deepcopy(self.output)
 
+class SingleActiveResearchTest(unittest.TestCase):
+    def test_resumes_waiting_request_before_claiming_more_work(self):
+        from unittest.mock import Mock, patch
+        from optimization_worker.journal import Journal
+
+        client = Mock(identity='fixture')
+        original = {
+            'claim': {'id': 240, 'task_type': 'research.bestseller', 'lease_epoch': 5},
+            'request_id': 'original-gallery-request', 'phase': 'host_pending',
+        }
+
+        def resume_waiting(journal):
+            journal.save(original)
+            return True
+
+        with tempfile.TemporaryDirectory() as directory:
+            for task_id in (None, 240):
+                with self.subTest(task_id=task_id):
+                    path = Path(directory) / f'{task_id}.sqlite'
+                    worker = Worker(client, path, task_id=task_id, single_active=True,
+                                    capabilities=('research.bestseller',), resume_waiting=resume_waiting)
+                    with patch.object(worker, '_run', return_value='pending') as run:
+                        self.assertEqual(worker.once(), 'pending')
+                    self.assertEqual(run.call_args.args[1], original)
+                    journal = Journal(path, client.identity)
+                    try:
+                        self.assertEqual(journal.active(), [original])
+                    finally:
+                        journal.close()
+        client.claim.assert_not_called()
+
+    def test_ambiguous_active_journal_fails_closed_without_claim_or_dispatch(self):
+        from unittest.mock import patch, Mock
+        client = Mock(identity='fixture')
+        journal = Mock()
+        journal.active.return_value = [
+            {'claim': {'id': 1, 'task_type': 'research.bestseller'}},
+            {'claim': {'id': 2, 'task_type': 'research.bestseller'}},
+        ]
+        worker = Worker(client, 'ignored', capabilities=('research.bestseller',), single_active=True)
+        with patch('optimization_worker.runtime.Journal', return_value=journal):
+            self.assertEqual(worker.once(), 'reconciliation_required')
+        client.claim.assert_not_called()
+        journal.close.assert_called_once()
+
 
 class Fixture:
     def __init__(self):
@@ -79,7 +124,7 @@ class Fixture:
                         return self.send(200, {'success': True, 'data': fixture.artifacts[path.rsplit('/', 1)[-1]]})
                     payload = {'facts': ['dress']}
                     return self.send(200, {'success': True, 'data': {'artifact_id': 23,
-                        'payload': payload, 'data': False, 'digest': canonical_hash(payload)}})
+                        'payload': payload, 'data': False, 'digest': canonical_hash(payload), 'mime_type': 'application/json'}})
                 op = path.rsplit('/', 1)[-1]
                 key = body.get('submission_key')
                 if key and key in fixture.receipts:
@@ -265,6 +310,15 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(output['facts'][0]['name'], 'item_id')
         self.assertEqual(output['facts'][0]['value'], 'MLM1')
 
+    def test_facts_provider_is_invoked_when_configured(self):
+        self.fixture.claim.update(task_type='product.facts', payload={'schema_version': '1', 'product_snapshot_id': '15'})
+        from optimization_worker.handlers import product_facts
+        output = product_facts({'snapshot': {'snapshot_id': 15, 'payload': {'title': 'Dress'}}})
+        provider = Provider(output=output)
+        worker = Worker(Client(self.fixture.url, 'fixture-key', timeout=.5), Path(self.tmp.name) / 'fact.sqlite', providers={'product.facts': provider})
+        self.assertEqual(worker.once(), 'succeeded')
+        self.assertEqual(provider.calls, 1)
+
     def test_offline_provider_requires_explicit_mode(self):
         from optimization_worker.providers import OfflineProvider
         with self.assertRaises(ValueError):
@@ -414,14 +468,56 @@ if __name__ == '__main__':
     unittest.main()
 
 class SourceImageContextCase(unittest.TestCase):
+    def test_qc_target_binding_requires_matching_artifact_ownership(self):
+        from optimization_worker.handlers import prepare
+        class Transport:
+            def snapshot(self, ref): return {'case_id':12, 'payload':{}}
+            def artifact(self, ref):
+                return {'case_id':12, 'company_id':1, 'payload':{'snapshot_id':1, 'target_artifact_ids':['3'], 'source_artifact_ids':[]} if ref == '2' else None}
+        claim={'task_type':'image.qc', 'snapshot_id':1, 'company_id':1, 'generation_task_id':5,
+               'generation_target_artifact_id':'3', 'payload':{'schema_version':'1','image_artifact_id':'1','generation_plan_id':'2'}}
+        self.assertEqual(prepare(Transport(),claim)['qc_target_artifact_id'], '3')
+        class Foreign(Transport):
+            def artifact(self, ref):
+                item=super().artifact(ref)
+                if ref == '3': item['case_id']=99
+                return item
+        self.assertNotIn('qc_target_artifact_id', prepare(Foreign(),claim))
+    def test_prepare_rejects_foreign_source_image(self):
+        from optimization_worker.handlers import prepare
+        class Transport:
+            def snapshot(self, ref):
+                return {'case_id':12, 'payload':{'source_image_artifact_ids':[99]}}
+            def artifact(self, ref):
+                return {'artifact_id':99, 'case_id':13, 'company_id':1, 'data':'x', 'digest':'x'}
+        with self.assertRaises(ValueError):
+            prepare(Transport(), {'task_type':'product.facts', 'snapshot_id':1, 'company_id':1,
+                'payload':{'schema_version':'1','product_snapshot_id':'1'}})
+        class OtherCompany(Transport):
+            def artifact(self, ref):
+                return {'artifact_id':99, 'case_id':12, 'company_id':2, 'data':'x', 'digest':'x'}
+        with self.assertRaises(ValueError):
+            prepare(OtherCompany(), {'task_type':'product.facts', 'snapshot_id':1, 'company_id':1,
+                'payload':{'schema_version':'1','product_snapshot_id':'1'}})
+
     def test_prepare_loads_standalone_source_image_into_verified_context(self):
         from optimization_worker.handlers import prepare
         # Narrow in-memory transport fixture: actual handler behavior is under test.
         class Transport:
             def snapshot(self, ref):
-                return {'payload': {'source_image_artifact_ids': [99]}}
+                return {'case_id':12, 'payload': {'source_image_artifact_ids': [99]}}
             def artifact(self, ref):
-                return {'artifact_id': int(ref), 'digest': 'verified', 'data': 'test-only'}
+                return {'artifact_id': int(ref), 'case_id':12, 'company_id':1, 'digest': 'verified', 'data': 'test-only'}
         context = prepare(Transport(), {'task_type': 'product.facts', 'snapshot_id': 1,
-            'payload': {'schema_version': '1', 'product_snapshot_id': '1'}})
+            'company_id':1, 'payload': {'schema_version': '1', 'product_snapshot_id': '1'}})
         self.assertEqual(context['artifacts']['99']['artifact_id'], 99)
+
+class ResearchUnknownProviderTests(WorkerTests):
+    def test_unknown_session_waits_with_original_request_unsettled(self):
+        from optimization_worker.host_session import SessionUnknown
+        class P:
+            def run(self,*args): raise SessionUnknown()
+        self.assertEqual(self.worker(P()).once(), 'waiting')
+        operations=[(op,body) for op,body in self.fixture.events if op in ('checkpoint','wait')]
+        self.assertEqual([body['body'].get('state') for op,body in operations if op=='checkpoint'],['unknown'])
+        self.assertEqual([body['body']['code'] for op,body in operations if op=='wait'],['external_result_unknown'])

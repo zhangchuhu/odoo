@@ -17,6 +17,68 @@ TASK_INPUTS = {
 class OperationsWorkbench(models.Model):
     _inherit = PREFIX + 'case'
 
+    title_flow_snapshot_id = fields.Many2one(PREFIX + 'snapshot', readonly=True, ondelete='restrict')
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        if 'default_title_flow_snapshot_id' in self.env.context or any('title_flow_snapshot_id' in v for v in vals_list):
+            raise AccessError('Title flow is server managed')
+        return super().create(vals_list)
+
+    @api.model
+    def workbench_title_flow(self, case_id):
+        case = self._wb_case(case_id, True)
+        case._lock()
+        snapshot = self._wb_snapshot(case)
+        if not snapshot:
+            raise ValidationError('需要商品快照')
+        if snapshot.payload.get('site_id') != 'MLM':
+            raise ValidationError('标题流程暂仅支持已确认的墨西哥站点 MLM')
+        case._set({'title_flow_snapshot_id': snapshot.id})
+        task = case._title_flow_advance()
+        return {'task_id': task.id if task else False, 'stage': task.task_type if task else 'complete'}
+
+    def _title_flow_advance(self):
+        self.ensure_one()
+        self._lock()
+        snap = self._wb_snapshot(self)
+        if not snap or self.title_flow_snapshot_id != snap:
+            return self.env[PREFIX + 'task']
+        tasks = self.env[PREFIX + 'task'].sudo().search([('case_id', '=', self.id), ('snapshot_id', '=', snap.id)], order='id desc')
+        artifacts = self.env[PREFIX + 'artifact'].sudo()
+        prior = {}
+        for kind in ('product.facts', 'research.keywords', 'title.generate'):
+            existing = tasks.filtered(lambda t: t.task_type == kind)
+            if kind == 'research.keywords' and prior.get('product.facts'):
+                existing = existing.filtered(lambda t: t.payload.get('facts_artifact_id') == str(prior['product.facts']))
+            if kind == 'title.generate' and prior.get('research.keywords'):
+                existing = existing.filtered(lambda t: t.payload.get('facts_artifact_id') == str(prior['product.facts']) and t.payload.get('keywords_artifact_id') == str(prior['research.keywords']))
+            task = existing[:1]
+            if not task:
+                payload = {'schema_version': '1'}
+                if kind == 'product.facts': payload['product_snapshot_id'] = str(snap.id)
+                elif kind == 'research.keywords': payload.update(facts_artifact_id=str(prior['product.facts']), site_id=snap.payload['site_id'])
+                else: payload.update(facts_artifact_id=str(prior['product.facts']), keywords_artifact_id=str(prior['research.keywords']), language='es-MX')
+                old = tasks.filtered(lambda t: t.title_flow_key == str(snap.id) + ':' + kind)
+                if old:
+                    old._set({'title_flow_key': False})
+                created = self.env[PREFIX + 'task'].sudo().create({'case_id': self.id, 'snapshot_id': snap.id, 'task_type': kind, 'payload': payload})
+                created._set({'title_flow_key': str(snap.id) + ':' + kind})
+                return created
+            if task.state != 'succeeded' or kind == 'title.generate':
+                return task
+            if kind == 'research.keywords' and task.result.get('status') == 'empty':
+                return task
+            digest = canonical_hash(task.result)
+            artifact = artifacts.search([('case_id', '=', self.id), ('result_task_id', '=', task.id), ('result_hash', '=', digest)], limit=1)
+            if not artifact:
+                validate_result(kind, task.result)
+                artifact = artifacts._append({'company_id': self.company_id.id, 'case_id': self.id, 'payload': task.result,
+                    'digest': bounded(task.result), 'mime_type': 'application/json', 'result_task_id': task.id,
+                    'result_snapshot_id': snap.id, 'result_hash': digest})
+            prior[kind] = artifact.id
+        return self.env[PREFIX + 'task']
+
     def _wb_case(self, case_id, edit=False):
         self._authorize('editor' if edit else 'worker')
         case = self.browse(int(case_id)).exists()
@@ -28,6 +90,19 @@ class OperationsWorkbench(models.Model):
 
     def _wb_snapshot(self, case):
         return self.env[PREFIX + 'snapshot'].search([('case_id', '=', case.id)], order='id desc', limit=1)
+
+    def _wb_source_images(self, case, snapshot):
+        payload = snapshot.payload if snapshot and isinstance(snapshot.payload, dict) else {}
+        refs = payload.get('source_image_artifact_ids') or []
+        if not isinstance(refs, list):
+            return []
+        ids = [int(ref) for ref in refs if type(ref) in (str, int) and str(ref).isdigit()]
+        records = self.env[PREFIX + 'artifact'].search([
+            ('id', 'in', ids), ('case_id', '=', case.id), ('company_id', '=', case.company_id.id),
+            ('mime_type', 'in', ['image/png', 'image/jpeg', 'image/webp'])])
+        available = set(records.ids)
+        return [{'artifact_id': ref, 'url': '/web/image/meli.optimization.artifact/%s/data' % ref}
+                for ref in ids if ref in available]
 
     @api.model
     def workbench_overview(self, query='', page=0, batch_id=False, state='', shop='', site=''):
@@ -51,6 +126,7 @@ class OperationsWorkbench(models.Model):
                 continue
             rows.append({'id': case.id, 'name': case.name, 'revision': case.revision,
                 'batch': case.batch_id.name, 'batch_id': case.batch_id.id, 'product': payload,
+                'source_images': self._wb_source_images(case, snap),
                 'tasks': len(tasks), 'waiting': len(tasks.filtered(lambda t: t.state == 'waiting')),
                 'failed': len(tasks.filtered(lambda t: t.state == 'failed'))})
         collection_batches = self.search([('collection', '=', True)]).mapped('batch_id').ids
@@ -73,14 +149,34 @@ class OperationsWorkbench(models.Model):
     def workbench_detail(self, case_id):
         case = self._wb_case(case_id)
         snap = self._wb_snapshot(case)
-        tasks = self.env[PREFIX + 'task'].search([('case_id', '=', case.id)], order='id desc')
+        tasks = self.env[PREFIX + 'task'].search([('case_id', '=', case.id), ('research_archived', '=', False)], order='id desc')
+        # Attempt is internal-only: expose only epoch and creation time, scoped to
+        # tasks already visible through this authorized case. Never expose lease data.
+        attempts = self.env[PREFIX + 'attempt'].sudo().search([('task_id', 'in', tasks.ids), ('company_id', '=', case.company_id.id)], order='epoch asc')
+        attempt_rows = {}
+        for attempt in attempts:
+            attempt_rows.setdefault(attempt.task_id.id, []).append({'epoch': attempt.epoch, 'created_at': fields.Datetime.to_string(attempt.create_date)})
+        attempts_by_epoch = {(task_id, row['epoch']): row for task_id, rows in attempt_rows.items() for row in rows}
+        failures = self.env[PREFIX + 'event'].sudo().search([
+            ('task_id', 'in', tasks.ids), ('company_id', '=', case.company_id.id), ('kind', 'in', ['wait', 'fail']),
+        ], order='id')
+        for failure in failures:
+            # Submission keys acquire an epoch prefix starting with the second lease.
+            parts = failure.submission_key.split(':', 2)
+            epoch = int(parts[1]) if len(parts) == 3 and parts[0] == 'epoch' and parts[1].isascii() and parts[1].isdecimal() else 1
+            row = attempts_by_epoch.get((failure.task_id.id, epoch))
+            if row is not None and isinstance(failure.payload, dict):
+                row['failure'] = {'at': fields.Datetime.to_string(failure.create_date),
+                                  'code': failure.payload.get('code'), 'message': failure.payload.get('message')}
         proposals = self.env[PREFIX + 'proposal'].search([('case_id', '=', case.id)], order='id desc')
         confirmations = self.env[PREFIX + 'confirmation'].search([('proposal_id', 'in', proposals.ids)])
         return {'id': case.id, 'name': case.name, 'revision': case.revision, 'batch': case.batch_id.name,
-            'collection': case.collection, 'snapshot': {'id': snap.id, 'payload': snap.payload, 'digest': snap.digest} if snap else None,
+            'collection': case.collection, 'collection_started': bool(case.collection and snap and case.collection_started_snapshot_id == snap), 'snapshot': {'id': snap.id, 'payload': snap.payload, 'digest': snap.digest, 'source_images': self._wb_source_images(case, snap)} if snap else None,
+            'retry_events': self.env[PREFIX + 'event'].search_read([('task_id', 'in', tasks.ids), ('kind', '=', 'unknown_research_retry')], ['kind', 'task_id', 'receipt'], order='id asc'),
             'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state,
+                'lease_expired': bool(t.state == 'running' and t.lease_expires_at and t.lease_expires_at <= fields.Datetime.now()),
                 'snapshot_id': t.snapshot_id.id, 'result': t.result,
-                'result_hash': canonical_hash(t.result), 'status_detail': t.status_detail} for t in tasks],
+                'result_hash': canonical_hash(t.result), 'status_detail': t.status_detail, 'attempts': attempt_rows.get(t.id, [])} for t in tasks],
             'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload', 'result_task_id', 'result_snapshot_id', 'result_hash', 'library_origin_id', 'library_artifact_id']),
             'proposals': [{'id': p.id, 'digest': p.digest, 'payload': p.payload,
                 'current': p.input_revision == case.revision,
@@ -132,6 +228,9 @@ class OperationsWorkbench(models.Model):
         snap = self._wb_snapshot(case)
         if not snap or task_type not in TASK_INPUTS or not isinstance(values, dict):
             raise ValidationError('需要快照和已支持的任务类型')
+        if (case.collection and task_type in ('product.facts', 'research.keywords', 'research.bestseller')
+                and case.collection_started_snapshot_id != snap):
+            raise ValidationError('请先点击一键开始采集')
         payload = {'schema_version': '1'}
         for key in TASK_INPUTS[task_type]:
             value = values.get(key)
@@ -148,8 +247,11 @@ class OperationsWorkbench(models.Model):
             payload[key] = value
         if task_type == 'product.facts':
             payload['product_snapshot_id'] = str(snap.id)
-        return self.env[PREFIX + 'task'].create({'case_id': case.id, 'snapshot_id': snap.id,
-            'task_type': task_type, 'payload': payload}).id
+        task=self.env[PREFIX + 'task'].create({'case_id': case.id, 'snapshot_id': snap.id,
+            'task_type': task_type, 'payload': payload})
+        if case.collection and task_type == 'research.bestseller' and self.env['ir.config_parameter'].sudo().get_param('meli_optimization.scoped_auto_research','0') == '1':
+            task.prepare_scoped_research()
+        return task.id
 
     @api.model
     def workbench_archive(self, case_id, task_id, result_hash):
@@ -195,8 +297,8 @@ class OperationsWorkbench(models.Model):
                 raise ValidationError('候选不存在')
             desired = choices[indices[0]]['text']
             before = snap.payload.get('title')
-        elif kind == 'images' and task.task_type in ('gallery.collect', 'image.generate'):
-            choices = task.result.get('images') or [task.result['image']]
+        elif kind == 'images' and task.task_type == 'image.generate':
+            choices = [task.result['image']]
             if max(indices) >= len(choices):
                 raise ValidationError('图片不存在')
             desired = [choices[i] for i in indices]
@@ -208,6 +310,7 @@ class OperationsWorkbench(models.Model):
                 artifact._authorize('worker')
                 if artifact.case_id != case or artifact.digest != image.get('sha256') or artifact.mime_type != image.get('mime_type') or not artifact.data:
                     raise ValidationError('图片产物归属、摘要或媒体类型不匹配')
+            case._require_passed_image_qc(task, desired)
             before = snap.payload.get('image_url')
         elif kind == 'reference' and task.task_type == 'research.bestseller' and len(indices) == 1:
             choices = task.result['candidates']
@@ -230,7 +333,28 @@ class OperationsWorkbench(models.Model):
         proposal._authorize()
         if not proposal or proposal.case_id != case:
             raise ValidationError('方案不属于当前商品')
+        if proposal.payload.get('action') == 'images':
+            task = self.env[PREFIX + 'task'].browse(int(proposal.payload.get('task_id') or 0)).exists()
+            if not task or task.case_id != case or task.snapshot_id != case._wb_snapshot(case) or task.task_type != 'image.generate' or canonical_hash(task.result) != proposal.payload.get('result_hash'):
+                raise ValidationError('图片方案已过期或来源无效')
+            case._require_passed_image_qc(task, proposal.payload.get('desired_value') or [])
         return proposal.confirm(digest).id
+
+    def _require_passed_image_qc(self, task, images):
+        self.ensure_one()
+        plan = task.payload.get('generation_plan_id')
+        required = {'garment_construction', 'color_material', 'garment_details', 'identity_pose',
+                    'accessories', 'scene_lighting_framing', 'text_layout'}
+        for image in images:
+            ref = str(image.get('artifact_id') or '')
+            qcs = self.env[PREFIX + 'task'].search([('company_id', '=', self.company_id.id), ('case_id', '=', self.id),
+                ('snapshot_id', '=', task.snapshot_id.id), ('task_type', '=', 'image.qc')])
+            matching = qcs.filtered(lambda q: q.payload.get('image_artifact_id') == ref and q.payload.get('generation_plan_id') == plan).sorted('id', reverse=True)
+            q = matching[:1]
+            if not (q and q.state == 'succeeded' and q.result and q.result.get('image_artifact_id') == ref and q.result.get('status') == 'passed'
+                    and {c.get('name') for c in q.result.get('checks', [])} == required
+                    and all(c.get('status') == 'passed' for c in q.result.get('checks', []))):
+                raise ValidationError('图片需要通过当前快照和生成计划的质检')
 
 
 class ResultArtifact(models.Model):
@@ -246,3 +370,47 @@ class ResultArtifact(models.Model):
         if any(provenance.intersection(values) for values in vals_list) or any('default_' + key in self.env.context for key in provenance):
             raise AccessError('Result provenance is assigned only by checked archival')
         return super().create(vals_list)
+
+
+class ImageProposalConfirmation(models.Model):
+    _inherit = PREFIX + 'proposal'
+
+    def confirm(self, digest):
+        self._authorize()
+        self.ensure_one()
+        if (self.payload or {}).get('action') == 'images':
+            self.case_id._bump_qc_revision()
+        self.case_id._lock()
+        payload = self.payload or {}
+        if payload.get('action') == 'images':
+            ref = payload.get('task_id')
+            task = self.env[PREFIX + 'task'].browse(int(ref)).exists() if str(ref or '').isdigit() else self.env[PREFIX + 'task']
+            if (not task or task.case_id != self.case_id or task.snapshot_id != self.case_id._wb_snapshot(self.case_id)
+                    or task.task_type != 'image.generate' or task.state != 'succeeded'
+                    or canonical_hash(task.result) != payload.get('result_hash')
+                    or payload.get('desired_value') != [task.result.get('image')]):
+                raise ValidationError('图片方案已过期或来源无效')
+            self.case_id._require_passed_image_qc(task, payload['desired_value'])
+        return super().confirm(digest)
+
+
+class TitleFlowTask(models.Model):
+    _inherit = PREFIX + 'task'
+
+    title_flow_key = fields.Char(readonly=True, index=True)
+    _unique_title_flow_key = models.Constraint('UNIQUE(title_flow_key)', 'Title flow stage already exists')
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        if 'default_title_flow_key' in self.env.context or any('title_flow_key' in v for v in vals_list):
+            raise AccessError('Title flow key is server managed')
+        return super().create(vals_list)
+
+    def complete(self, token, epoch, key, body):
+        self._authorize('worker')
+        self._lock()
+        was_succeeded = self.state == 'succeeded'
+        receipt = super().complete(token, epoch, key, body)
+        if not was_succeeded and self.task_type in ('product.facts', 'research.keywords') and self.state == 'succeeded':
+            self.case_id.sudo()._title_flow_advance()
+        return receipt

@@ -1,12 +1,22 @@
 import sys
 from pathlib import Path
 import unittest
+import os
 from unittest.mock import patch, MagicMock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'addons'))
 from meli_platform_adapter import api, oauth
 from meli_platform_adapter.errors import PlatformError
 
 class AdapterTests(unittest.TestCase):
+ def test_explicit_proxy_is_used_without_environment_trust(self):
+  with patch.dict(os.environ, {'MERCADO_API_HTTPS_PROXY':'http://127.0.0.1:7890'}), patch.object(api.requests,'Session') as factory:
+   session=factory.return_value.__enter__.return_value
+   api.request('GET','/users/me',token='secret')
+   self.assertFalse(session.trust_env)
+   self.assertEqual(session.request.call_args.kwargs['proxies'], {'https':'http://127.0.0.1:7890'})
+ def test_proxy_with_credentials_is_rejected(self):
+  with patch.dict(os.environ, {'MERCADO_API_HTTPS_PROXY':'http://user:password@127.0.0.1:7890'}):
+   with self.assertRaises(PlatformError): api.request('GET','/users/me')
  def test_fixed_origin_and_no_redirect_or_environment_credentials(self):
   with patch.object(api.requests,'Session') as factory:
    session=factory.return_value.__enter__.return_value
