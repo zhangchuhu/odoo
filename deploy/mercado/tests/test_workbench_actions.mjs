@@ -13,6 +13,82 @@ function fixture() {
     ui.notification = {add(){}};
     return ui;
 }
+test('image detail keeps unmapped tasks and hides tasks shown in plan cards', () => {
+    const ui=fixture();
+    Object.defineProperty(ui,'visibleTasks',{value:[{id:1,task_type:'image.generate'},{id:2,task_type:'image.generate'},{id:3,task_type:'image.qc'}]});
+    Object.defineProperty(ui,'imagePlans',{value:[{rows:[{task:{id:1}}]},{rows:null}]});
+    ui.state.tab='images';
+    assert.deepEqual(ui.unmappedResultTasks.map(t=>t.id),[2,3]);
+    ui.state.tab='research';assert.deepEqual(ui.unmappedResultTasks.map(t=>t.id),[1,2,3]);
+});
+test('expired image regeneration is bound to the current task lease and snapshot', async () => {
+    const ui=fixture(), calls=[]; ui.navigationVersion=1;ui.disposed=false;
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {state:'queued'}};ui.load=async()=>{};
+    const task={id:253,task_type:'image.generate',state:'running',lease_expired:true,lease_epoch:4,snapshot_id:1};
+    assert.equal(ui.expiredImageAvailable({...task,snapshot_id:2}),false);
+    assert.equal(ui.expiredImageAvailable({...task,lease_expired:false}),false);
+    ui.openExpiredImage(task);assert.equal(ui.state.modal,'expired-image');
+    await ui.regenerateExpiredImage();
+    assert.deepEqual(calls,[['workbench_regenerate_expired_image',[1,253,4]]]);
+});
+test('image plan defaults to target order and permits reordering and exclusion', () => {
+    const ui=fixture(); ui.state.imagePlanSelections={};
+    const plan={planId:8,rows:[{targetId:'a',task:{id:3,state:'succeeded'}},{targetId:'b',task:{id:2,state:'succeeded'}},{targetId:'c',task:{id:1,state:'running'}}]};
+    assert.deepEqual(ui.imagePlanSelection(plan),[3,2]);
+    ui.moveImagePlan(plan,1,-1); assert.deepEqual(ui.imagePlanSelection(plan),[2,3]);
+    ui.toggleImagePlan(plan,3); assert.deepEqual(ui.imagePlanSelection(plan),[2]);
+    plan.rows[1].task.id=20; assert.deepEqual(ui.imagePlanSelection(plan),[20]);
+    plan.rows[1].task.id=2;
+    ui.resetImagePlan(plan); assert.deepEqual(ui.imagePlanSelection(plan),[3,2]);
+});
+test('publish preview is bound to its confirmed plan and current navigation', async () => {
+    const ui=fixture(), calls=[];
+    ui.navigationVersion=1; ui.disposed=false;
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {target:{model:'user_product'}}};
+    await ui.previewImagePublish({id:7,digest:'digest'});
+    assert.deepEqual(calls,[['workbench_image_publish_preview',[1,7,'digest']]]);
+    assert.equal(ui.state.modal,'image-publish-preview');
+    assert.equal(ui.state.imagePublishPreview.proposal_id,7);
+});
+test('selecting a SKU requests a new preview scoped to that SKU', async () => {
+    const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {target:{model:'traditional',selected_variant_id:'12'}}};
+    await ui.previewImagePublish({id:7,digest:'digest'},'12');
+    assert.deepEqual(calls,[['workbench_image_publish_preview',[1,7,'digest','12']]]);
+});
+test('publication sends each step once and stops when an outcome needs reconciliation', async () => {
+    const ui=fixture(), calls=[]; ui.navigationVersion=1;ui.disposed=false;ui.notification={add() {}};
+    ui.state.imagePublishPreview={case_id:1,proposal_id:7,proposal_digest:'p',digest:'d'};
+    ui.rpc=async(method,args)=>{calls.push(method); if(method==='workbench_image_publish_start')return {id:9};
+      if(method==='workbench_image_publish_reserve')return {nonce:'a',operation:'update'};
+      return {state:'reconciliation_required'};};
+    ui.load=async()=>{};
+    await ui.startImagePublish();
+    assert.deepEqual(calls,['workbench_image_publish_start','workbench_image_publish_reserve','workbench_image_publish_dispatch']);
+    assert.equal(ui.state.imagePublishResult.state,'reconciliation_required');
+});
+test('publishing a selected SKU requires explicit source-garment confirmation', async () => {
+    const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;ui.notification={add(){}};
+    ui.state.imagePublishPreview={case_id:1,proposal_id:7,proposal_digest:'p',digest:'d',target:{selected_variant_id:'12'}};
+    ui.state.imagePublishSkuConfirmed=false;ui.rpc=async(method,args)=>{calls.push([method,args]);return {id:9}};
+    await ui.startImagePublish();assert.equal(calls.length,0);
+    ui.state.imagePublishSkuConfirmed=true;ui.runImagePublication=async()=>{};await ui.startImagePublish();
+    assert.deepEqual(calls[0],['workbench_image_publish_start',[1,7,'p','d','12',true]]);
+});
+test('reconciliation checks the existing publication instead of dispatching again', async () => {
+    const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;ui.notification={add(){}};
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {state:'published'}}; ui.load=async()=>{};
+    await ui.reconcileImagePublication({id:9});
+    assert.deepEqual(calls,[['workbench_image_publish_reconcile',[1,9]]]);
+});
+test('unknown upload is abandoned only after explicit confirmation', async () => {
+    const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;ui.notification={add(){}};
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {state:'failed'}};ui.load=async()=>{};
+    globalThis.confirm=()=>false;await ui.abandonImagePublication({id:9});assert.equal(calls.length,0);
+    globalThis.confirm=()=>true;await ui.abandonImagePublication({id:9});
+    assert.deepEqual(calls,[['workbench_image_publish_abandon',[1,9]]]);
+    delete globalThis.confirm;
+});
 test('refresh restoration reloads the authorized case and tab and falls back if inaccessible', async () => {
     const ui=fixture(), notices=[];
     ui.tabs=[['snapshot','商品快照'],['images','图片与质检']];

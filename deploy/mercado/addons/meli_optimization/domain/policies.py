@@ -17,10 +17,10 @@ from .contracts import DomainError, _integer, _text, _utc
 _TRANSITIONS = {
     'draft': ('queued', 'cancelled'),
     'queued': ('running', 'waiting', 'cancelled'),
-    'running': ('succeeded', 'retry_wait', 'waiting', 'failed', 'cancelled'),
+    'running': ('succeeded', 'retry_wait', 'waiting', 'failed', 'cancelled', 'skipped'),
     'retry_wait': ('queued', 'cancelled'),
     'waiting': ('queued', 'cancelled', 'failed'),
-    'succeeded': (), 'failed': (), 'cancelled': (),
+    'succeeded': (), 'failed': (), 'cancelled': (), 'skipped': (),
 }
 
 

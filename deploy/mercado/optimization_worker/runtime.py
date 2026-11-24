@@ -9,7 +9,7 @@ from .client import APIError
 from .domain import DomainError, canonical_hash
 from .handlers import CapabilityMissing, TASK_TYPES, prepare, product_facts, validate_output
 from .journal import Journal
-from .host_session import SessionPending, SessionFailure, SessionUnknown, SessionBlocked
+from .host_session import SessionPending, SessionFailure, SessionUnknown, SessionBlocked, SessionSkipped
 
 REGISTERED_RUN_PHASES = ('host_pending', 'calling', 'ready', 'result', 'validated', 'provider_terminal', 'provider_missing')
 
@@ -200,7 +200,7 @@ class Worker:
             pending = record['pending']
             receipt = self.client.submit(claim, pending['operation'], pending['envelope'])
             operation = pending['operation']
-            if operation in ('wait', 'fail', 'complete'):
+            if operation in ('wait', 'fail', 'complete', 'skip'):
                 record.update(done=True, outcome=receipt['state'])
             elif pending['envelope']['body']['state'] == 'unknown':
                 record['phase'] = 'ready'
@@ -293,6 +293,8 @@ class Worker:
                                      copy.deepcopy(record['context']), record['request_id'])))
                     except SessionFailure as exc:
                         results.put(('terminal', exc.code))
+                    except SessionSkipped as exc:
+                        results.put(('skipped', {'message':exc.message, 'evidence':exc.evidence}))
                     except SessionBlocked as exc:
                         results.put(('blocked', exc))
                     except SessionPending:
@@ -312,6 +314,12 @@ class Worker:
                 if outcome == 'terminal':
                     record['provider_failed'] = output
                     record['phase'] = 'provider_terminal'
+                    save()
+                elif outcome == 'skipped':
+                    if claim['task_type'] != 'image.generate':
+                        raise ValueError('Only images may be skipped')
+                    record['provider_skipped'] = output
+                    record['phase'] = 'provider_skip_checkpoint'
                     save()
                 elif outcome == 'blocked':
                     if output.code == 'window_registration_failed':
@@ -338,6 +346,12 @@ class Worker:
                     record['output'] = output
                     record['phase'] = 'result'
                     save()
+            if record['phase'] == 'provider_skip_checkpoint':
+                checkpoint('failed')
+            if record.get('provider_skipped') and record['phase'] == 'terminal_checkpoint':
+                submit('skip', {'code':'reference_insufficient', 'message':record['provider_skipped']['message'],
+                                'evidence':record['provider_skipped']['evidence'], 'request_id':record['request_id']})
+                return record['outcome']
             if record['phase'] == 'provider_terminal':
                 checkpoint('failed')
             if record['phase'] == 'provider_missing':

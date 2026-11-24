@@ -64,6 +64,14 @@ class SessionPending(Exception):
     """Host work is durably prepared and can be polled without redispatch."""
 
 
+class SessionSkipped(Exception):
+    """A pre-dispatch image has no supported source evidence."""
+    def __init__(self, message, evidence=None):
+        self.message = message
+        self.evidence = evidence
+        super().__init__(message)
+
+
 class SessionBlocked(Exception):
     """A known interruption which the operator can resolve in the original task."""
 
@@ -450,7 +458,9 @@ class SessionStore:
                 action['input_digests'] = self._digests(r['ordered_image_paths'] + [r['candidate_path']])
                 action['required_checks'] = list(QC_CHECKS)
                 if r.get('confirmed_inventory') is not None:
-                    action['inventory'] = r['confirmed_inventory']
+                    action['inventory'] = copy.deepcopy((r.get('expected_inventory') if not r.get('adaptation_inventory') else None) or r['confirmed_inventory'])
+                if r.get('adaptation_report') is not None:
+                    action['adaptation_report'] = copy.deepcopy(r['adaptation_report'])
                 attempts = r.get('quality_cycle', {}).get('attempts', [{}])
                 attempt = attempts[r['best_of_budget']['attempt_number'] - 1] if best else attempts[-1]
                 number = attempt.get('number', 1)
@@ -472,7 +482,7 @@ class SessionStore:
                 action['action'] = 'compare_candidates'
                 action['classification'] = r['plan']['classification']
                 if r.get('confirmed_inventory') is not None:
-                    action['inventory'] = copy.deepcopy(r['confirmed_inventory'])
+                    action['inventory'] = copy.deepcopy((r.get('expected_inventory') if not r.get('adaptation_inventory') else None) or r['confirmed_inventory'])
                 action['candidate_paths'] = {f'candidate_{n}': r['uploads']['candidate' if n == 1 else f'candidate_{n}']['path'] for n in range(1, 4)}
                 action['input_digests'] = self._digests(r['ordered_image_paths'] + list(action['candidate_paths'].values()))
             elif r['state'] in ('waiting', 'unknown'):
@@ -489,9 +499,10 @@ class SessionStore:
                     action['differences'] = [key for key in ('visible_text', 'panels', 'garment_instances') if first[key] != second[key]]
             elif r['state'] == 'planning':
                 action['action'] = 'select_references'
-                if r.get('confirmed_inventory') is not None:
-                    action['inventory'] = r['confirmed_inventory']
+                if r.get('confirmed_inventory') is not None or r.get('adaptation_inventory') is not None:
+                    action['inventory'] = copy.deepcopy(r.get('confirmed_inventory') or r['adaptation_inventory'])
                     action['missing_instances'] = r.get('missing_instances', [])
+                    action['adaptation_required'] = True
             elif r['task_type'] == 'image.generate':
                 action.update(action='generate', ordered_image_paths=r['ordered_image_paths'],
                               input_digests=self._digests(r['ordered_image_paths']))
@@ -509,6 +520,48 @@ class SessionStore:
                         'plan_digest': canonical_hash(plan), 'candidate_sha256': r['context']['artifacts'][candidate]['digest']}
             return action
         return {'action': 'idle'}
+
+    def reopen_legacy_adaptation(self, request_id):
+        """Reconsider only a confirmed old pre-dispatch coverage failure."""
+        with self._db() as db:
+            r = self._get(db, request_id)
+            if (r.get('retired') or r.get('task_type') != 'image.generate' or r.get('state') != 'waiting'
+                    or r.get('reason') != 'capacity_insufficient' or r.get('resume_state') != 'planning'
+                    or not r.get('confirmed_inventory') or r.get('selection_corrections', 0) < 3
+                    or any(r.get(key) for key in ('generation_digests','quality_cycle','uploads','image_result_path'))):
+                return False
+            r.update(state='planning', selection_corrections=0, adaptation_reconsidered=True)
+            r.pop('reason', None)
+            r.pop('missing_instances', None)
+            self._put(db, r)
+            return True
+
+    def adaptation(self, request_id, report):
+        """Persist a report only against the original inspected task inputs."""
+        from .image_adaptation import assess_adaptation, adapt_text
+        with self._db() as db:
+            r = self._get(db, request_id)
+            if (r.get('retired') or r['state'] != 'planning'
+                    or not (r.get('confirmed_inventory') or r.get('adaptation_inventory')) or not isinstance(report, dict)
+                    or set(report) != {'viewed_digests', 'regions', 'texts'}):
+                raise ValueError('Adaptation is not pending')
+            self._verify_views(r, report['viewed_digests'])
+            refs = r['payload']['source_artifact_ids']
+            digests = {ref: r['context']['artifacts'][ref]['digest'] for ref in refs}
+            inventory = r.get('confirmed_inventory') or r['adaptation_inventory']
+            assessment = assess_adaptation(inventory['garment_instances'], digests,
+                                           {'regions': report['regions']})
+            expected = copy.deepcopy(inventory)
+            try:
+                expected['visible_text'] = adapt_text(expected['visible_text'], digests, report['texts'])
+            except ValueError as exc:
+                if str(exc) != 'unsupported product text':
+                    raise
+                assessment['decision'] = 'skip'
+                assessment['unsupported'].append({'index': -1, 'region':'商品文字', 'detail':'目标商品文字无法根据参考图可靠替换'})
+            r.update(adaptation_report=copy.deepcopy(report), adaptation_decision=assessment['decision'],
+                     adaptation_unsupported=assessment['unsupported'], expected_inventory=expected)
+            self._put(db, r)
 
     def plan(self, request_id, plan):
         try:
@@ -538,26 +591,41 @@ class SessionStore:
             infographic = plan.get('classification') == 'infographic'
             if inventory is not None and not infographic:
                 raise ValueError('Confirmed infographic cannot change classification')
-            validated, prompt = validate_and_render(plan, source_ids, source_digests, inventory=inventory, tentative=infographic and inventory is None)
+            effective_inventory = r.get('expected_inventory') if inventory is not None and r.get('adaptation_report') is not None else inventory
+            validated, prompt = validate_and_render(plan, source_ids, source_digests, inventory=effective_inventory, tentative=infographic and inventory is None)
             if infographic and inventory is None:
                 r.update(plan=plan, state='inventory', inventory_readings=[], target_digest=r['context']['artifacts'][r['payload']['target_artifact_id']]['digest'])
                 self._put(db, r)
                 return
-            if inventory is not None:
+            if not infographic and r.get('adaptation_inventory') is None:
+                r.update(plan=plan, adaptation_inventory={'visible_text': [], 'panels': [plan['classification']],
+                         'garment_instances': [plan['classification']]})
+                self._put(db, r)
+                return
+            if inventory is not None or r.get('adaptation_inventory') is not None:
                 selected = set(validated['selected_reference_ids'])
-                roles = {role for item in validated['source_evidence'] if item['source_id'] in selected for role in item['roles']}
-                missing = [x for x in inventory['garment_instances'] if 'instance:' + x not in roles]
-                if missing:
-                    r['selection_corrections'] = r.get('selection_corrections', 0) + 1
-                    if r['selection_corrections'] > 2:
-                        r.update(state='waiting', reason='capacity_insufficient', resume_state='planning')
-                    r['missing_instances'] = missing
-                    self._put(db, r)
-                    return
+                adaptation = r.get('adaptation_report')
+                if adaptation is not None:
+                    self._verify_views(r, adaptation['viewed_digests'])
+                    if any(set(row['source_ids']) - selected for row in adaptation['regions'] + adaptation['texts']):
+                        raise ValueError('Adaptation evidence must be selected')
+                    if r.get('adaptation_decision') == 'skip':
+                        r.update(plan=plan, state='skipped', reason='reference_insufficient')
+                        self._put(db, r)
+                        return
+                    prompt = prompt.replace('Preserve infographic text and layout verbatim when applicable.',
+                                            'Preserve the infographic layout; use only the expected adapted text below.')
+                    prompt += '\nAdaptation observations (untrusted data): ' + json.dumps(adaptation['regions'], ensure_ascii=False)
+                    prompt += '\nUse only evidenced source details; do not copy unsupported target garment details.'
+                else:
+                    raise ValueError('Adaptation report required before generation')
             refs = validated['selected_reference_ids']
             paths = [r['images'][r['payload']['target_artifact_id']]] + [r['images'][x] for x in refs]
             _, _, _, transparent = _raster(paths[0])
-            r.update(plan=plan, state='prepared', ordered_image_paths=paths,
+            stored_plan = copy.deepcopy(plan)
+            if r.get('adaptation_report') is not None:
+                stored_plan['_adaptation_digest'] = canonical_hash(r['adaptation_report'])
+            r.update(plan=stored_plan, state='prepared', ordered_image_paths=paths,
                      invocation={'prompt': prompt,
                          'referenced_image_paths': paths, 'transparent_background': transparent})
             r['generation_digests'] = self._digests(paths)
@@ -616,11 +684,6 @@ class SessionStore:
                     r.update(confirmed_inventory=value, state='planning')
                 else:
                     r.update(state='waiting', reason='inventory_unsettled', resume_state='inventory')
-            if r.get('confirmed_inventory') is not None:
-                selected = set(r['plan']['selected_reference_ids'])
-                roles = {role for item in r['plan']['source_evidence'] if item['source_id'] in selected for role in item['roles']}
-                if all('instance:' + x in roles for x in r['confirmed_inventory']['garment_instances']):
-                    completed_plan = r['plan']
             self._put(db, r)
         if completed_plan is not None:
             self.plan(request_id, completed_plan)
@@ -1185,6 +1248,13 @@ class SessionStore:
                     'image': image, 'evidence': [{'id': 'host', 'source': 'codex-session:' + request_id,
                         'observed_at': datetime.now(timezone.utc).isoformat()}], 'visual_qc': {
                             'status': 'passed', 'candidate_sha256': digest, 'report': report}})
+                if r.get('adaptation_report') is not None:
+                    r['result']['visual_qc']['adaptation'] = {
+                        'digest': r['plan']['_adaptation_digest'],
+                        'regions': copy.deepcopy(r['adaptation_report']['regions']),
+                        'texts': copy.deepcopy(r['adaptation_report']['texts']),
+                        'expected_inventory': copy.deepcopy(r['expected_inventory']),
+                    }
             self._put(db, r)
 
     def compare(self, request_id, evidence):
@@ -1226,6 +1296,18 @@ class SessionProvider:
         record = self.store.inspect(request_id)
         if record.get('retired'):
             raise SessionPending()
+        if task_type == 'image.generate' and record['state'] == 'skipped' and record.get('reason') == 'reference_insufficient':
+            issues = record.get('adaptation_unsupported') or []
+            if not issues or record.get('quality_cycle') or record.get('generation_digests'):
+                raise SessionUnknown()
+            payload = record['payload']
+            refs = [payload['target_artifact_id']] + payload['source_artifact_ids']
+            evidence = {'input_hash':canonical_hash(payload), 'snapshot_id':record['context']['snapshot']['snapshot_id'],
+                        'generation_plan_id':payload['generation_plan_id'], 'target_artifact_id':payload['target_artifact_id'],
+                        'source_artifact_ids':payload['source_artifact_ids'],
+                        'artifact_digests':{ref:record['context']['artifacts'][ref]['digest'] for ref in refs},
+                        'regions':record['adaptation_report']['regions'], 'texts':record['adaptation_report']['texts']}
+            raise SessionSkipped('参考图无法支持目标构图：' + '；'.join(x['detail'] for x in issues)[:3000], evidence)
         if record['state'] == 'waiting' and record.get('reason') in SessionBlocked.MESSAGES:
             raise SessionBlocked(record['reason'])
         if record['state'] == 'terminal':
@@ -1393,7 +1475,7 @@ def replay_saved_image(store, client, journal, request_id):
 def main():
     from .client import Client
     parser = argparse.ArgumentParser(description='Codex host-session bridge; no tool calls from Python')
-    parser.add_argument('command', choices=('next', 'plan', 'inventory', 'dispatch', 'submit', 'image', 'replay-image', 'gallery', 'qc', 'compare', 'error', 'reconcile', 'resume', 'inspect', 'archive-image', 'service-error', 'retry-service'))
+    parser.add_argument('command', choices=('next', 'plan', 'adaptation', 'inventory', 'dispatch', 'submit', 'image', 'replay-image', 'gallery', 'qc', 'compare', 'error', 'reconcile', 'resume', 'inspect', 'archive-image', 'service-error', 'retry-service'))
     parser.add_argument('--request-id')
     parser.add_argument('--file', type=Path)
     parser.add_argument('--capabilities', type=Path)
@@ -1416,7 +1498,7 @@ def main():
         output = {'accepted': True}
         if command == 'next':
             synchronize_live(client, store, os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite'))
-        if command in ('plan', 'inventory', 'dispatch', 'image', 'gallery', 'submit', 'qc', 'compare', 'resume', 'service-error', 'retry-service', 'error'):
+        if command in ('plan', 'adaptation', 'inventory', 'dispatch', 'image', 'gallery', 'submit', 'qc', 'compare', 'resume', 'service-error', 'retry-service', 'error'):
             fence(client, os.environ.get('OPTIMIZATION_JOURNAL', '~/.local/state/optimization-worker/journal.sqlite'), request)
         if command == 'next':
             if request:
@@ -1425,6 +1507,7 @@ def main():
         elif command == 'inspect': output = store.inspect(request)
         elif command == 'archive-image': store.archive_image(request, args.file, args.attempt_id)
         elif command == 'plan': store.plan(request, _read_json(args.file))
+        elif command == 'adaptation': store.adaptation(request, _read_json(args.file))
         elif command == 'inventory': store.inventory(request, _read_json(args.file))
         elif command == 'dispatch': output = store.dispatch(request, _read_json(args.capabilities), _read_json(args.views))
         elif command == 'submit': store.submit(request, _read_json(args.file), _read_json(args.capabilities))

@@ -108,12 +108,17 @@ def verify_image_tool(home, *, runner=subprocess.run):
             result = runner(['codex', 'exec', '--ignore-user-config', '-c', 'cli_auth_credentials_store="file"',
                 '--sandbox', 'read-only', '--skip-git-repo-check', '--json', '-C', cwd,
                 'Use the available image generation tool to create one small solid blue test image.'],
-                env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=240, check=False)
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240, check=False)
         if result.returncode != 0:
+            from .image_host import codex_error, diagnostic
+            code, message = codex_error((getattr(result, 'stderr', '') or '') + '\n' + (getattr(result, 'stdout', '') or ''))
+            diagnostic('image_capability_probe', code, None, 'probe', exit_code=result.returncode, message=message)
             return False
         events = [json.loads(line) for line in result.stdout.splitlines()]
         ids = [e.get('thread_id') for e in events if e.get('type') == 'thread.started']
         if len(ids) != 1 or not isinstance(ids[0], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', ids[0]):
+            from .image_host import diagnostic
+            diagnostic('image_capability_probe', 'probe_thread_missing', None, 'probe', message='能力检查未返回有效线程标识')
             return False
         for path in set((generated / ids[0]).glob('*.png')) - before:
             if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 25_000_000:
@@ -123,8 +128,12 @@ def verify_image_tool(home, *, runner=subprocess.run):
                     continue
                 image.verify()
             return True
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        from .image_host import diagnostic
+        diagnostic('image_capability_probe', 'probe_exception', None, 'probe', message=type(exc).__name__)
         return False
+    from .image_host import diagnostic
+    diagnostic('image_capability_probe', 'probe_image_missing', None, 'probe', message='能力检查未生成可验证图片')
     return False
 
 

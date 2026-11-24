@@ -9,7 +9,9 @@ from odoo.addons.meli_platform_adapter import transport
 from .optimization import PREFIX, ExactJson, bounded
 from ..domain import product_facts_from_snapshot, validate_result
 from ..domain.screening_resume import ReplayReads, CollectionPending, CheckpointExpired, observation_window
-from ..domain.screening import parse_criteria, screen_products, collect_shop, timestamp
+from ..domain.screening import parse_criteria, screen_products, collect_shop, timestamp, sku_size
+from ..domain.image_publish import resolve_target
+from ..domain.variant_groups import traditional_groups, bind_site_variations
 
 
 class Screening(models.Model):
@@ -69,7 +71,7 @@ class ScreeningWorkbench(models.Model):
             raise ValidationError('同一请求身份不可改变筛选条件，请使用新的 request_key')
         row = existing or model._append(dict(company_id=shop.company_id.id, shop_id=shop.id, seller_id=shop.marketplace_seller_id, request_key=request_key, criteria=criteria, digest=digest))
         return dict(id=row.id, digest=row.digest, shop_id=shop.id, company_id=shop.company_id.id, seller_id=row.seller_id, criteria=row.criteria,
-            semantics='sales_units <= sales_max AND sum(all SKU available_quantity) >= stock_min; paid orders created in [start,end); cancellations excluded, returns/refunds not deducted; unknown excluded' + ('; every listed SKU has verified SIZE and stock > 0; no variations requires explicit one-size; unlisted intended sizes are not inferred' if criteria.get('require_all_skus_in_stock') else ''),
+            semantics='product sales_units <= sales_max AND sum(each picture-variant group SKU available_quantity) >= stock_min; paid orders created in [start,end); cancellations excluded, returns/refunds not deducted; unknown excluded' + ('; every listed SKU in the group has verified SIZE and stock > 0; no variations requires explicit one-size; unlisted intended sizes are not inferred' if criteria.get('require_all_skus_in_stock') else ''),
             execute_tool='optimization_screen_execute', batch_id=row.batch_id.id or None)
 
     def _screen_collect(self, shop, criteria, checkpoint=None):
@@ -94,7 +96,36 @@ class ScreeningWorkbench(models.Model):
             and m.get('site_id') == shop.site and (not shop.logistic_type or m.get('logistic_type') == shop.logistic_type)]
         if len(matches) != 1:
             raise ValidationError('站点 Seller、站点或物流映射已改变，请重新授权店铺')
-        return collect_shop(get, shop.marketplace_seller_id, criteria)
+        products,orders,source=collect_shop(get, shop.marketplace_seller_id, criteria)
+        product_criteria=dict(criteria,require_all_skus_in_stock=False)
+        matched={p['id'] for p in screen_products(products,orders,product_criteria,shop.marketplace_seller_id,source.get('orders_complete'))['matches']}
+        verified=[]
+        for product in products:
+            if product['id'] not in matched:continue
+            try:
+                parent_id=product.get('cbt_item_id')
+                if not isinstance(parent_id,str) or not re.fullmatch(r'CBT[0-9]+',parent_id):raise ValueError('缺少母商品身份')
+                parent=get('/marketplace/items/'+parent_id)
+                target=resolve_target(product,parent,product['id'],shop.site,shop.seller_id,shop.marketplace_seller_id,shop.logistic_type)
+                if target['model']!='traditional':raise ValueError('User Product 图片变体尚未核验')
+                groups=traditional_groups(parent)
+                if any(not g['selectable'] for g in groups):raise ValueError('图片变体归属不完整')
+                if product.get('variations') or parent.get('variations'):
+                    groups=bind_site_variations(groups,product.get('variations'))
+                else:
+                    quantity=product.get('available_quantity')
+                    groups[0]['stock']=quantity if type(quantity) is int and quantity>=0 else None
+                product['_verified_variant_groups']=groups
+                product['_verified_parent_id']=parent_id
+                verified.append((product,parent_id,parent))
+            except (ValueError,TypeError,KeyError) as exc:
+                product['_variant_error']=str(exc)[:300]
+        for product,parent_id,previous_parent in verified:
+            if get('/marketplace/items/'+parent_id) != previous_parent:
+                product.pop('_verified_variant_groups',None)
+                product['_variant_error']='母商品变体或图片在采集期间发生变化'
+        source['variant_groups_checked']=True
+        return products,orders,source
 
     @api.model
     def screening_execute(self, preview_id, digest):
@@ -122,12 +153,50 @@ class ScreeningWorkbench(models.Model):
         checkpoint = previous.get('job_checkpoint', {}) if previous.get('job_state') == 'running' else {}
         started = previous.get('started_at') if checkpoint else datetime.now(timezone.utc).isoformat()
         try:
+            if checkpoint.get('responses') and checkpoint.get('variant_schema') != 1:
+                raise CheckpointExpired('旧检查点不包含变体图片身份')
+            checkpoint['variant_schema']=1
             observation_window(checkpoint)
             products, orders, source = self._screen_collect(shop, row.criteria, checkpoint)
             window = observation_window(checkpoint)
             source = dict(source, collection_started_at=started, **{k: v for k, v in window.items() if k != 'collection_started_at'})
             source['collection_started_at'] = window.get('collection_started_at', started)
-            result = screen_products(products, orders, row.criteria, row.seller_id, source.get('orders_complete'))
+            criteria_for_products=dict(row.criteria,require_all_skus_in_stock=False) if source.get('variant_groups_checked') else row.criteria
+            result = screen_products(products, orders, criteria_for_products, row.seller_id, source.get('orders_complete'))
+            if source.get('variant_groups_checked'):
+                expanded=[]
+                for product in result['matches']:
+                    groups=product.get('_verified_variant_groups')
+                    if not isinstance(groups,list) or not groups:
+                        result['unknown'].append({'item_id':product['id'],'reason':'variant_identity_unverified','detail':product.get('_variant_error') or '变体身份不可核验'})
+                        continue
+                    for group in groups:
+                        if group.get('stock') is None:
+                            result['unknown'].append({'item_id':product['id'],'reason':'variant_stock_unknown','detail':group['label']});continue
+                        if group['stock'] < row.criteria['stock_min']:continue
+                        child={k:v for k,v in product.items() if not k.startswith('_')}
+                        child['available_quantity']=group['stock']
+                        child['sales_scope']='product'
+                        child['variations']=[v for v in product['variations'] if str(v.get('id')) in group.get('site_variant_ids',[])]
+                        if row.criteria.get('require_all_skus_in_stock'):
+                            members=child['variations'] or [product]
+                            evidence=[]
+                            for sku in members:
+                                size=sku_size(sku,one_size=not child['variations'])
+                                qty=sku.get('available_quantity')
+                                if size is None or type(qty) is not int or qty<0:break
+                                evidence.append({'sku_id':str(sku['id']),'size':size,'available_quantity':qty})
+                            if len(evidence)!=len(members):
+                                result['unknown'].append({'item_id':product['id'],'reason':'variant_size_unknown','detail':group['label']});continue
+                            if any(x['available_quantity']==0 for x in evidence):continue
+                            child['sku_size_evidence']=evidence
+                        child['pictures']=[{'id':p,'secure_url':u} for p,u in zip(group['picture_ids'],group['picture_urls'])]
+                        child['thumbnail']=group['picture_urls'][0] if group['picture_urls'] else None
+                        child['_variant_scope']={'model':'traditional','parent_id':product['_verified_parent_id'],'key':group['key'],
+                            'label':group['label'],'variant_ids':group['variant_ids'],'site_variant_ids':group.get('site_variant_ids',[]),
+                            'picture_ids':group['picture_ids'],'sizes':group['sizes'],'attribute_signature':group.get('attribute_signature')}
+                        expanded.append(child)
+                result['matches']=expanded
         except CheckpointExpired:
             state = {'preview_id': row.id, 'job_state': 'failed', 'code': 'checkpoint_expired',
                 'message': '采集观察已超过 2 小时，或旧检查点缺少可信读取时间；未创建批次。再次执行同一预览才会重新采集。', 'resume_action': 'execute_same_preview_recollects'}
@@ -157,11 +226,29 @@ class ScreeningWorkbench(models.Model):
             batch = self.env[PREFIX + 'batch'].with_company(shop.company_id).create({'name': f'自动筛选 · {shop.name} · {row.request_key}'})
             cases = []
             for product in result['matches']:
-                case = scoped.create({'name': product['id'] + ' · ' + str(product.get('title') or ''), 'batch_id': batch.id, 'shop_id': shop.id})
-                payload = dict(product, item_id=product['id'], shop=shop.name, shop_id=shop.id, company_id=shop.company_id.id,
+                scope=product.get('_variant_scope')
+                if scope:
+                    fence=f'{shop.company_id.id}:{shop.id}:{product["id"]}'
+                    self.env.cr.execute('''INSERT INTO meli_optimization_variant_creation_fence (target_key,version) VALUES (%s,1)
+                        ON CONFLICT (target_key) DO UPDATE SET version=meli_optimization_variant_creation_fence.version+1''',[fence])
+                    existing=scoped.sudo().search([('company_id','=',shop.company_id.id),('shop_id','=',shop.id),('variant_item_id','=',product['id'])])
+                    members=set(scope['variant_ids'])
+                    if existing.filtered(lambda c:bool(members.intersection(set(c.variant_members or []))) or (not members and c.variant_members==[])):
+                        result['unknown'].append({'item_id':product['id'],'reason':'variant_already_exists','detail':scope['label']})
+                        continue
+                case = scoped.create({'name': product['id'] + (' · '+scope['label'] if scope else '') + ' · ' + str(product.get('title') or ''), 'batch_id': batch.id, 'shop_id': shop.id})
+                if scope:
+                    identity=bounded({'company_id':shop.company_id.id,'shop_id':shop.id,'item_id':product['id'],'members':scope['variant_ids']})
+                    case._set({'variant_identity':identity,'variant_item_id':product['id'],'variant_members':scope['variant_ids']})
+                payload = dict({k:v for k,v in product.items() if not k.startswith('_')}, item_id=product['id'], shop=shop.name, shop_id=shop.id, company_id=shop.company_id.id,
                     seller_id=row.seller_id, source=source, observed_at=observed_at, screening_criteria=row.criteria,
-                    screening_id=row.id, screening_digest=row.digest, value_status='known')
-                snapshot = self.env[PREFIX + 'snapshot'].with_company(shop.company_id).create({'case_id': case.id, 'payload': payload})
+                    screening_id=row.id, screening_digest=row.digest, value_status='known' if product.get('available_quantity') is not None else 'unknown')
+                if scope:payload['variant_scope']=scope
+                snapshots=self.env[PREFIX + 'snapshot'].with_company(shop.company_id)
+                if scope:
+                    from .variant_workbench import _VARIANT_SNAPSHOT_GUARD
+                    snapshots=snapshots.with_context(_variant_snapshot_guard=_VARIANT_SNAPSHOT_GUARD)
+                snapshot = snapshots.create({'case_id': case.id, 'payload': payload})
                 # Local observation arrangement is part of persistence, not a
                 # provider job. Use the same builder and checked archival as the
                 # manual worker flow, without claiming a worker lease.

@@ -19,6 +19,55 @@ test('image ordering preserves selected identity and rejects bounds', () => {
 
 // A stale completed task must never replace facts for the latest snapshot.
 const helpers = await import('../addons/meli_optimization/static/src/workbench_helpers.js');
+test('image plan counts skipped pictures as finished without counting retry history twice', () => {
+    const plan = {operation:'garment_swap',snapshot_id:3,selected_indices:[0,1],target_artifact_ids:['a','b']};
+    const base={task_type:'image.generate',generation_plan_id:'8',snapshot_id:3};
+    const tasks=[{...base,id:1,target_artifact_id:'a',state:'failed'},{...base,id:3,target_artifact_id:'a',state:'succeeded'},
+                 {...base,id:2,target_artifact_id:'b',state:'skipped'}];
+    const group=helpers.imagePlanGroups(tasks,[{id:8,payload:plan}],3)[0];
+    assert.deepEqual([group.completed,group.skipped,group.failed,group.total,group.summary],[1,1,0,2,'已完成']);
+});
+test('image task queue includes the skip count', () => {
+    const tasks = [{id:1,task_type:'image.generate',generation_plan_id:'8',snapshot_id:3,state:'succeeded'},
+                   {id:2,task_type:'image.generate',generation_plan_id:'8',snapshot_id:3,state:'skipped'}];
+    const group = helpers.groupImageTasks(tasks)[0];
+    assert.equal(group.skipped, 1);
+});
+test('image task queue counts a target once when it has attempts', () => {
+    const base={task_type:'image.generate',generation_plan_id:'8',snapshot_id:3};
+    const tasks=[{...base,id:1,target_artifact_id:'a',state:'failed'},
+                 {...base,id:2,target_artifact_id:'a',state:'succeeded'},
+                 {...base,id:3,target_artifact_id:'b',state:'skipped'}];
+    const group=helpers.groupImageTasks(tasks)[0];
+    assert.deepEqual([group.total,group.completed,group.skipped],[2,1,1]);
+});
+test('image plan uses frozen library order even when tasks finish in another order', () => {
+    const plan = {selected_indices:[8,0,4],target_artifact_ids:['a','b','c'],snapshot_id:3};
+    const tasks = [
+      {id:4,snapshot_id:3,target_artifact_id:'a',state:'succeeded'},
+      {id:2,snapshot_id:3,target_artifact_id:'b',state:'succeeded'},
+      {id:3,snapshot_id:3,target_artifact_id:'c',state:'running'}];
+    assert.deepEqual(helpers.imagePlanRows(plan,tasks).map(row=>[row.libraryIndex,row.targetId,row.task.id]), [[0,'b',2],[4,'c',3],[8,'a',4]]);
+});
+test('image plan rejects ambiguous target order rather than guessing', () => {
+    assert.equal(helpers.imagePlanRows({selected_indices:[0,0],target_artifact_ids:['a','b']},[]), null);
+    assert.equal(helpers.imagePlanRows({selected_indices:[0],target_artifact_ids:['a','b']},[]), null);
+    assert.equal(helpers.imagePlanRows({selected_indices:[0,1],target_artifact_ids:['a','a']},[]), null);
+});
+test('image plan groups only tasks in the same plan and snapshot', () => {
+    const tasks=[{id:1,task_type:'image.generate',generation_plan_id:'8',snapshot_id:3,target_artifact_id:'12',state:'succeeded'},
+      {id:2,task_type:'image.generate',generation_plan_id:'9',snapshot_id:3,target_artifact_id:'12',state:'succeeded'}];
+    const artifacts=[{id:8,payload:{operation:'garment_swap',snapshot_id:3,selected_indices:[1],target_artifact_ids:['12']}},
+      {id:9,payload:{operation:'garment_swap',snapshot_id:3,selected_indices:[1],target_artifact_ids:['12']}}];
+    assert.deepEqual(helpers.imagePlanGroups(tasks,artifacts,3).map(g=>g.rows[0].task.id),[1,2]);
+    assert.deepEqual(helpers.imagePlanGroups(tasks,artifacts,4),[]);
+});
+test('image results show grouped plan order and ambiguous history explicitly', () => {
+    const xml = readFileSync(new URL('../addons/meli_optimization/static/src/workbench.xml', import.meta.url), 'utf8');
+    assert.match(xml, /目标构图顺序/);
+    assert.match(xml, /顺序待确认/);
+    assert.match(xml, /目标构图和生成图汇总/);
+});
 test('restored location rejects invalid sections, IDs, tabs, and scroll offsets', () => {
     assert.deepEqual(helpers.workbenchLocation({section:'cases',caseId:23,tab:'images',scrollTop:325}),
                      {section:'cases',caseId:23,tab:'images',scrollTop:325});

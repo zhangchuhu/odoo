@@ -6,6 +6,115 @@ from odoo.exceptions import AccessError, ValidationError
 
 @tagged('post_install', '-at_install')
 class ScreeningCase(TransactionCase):
+    def test_screening_applies_inventory_threshold_to_each_variant_group(self):
+        preview=self.preview()
+        products,orders,source=self.collected()
+        products[0]['variations']=[{'id':101,'available_quantity':3},{'id':102,'available_quantity':17}]
+        products[0]['_verified_parent_id']='CBT1'
+        products[0]['_verified_variant_groups']=[
+            {'key':'v','label':'Violeta','variant_ids':['11'],'site_variant_ids':['101'],'stock':3,'picture_ids':['p1'],'picture_urls':['https://http2.mlstatic.com/a.jpg'],'sizes':['S']},
+            {'key':'g','label':'Gray','variant_ids':['12'],'site_variant_ids':['102'],'stock':17,'picture_ids':['p2'],'picture_urls':['https://http2.mlstatic.com/b.jpg'],'sizes':['S']}]
+        source['variant_groups_checked']=True
+        with patch.object(type(self.ui),'_screen_collect',return_value=(products,orders,source)):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        self.assertEqual(len(result['case_ids']),1)
+        self.assertEqual(self.ui._wb_snapshot(self.ui.browse(result['case_ids'][0])).payload['variant_scope']['label'],'Gray')
+    def test_screen_collection_joins_site_and_parent_variations_by_pictures(self):
+        def v(i,c,p):return {'id':i,'attribute_combinations':[{'id':'COLOR','value_name':c},{'id':'SIZE','value_name':'S'}], 'picture_ids':[p],'available_quantity':10}
+        item={'id':'MLM1','site_id':'MLM','seller_id':'9','title':'Test','cbt_item_id':'CBT1','tags':[],
+              'variations':[v(101,'Violeta','p1'),v(102,'Gray','p2')]}
+        parent={'id':'CBT1','site_id':'CBT','seller_id':'8','pictures':[{'id':'p1','secure_url':'https://http2.mlstatic.com/a.jpg'}, {'id':'p2','secure_url':'https://http2.mlstatic.com/b.jpg'}],
+                'variations':[v(11,'Violeta','p1'),v(12,'Gray','p2')],
+                'marketplace_items':[{'item_id':'MLM1','site_id':'MLM','user_id':'9','parent_id':'CBT1','parent_user_id':'8','logistic_type':self.shop.logistic_type}]}
+        class Response:
+            status=200
+            def __init__(self,data):self.data=data
+            def json(self):return self.data
+            def close(self):pass
+        values={'/users/me':{'id':'8'},'/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]},'/marketplace/items/CBT1':parent}
+        mod='odoo.addons.meli_optimization.models.screening'
+        with patch.object(type(self.shop),'_token',return_value='fake'),patch(mod+'.transport.send',side_effect=lambda method,path,**kw:Response(values[path])),patch(mod+'.collect_shop',return_value=([item],[],{'orders_complete':True})):
+            products,_,source=self.ui._screen_collect(self.shop,self.criteria)
+        self.assertTrue(source['variant_groups_checked'])
+        self.assertEqual([g['variant_ids'] for g in products[0]['_verified_variant_groups']],[['11'],['12']])
+        self.assertEqual([g['site_variant_ids'] for g in products[0]['_verified_variant_groups']],[['101'],['102']])
+    def test_screening_creates_separate_verified_variant_cases(self):
+        preview=self.preview()
+        products,orders,source=self.collected()
+        products[0]['variations']=[{'id':101,'available_quantity':10},{'id':102,'available_quantity':10}]
+        products[0]['_verified_parent_id']='CBT1'
+        products[0]['_verified_variant_groups']=[
+            {'key':'v','label':'Violeta','variant_ids':['11'],'site_variant_ids':['101'],'stock':10,'picture_ids':['p1'],'picture_urls':['https://http2.mlstatic.com/a.jpg'],'sizes':['S'],'attribute_signature':'a'},
+            {'key':'g','label':'Gray','variant_ids':['12'],'site_variant_ids':['102'],'stock':10,'picture_ids':['p2'],'picture_urls':['https://http2.mlstatic.com/b.jpg'],'sizes':['S'],'attribute_signature':'b'}]
+        source['variant_groups_checked']=True
+        with patch.object(type(self.ui),'_screen_collect',return_value=(products,orders,source)):
+            result=self.ui.screening_execute(preview['id'],preview['digest'])
+        self.assertEqual(len(result['case_ids']),2)
+        cases=self.ui.browse(result['case_ids'])
+        snapshots=[self.ui._wb_snapshot(c).payload for c in cases]
+        self.assertEqual([p['variant_scope']['label'] for p in snapshots],['Violeta','Gray'])
+        self.assertEqual([p['variant_scope']['variant_ids'] for p in snapshots],[['11'],['12']])
+        self.assertEqual([p['available_quantity'] for p in snapshots],[10,10])
+        self.assertTrue(all(p['sales_scope']=='product' for p in snapshots))
+    def test_variant_creation_is_scoped_and_prevents_overlap(self):
+        from ..domain.variant_groups import traditional_groups, bind_site_variations
+        def v(i,color,size,pic):
+            return {'id':i,'attribute_combinations':[{'id':'COLOR','value_id':'','value_name':color},{'id':'SIZE','value_name':size}], 'picture_ids':[pic], 'available_quantity':2}
+        parent={'pictures':[{'id':'p1','secure_url':'https://http2.mlstatic.com/a.jpg'},{'id':'p2','secure_url':'https://http2.mlstatic.com/b.jpg'}],
+                'variations':[v(11,'Violeta','S','p1'),v(12,'Violeta','M','p1'),v(13,'Gray','S','p2')]}
+        def product(shop,item):
+            return {'item_id':item,'parent_id':'CBT1','site':'MLM','title':'Test','model':'traditional','groups':traditional_groups(parent)}
+        with patch.object(type(self.ui),'_screen_shop',return_value=self.shop), patch.object(type(self.ui),'_variant_read_product',side_effect=product):
+            p=self.ui.workbench_variant_preview(self.shop.id,'MLM1')
+            created=self.ui.workbench_variant_create(self.shop.id,'MLM1',p['digest'],[g['key'] for g in p['item']['groups']])
+            self.assertEqual(len(created),2)
+            cases=self.ui.browse([x['case_id'] for x in created])
+            scopes=[self.ui._wb_snapshot(c).payload['variant_scope'] for c in cases]
+            self.assertEqual([s['picture_ids'] for s in scopes],[['p1'],['p2']])
+            self.assertEqual([s['variant_ids'] for s in scopes],[['11','12'],['13']])
+            again=self.ui.workbench_variant_preview(self.shop.id,'MLM1')
+            self.assertTrue(all(not g['selectable'] and g['existing_id'] for g in again['item']['groups']))
+            with self.assertRaises(ValidationError):self.ui.workbench_variant_create(self.shop.id,'MLM1',p['digest'],[p['item']['groups'][0]['key']])
+            with self.assertRaises(ValidationError):self.ui.workbench_snapshot(cases[0].id,{'shop':'test','item_id':'MLM1','title':'overwrite'})
+            with self.assertRaises(AccessError):self.env['meli.optimization.snapshot'].with_user(self.ui.env.user).create({'case_id':cases[0].id,'payload':self.ui._wb_snapshot(cases[0]).payload})
+        with self.assertRaises(AccessError):
+            self.ui.create({'name':'forged','batch_id':cases[0].batch_id.id,'variant_identity':'forged'})
+
+    def test_variant_gallery_sync_only_downloads_selected_color(self):
+        import base64
+        from ..domain.variant_groups import traditional_groups, bind_site_variations
+        def v(i,c,p):return {'id':i,'attribute_combinations':[{'id':'COLOR','value_name':c},{'id':'SIZE','value_name':'S'}],'picture_ids':[p],'available_quantity':1}
+        pics=[{'id':'p1','secure_url':'https://http2.mlstatic.com/a.jpg'},{'id':'p2','secure_url':'https://http2.mlstatic.com/b.jpg'}]
+        parent={'id':'CBT1','site_id':'CBT','seller_id':'8','pictures':pics,'variations':[v(11,'Violeta','p1'),v(12,'Gray','p2')],
+                'marketplace_items':[{'item_id':'MLM1','site_id':'MLM','user_id':'9','logistic_type':self.shop.logistic_type,'parent_id':'CBT1','parent_user_id':'8'}]}
+        site_vars=[v(101,'Violeta','p1'),v(102,'Gray','p2')]
+        product=lambda shop,item:{'item_id':item,'parent_id':'CBT1','site':'MLM','title':'Test','model':'traditional','groups':bind_site_variations(traditional_groups(parent),site_vars)}
+        with patch.object(type(self.ui),'_screen_shop',return_value=self.shop),patch.object(type(self.ui),'_variant_read_product',side_effect=product):
+            preview=self.ui.workbench_variant_preview(self.shop.id,'MLM1')
+            row=self.ui.workbench_variant_create(self.shop.id,'MLM1',preview['digest'],[preview['item']['groups'][0]['key']])[0]
+        item={'id':'MLM1','site_id':'MLM','seller_id':'9','cbt_item_id':'CBT1','tags':[],'variations':site_vars}
+        values={'/users/me':{'id':'8'},'/marketplace/users/8':{'user_id':'8','marketplaces':[{'user_id':'9','site_id':'MLM','logistic_type':self.shop.logistic_type}]},'/marketplace/items/MLM1':item,'/marketplace/items/CBT1':parent}
+        class Response:
+            status=200
+            def __init__(self,data):self.data=data
+            def json(self):return self.data
+            def close(self):pass
+        raw=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        mod='odoo.addons.meli_optimization.models.snapshot_gallery'
+        with patch.object(type(self.ui),'_screen_shop',return_value=self.shop),patch.object(type(self.shop),'_token',return_value='fake'),patch(mod+'.transport.send',side_effect=lambda method,path,**kw:Response(values[path])),patch(mod+'.fetch',return_value=(raw,'image/png')) as download:
+            result=self.ui.workbench_archive_snapshot_gallery(row['case_id'],row['revision'])
+            unchanged=self.ui.workbench_archive_snapshot_gallery(row['case_id'],result['revision'])
+            self.assertEqual(unchanged['snapshot']['id'],result['snapshot']['id'])
+            parent['pictures'].append({'id':'p3','secure_url':'https://http2.mlstatic.com/c.jpg'})
+            parent['variations'][0]['picture_ids']=['p3']
+            site_vars[0]['picture_ids']=['p3']
+            changed=self.ui.workbench_archive_snapshot_gallery(row['case_id'],result['revision'])
+            self.assertNotEqual(changed['snapshot']['id'],result['snapshot']['id'])
+            self.assertEqual(changed['snapshot']['payload']['variant_scope']['picture_ids'],['p3'])
+            parent['variations'][0]['attribute_combinations'][0]['value_name']='Other color'
+            with self.assertRaises(ValidationError):self.ui.workbench_archive_snapshot_gallery(row['case_id'],changed['revision'])
+        self.assertEqual([c.args[0] for c in download.call_args_list],['https://http2.mlstatic.com/a.jpg','https://http2.mlstatic.com/a.jpg','https://http2.mlstatic.com/c.jpg'])
+        self.assertEqual([x['id'] for x in result['snapshot']['payload']['pictures']],['p1'])
     def test_bestseller_import_rejects_invalid_batch(self):
         config = {'platform':'mercado-libre-mx','result_limit':5,'min_sold':100,'min_reviews':0,'min_rating':0}
         with self.assertRaises(ValidationError):
@@ -373,7 +482,7 @@ class ScreeningCase(TransactionCase):
             failed = self.ui.screening_execute(preview['id'], preview['digest'])
             self.assertEqual(failed['job_state'], 'failed')
             result = self.ui.screening_execute(preview['id'], preview['digest'])
-        self.assertEqual(checkpoints[1], {})
+        self.assertEqual(checkpoints[1], {'variant_schema':1})
         self.assertEqual(result['matched'], 1)
 
     def test_expired_checkpoint_fails_without_recollection_or_batch(self):
@@ -394,7 +503,7 @@ class ScreeningCase(TransactionCase):
         preview = self.preview()
         observed = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
         row = self.env['meli.optimization.screening'].browse(preview['id'])
-        row._set({'outcome': {'job_state': 'running', 'job_checkpoint': {'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': observed, 'observed_at': observed}]}}})
+        row._set({'outcome': {'job_state': 'running', 'job_checkpoint': {'variant_schema':1,'responses': [{'path': '/users/me', 'query': [], 'data': {'id': 8}, 'read_started_at': observed, 'observed_at': observed}]}}})
         with patch.object(type(self.ui), '_screen_collect', self.collected):
             result = self.ui.screening_execute(preview['id'], preview['digest'])
         self.assertEqual(result['observed_at'], observed)

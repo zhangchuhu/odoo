@@ -24,3 +24,5 @@ access_library_worker,library worker,model_meli_optimization_library,group_worke
 
 access_screening_editor,screening editor,model_meli_optimization_screening,group_editor,1,1,1,0
 access_screening_worker,screening worker,model_meli_optimization_screening,group_worker,1,0,0,0
+access_image_publication_editor,image publication editor,model_meli_optimization_image_publication,group_editor,1,1,1,0
+access_image_publication_worker,image publication worker,model_meli_optimization_image_publication,group_worker,1,0,0,0

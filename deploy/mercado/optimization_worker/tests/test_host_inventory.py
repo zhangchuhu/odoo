@@ -3,6 +3,100 @@ from test_host_session import HostSessionTests, caps
 
 
 class InventoryTests(HostSessionTests):
+    def test_adaptation_report_is_bound_to_confirmed_inventory_and_inputs(self):
+        plan = self.begin()
+        for _ in range(2):
+            action = self.store.next()
+            self.store.inventory('inv', self.envelope(action))
+        action = self.store.next()
+        report = {'viewed_digests': action['input_digests'], 'texts':[{'index':0,'decision':'preserve','source_ids':[],'replacement':'SALE!'}], 'regions': [
+            {'index': 0, 'decision': 'replace', 'source_ids': ['2'], 'detail': 'Use the visible cuff'},
+        ]}
+        self.store.adaptation('inv', report)
+        self.assertEqual(self.store.inspect('inv')['adaptation_decision'], 'generate')
+        stale = copy.deepcopy(report)
+        stale['viewed_digests'] = {}
+        with self.assertRaises(ValueError):
+            self.store.adaptation('inv', stale)
+
+    def test_target_button_closeup_does_not_require_matching_source_button(self):
+        plan = self.begin()
+        plan['source_evidence'][0]['roles'].append('instance:dress')
+        for _ in range(2):
+            action = self.store.next()
+            self.store.inventory('inv', self.envelope(action, {'visible_text':['SALE!'], 'panels':['detail'], 'garment_instances':['button close-up']}))
+        action = self.store.next()
+        self.store.adaptation('inv', {'viewed_digests': action['input_digests'], 'texts':[{'index':0,'decision':'preserve','source_ids':[],'replacement':'SALE!'}], 'regions': [
+            {'index': 0, 'decision': 'replace', 'source_ids': ['2'], 'detail': 'Use the visible cuff'}]})
+        self.store.plan('inv', plan)
+        self.assertEqual(self.store.next()['action'], 'generate')
+
+    def test_unsupported_region_is_terminal_before_image_dispatch(self):
+        plan = self.begin()
+        for _ in range(2):
+            action = self.store.next()
+            self.store.inventory('inv', self.envelope(action, {'visible_text': [], 'panels': ['back'], 'garment_instances': ['back view']}))
+        action = self.store.next()
+        self.store.adaptation('inv', {'viewed_digests': action['input_digests'], 'texts':[], 'regions': [
+            {'index': 0, 'decision': 'unsupported', 'source_ids': [], 'detail': 'No back reference'}]})
+        self.store.plan('inv', plan)
+        record = self.store.inspect('inv')
+        self.assertEqual(record['state'], 'skipped')
+        self.assertNotIn('generation_digests', record)
+        from optimization_worker.host_session import SessionProvider, SessionSkipped
+        with self.assertRaises(SessionSkipped) as skipped:
+            SessionProvider(self.store).run('image.generate', self.payload, self.context, 'inv')
+        self.assertIn('No back reference', skipped.exception.message)
+
+    def test_adapted_product_text_is_bound_into_generation_and_qc(self):
+        plan = self.begin()
+        content={'visible_text':['One shoulder top'],'panels':['detail'],'garment_instances':['button close-up']}
+        for _ in range(2):
+            action = self.store.next()
+            self.store.inventory('inv', self.envelope(action, content))
+        action = self.store.next()
+        self.store.adaptation('inv', {'viewed_digests':action['input_digests'], 'regions':[
+            {'index':0,'decision':'replace','source_ids':['2'],'detail':'Use cuff'}], 'texts':[
+            {'index':0,'decision':'replace','source_ids':['2'],'replacement':'Long sleeve top'}]})
+        self.store.plan('inv',plan)
+        record=self.store.inspect('inv')
+        self.assertEqual(record['expected_inventory']['visible_text'], ['Long sleeve top'])
+        self.assertIn('Long sleeve top', record['invocation']['prompt'])
+        self.assertNotIn('One shoulder top', record['invocation']['prompt'])
+        self.assertEqual(record['plan']['_adaptation_digest'], __import__('optimization_worker.domain', fromlist=['canonical_hash']).canonical_hash(record['adaptation_report']))
+        action=self.store.next(); self.store.dispatch('inv',caps(),action['input_digests'])
+        with self.store._db() as db:
+            r=self.store._get(db,'inv'); path=r['ordered_image_paths'][0]; digest=r['generation_digests'][path]
+            r['quality_cycle']['attempts'][-1].update(status='review_pending',digest=digest)
+            r.update(state='qc_pending',candidate_path=path,uploads={'candidate':{'sha256':digest,'path':path,'artifact_id':'123'}})
+            self.store._put(db,r)
+        qc=self.store.next()
+        self.assertEqual(qc['inventory']['visible_text'], ['Long sleeve top'])
+        self.assertEqual(qc['adaptation_report']['texts'][0]['replacement'], 'Long sleeve top')
+        report={'viewed_digests':qc['input_digests'],'quality_binding':qc['quality_binding'],'review_binding':qc['review_binding'],
+                'checks':[{'name':n,'status':'passed','evidence':'fixture'} for n in qc['required_checks']],
+                'skill_report':{'schema_version':1,'candidate':'candidate_1','scores':{'garment_construction':90,'color_material':88,'garment_details':88,'target_preservation':90,'text_layout':95},'critical_defects':[],'primary_defect':None,'evidence':['fixture'],'confidence':0.85,'decision':'accept','exact_text':True,'added_text':[],'missing_text':[],'instances_exact':True,'panel_count_exact':True,'panel_layout_exact':True}}
+        self.store.qc('inv',report)
+        result=self.store.result('inv')
+        self.assertEqual(result['visual_qc']['adaptation']['texts'][0]['replacement'],'Long sleeve top')
+
+    def test_legacy_reference_wait_can_be_reopened_only_before_dispatch(self):
+        self.begin()
+        for _ in range(2):
+            action = self.store.next()
+            self.store.inventory('inv', self.envelope(action))
+        with self.store._db() as db:
+            record = self.store._get(db, 'inv')
+            record.update(state='waiting', reason='capacity_insufficient', resume_state='planning', selection_corrections=3)
+            self.store._put(db, record)
+        self.assertTrue(self.store.reopen_legacy_adaptation('inv'))
+        self.assertEqual(self.store.next()['action'], 'select_references')
+        with self.store._db() as db:
+            record = self.store._get(db, 'inv')
+            record.update(state='waiting', reason='capacity_insufficient', resume_state='planning', generation_digests={'x':'y'})
+            self.store._put(db, record)
+        self.assertFalse(self.store.reopen_legacy_adaptation('inv'))
+
     def begin(self, covered=False):
         self.store.enqueue('inv', 'image.generate', self.payload, self.context)
         action = self.store.next()
@@ -25,13 +119,17 @@ class InventoryTests(HostSessionTests):
         self.store.inventory('inv',self.envelope(a)); a=self.store.next()
         self.assertEqual(a['action'],'select_references'); self.assertEqual(a['inventory']['visible_text'],['SALE!'])
         plan['source_evidence'][0]['roles'].append('instance:dress detail')
+        self.store.adaptation('inv', {'viewed_digests':a['input_digests'],'regions':[{'index':0,'decision':'direct','source_ids':['2'],'detail':'dress visible'}], 'texts':[{'index':0,'decision':'preserve','source_ids':[],'replacement':'SALE!'}]})
         self.store.plan('inv',plan); a=self.store.next(); self.assertEqual(a['action'],'generate')
         self.assertIn('SALE!',self.store.inspect('inv')['invocation']['prompt'])
 
     def test_covered_tentative_plan_continues_after_agreement(self):
-        self.begin(covered=True)
+        plan = self.begin(covered=True)
         a=self.store.next(); self.store.inventory('inv',self.envelope(a))
         a=self.store.next(); self.store.inventory('inv',self.envelope(a))
+        a=self.store.next()
+        self.store.adaptation('inv', {'viewed_digests':a['input_digests'],'regions':[{'index':0,'decision':'direct','source_ids':['2'],'detail':'dress visible'}], 'texts':[{'index':0,'decision':'preserve','source_ids':[],'replacement':'SALE!'}]})
+        self.store.plan('inv',plan)
         self.assertEqual(self.store.next()['action'],'generate')
 
     def test_verified_capacity_pauses_without_dispatch(self):

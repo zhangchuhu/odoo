@@ -3,7 +3,7 @@ import { Component, onWillStart, useState, useEffect, onWillUnmount } from '@odo
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
 import { session } from '@web/session';
-import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks, groupImageTasks, imageReviewWaiting, workbenchLocation, workbenchListPosition } from './workbench_helpers';
+import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks, groupImageTasks, imagePlanGroups, imageReviewWaiting, workbenchLocation, workbenchListPosition } from './workbench_helpers';
 
 export class OptimizationWorkbench extends Component {
     static template = 'meli_optimization.Workbench';
@@ -15,6 +15,7 @@ export class OptimizationWorkbench extends Component {
         this.orm = useService('orm');
         this.notification = useService('notification');
         this.locationKey = `meli.optimization.workbench.location.v1:${session.uid || 'anonymous'}`;
+        this.imagePlanKey = `meli.optimization.image-plans.v1:${session.uid || 'anonymous'}`;
         let storedLocation;
         try { storedLocation = JSON.parse(sessionStorage.getItem(this.locationKey) || 'null'); }
         catch { storedLocation = null; }
@@ -23,9 +24,10 @@ export class OptimizationWorkbench extends Component {
         this.initialScrollTop = initialLocation.scrollTop;
         this.locationReady = false;
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
-            batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, taskType: 'product.facts',
-            taskValues: {}, selections: {}, preview: null, imageDecision: null, collections: [], collectionStartStatus: null, collectionFilters: {query:'',platform:''}, collectionApplied: {}, library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', garmentUploadBusy: false, libraryQuery: '', librarySite: '', libraryFilters: {query:'', platform:'', dateFrom:'', dateTo:''}, libraryApplied: {}, libraryPage: 0, libraryPageSize: 50, libraryTotal: 0, libraryResults: [] });
+            batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, variantShops: [], variantForm: {}, variantPreview: null, variantSelection: [], variantResults: null, taskType: 'product.facts',
+            taskValues: {}, selections: {}, imagePlanSelections: {}, preview: null, imagePublishPreview: null, imagePublishVariant: '', imagePublishSkuConfirmed: false, imageDecision: null, collections: [], collectionStartStatus: null, collectionFilters: {query:'',platform:''}, collectionApplied: {}, library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', garmentUploadBusy: false, libraryQuery: '', librarySite: '', libraryFilters: {query:'', platform:'', dateFrom:'', dateTo:''}, libraryApplied: {}, libraryPage: 0, libraryPageSize: 50, libraryTotal: 0, libraryResults: [] });
         Object.assign(this.state, initialList);
+        try { const saved = JSON.parse(sessionStorage.getItem(this.imagePlanKey) || '{}'); if (saved && typeof saved === 'object' && !Array.isArray(saved)) this.state.imagePlanSelections = saved; } catch {}
         this.tabs = [['snapshot','商品快照'],['facts','商品事实'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
             ['gallery','类似爆款'],['images','图片与质检'],['proposals','变更确认'],['activity','活动与广告'],['effects','效果观察'],['audit','审计记录']];
         this.taskLabels = {'product.facts':'整理商品事实','research.keywords':'关键词研究','research.bestseller':'爆款研究',
@@ -159,7 +161,40 @@ export class OptimizationWorkbench extends Component {
     }
     async navigate(section) { this.back(); this.state.section=section; this.state.status=''; this.state.page=0; return this.refresh(); }
     async page(delta) { this.state.page += delta; return this.refresh(); }
-    createForm() { this.state.form = {shop:'',item_id:'',title:'',site_id:'MLM',seller_sku:'',available_quantity:'',image_url:'',batch_name:''}; this.state.modal='create'; }
+    async createForm() {
+        this.state.variantForm={shop_id:'',item_id:'',batch_name:''};this.state.variantShops=[];this.state.variantPreview=null;this.state.variantSelection=[];this.state.variantResults=null;this.state.modal='variant-create';
+        return this.perform(async()=>{const shops=await this.rpc('workbench_variant_shops',[]);if(this.state.modal==='variant-create')this.state.variantShops=shops;});
+    }
+    manualCreateForm() { this.state.form = {shop:'',item_id:'',title:'',site_id:'MLM',seller_sku:'',available_quantity:'',image_url:'',batch_name:''}; this.state.modal='create'; }
+    variantItemId(value) { const id=String(value || '').trim().toUpperCase();return /^[0-9]+$/.test(id) ? 'MLM'+id : id; }
+    async readVariants() {
+        const f=this.state.variantForm, shop=Number(f.shop_id), id=this.variantItemId(f.item_id);
+        if (!shop || !id) return;
+        this.state.variantPreview=null;this.state.variantSelection=[];
+        return this.perform(async()=>{const p=await this.rpc('workbench_variant_preview',[shop,id]);if(this.state.modal==='variant-create' && this.state.variantForm===f && Number(f.shop_id)===shop && this.variantItemId(f.item_id)===id){this.state.variantPreview=p;this.state.variantSelection=p.item.groups.filter(g=>g.selectable).map(g=>g.key);}});
+    }
+    toggleVariant(key) { this.state.variantSelection=this.state.variantSelection.includes(key) ? this.state.variantSelection.filter(k=>k!==key) : [...this.state.variantSelection,key]; }
+    toggleAllVariants() { const keys=(this.state.variantPreview?.item.groups || []).filter(g=>g.selectable).map(g=>g.key);this.state.variantSelection=keys.every(k=>this.state.variantSelection.includes(k)) ? [] : keys; }
+    async syncVariantResult(row) {
+        try { const detail=await this.rpc('workbench_detail',[row.case_id]);await this.rpc('workbench_archive_snapshot_gallery',[row.case_id,detail.revision]);row.synced=true;row.error=''; }
+        catch (error) { row.synced=false;const message=error?.data?.message || error?.message;row.error='原图同步失败：' + (typeof message === 'string' ? message.slice(0,300) : '请查看记录并重试'); }
+    }
+    async createVariants() {
+        const p=this.state.variantPreview, f=this.state.variantForm, keys=[...this.state.variantSelection];if(!p || !keys.length)return;
+        return this.perform(async()=>{const rows=await this.rpc('workbench_variant_create',[p.shop_id,p.item.item_id,p.digest,keys,f.batch_name || '']);let results=rows.map(r=>({...r,synced:false,error:''}));if(this.state.modal==='variant-create' && this.state.variantForm===f){this.state.variantResults=results;results=this.state.variantResults;}for(const row of results)await this.syncVariantResult(row);await this.load();});
+    }
+    async retryVariantSync(row) { return this.perform(async()=>{await this.syncVariantResult(row);}); }
+    async openVariantCase(id) { this.state.modal='';await this.open(id); }
+    async splitVariantForm() {
+        const detail=this.state.detail;
+        if(!detail?.snapshot?.payload?.item_id)return;
+        await this.createForm();
+        if(this.state.modal==='variant-create') {
+            this.state.variantForm.shop_id=detail.shop_id ? String(detail.shop_id) : '';
+            this.state.variantForm.item_id=detail.snapshot.payload.item_id;
+            if(detail.shop_id)await this.readVariants();
+        }
+    }
     snapshotForm() { this.state.form = {...this.state.detail.snapshot.payload}; this.state.form.available_quantity ??= ''; this.state.modal='snapshot'; }
     snapshotImageForm() {
         this.snapshotImageReadGeneration = (this.snapshotImageReadGeneration || 0) + 1;
@@ -351,6 +386,23 @@ export class OptimizationWorkbench extends Component {
         }, '任务已加入队列，等待具备能力的 Worker');
     }
     async control(task, operation) { return this.perform(async () => {await this.rpc('workbench_control',[this.state.detail.id,task.id,operation]); await this.load();}, '任务状态已更新'); }
+    expiredImageAvailable(task) {
+        return task?.task_type === 'image.generate' && task.state === 'running' && task.lease_expired && Number.isSafeInteger(task.lease_epoch) && task.lease_epoch > 0 && task.snapshot_id === this.state.detail?.snapshot?.id;
+    }
+    openExpiredImage(task) {
+        if (!this.expiredImageAvailable(task)) return;
+        this.state.expiredImageTask = task;
+        this.state.modal = 'expired-image';
+    }
+    async regenerateExpiredImage() {
+        const task = this.state.expiredImageTask;
+        if (!this.expiredImageAvailable(task)) return;
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        return this.perform(async()=>{
+            await this.rpc('workbench_regenerate_expired_image',[context.case_id,task.id,task.lease_epoch]);
+            if (this.contextMatches(context)) {this.state.modal='';await this.load();}
+        }, '已重新加入生成队列');
+    }
     imageDecisionAvailable(task) {
         const detail = task?.status_detail;
         return imageReviewWaiting(task) && !task.lease_expired && task.snapshot_id === this.state.detail?.snapshot?.id && !!detail?.review_evidence && !!detail?.review_report_hash;
@@ -388,9 +440,42 @@ export class OptimizationWorkbench extends Component {
     async retryDerived(task) { return this.perform(async () => { const result = await this.rpc('workbench_retry_derived',[this.state.detail.id,task.id]); await this.load(); if (!result.ok) throw new Error('后续操作仍未完成，请检查任务详情'); }, '后续操作已完成'); }
     get groupedTasks() { return visibleCollectionTasks(groupResearchRetries(this.state.detail?.tasks || [], this.state.detail?.retry_events || []), this.state.detail); }
     get taskQueueGroups() { return groupImageTasks(this.groupedTasks); }
+    get imagePlans() { return imagePlanGroups(this.state.detail?.tasks, this.state.detail?.artifacts, this.state.detail?.snapshot?.id); }
+    imagePlanSelection(plan) {
+        const available = (plan.rows || []).filter(row => row.task?.state === 'succeeded');
+        const saved = this.state.imagePlanSelections[plan.planId];
+        return Array.isArray(saved) ? saved.map(target => available.find(row => row.targetId === target)?.task.id).filter(id => id !== undefined) : available.map(row => row.task.id);
+    }
+    saveImagePlanSelection(plan, ids) {
+        this.state.imagePlanSelections[plan.planId] = ids.map(id => plan.rows.find(row => row.task?.id === id)?.targetId).filter(Boolean);
+        try { sessionStorage.setItem(this.imagePlanKey, JSON.stringify(this.state.imagePlanSelections)); } catch {}
+    }
+    toggleImagePlan(plan, id) {
+        const selected = this.imagePlanSelection(plan);
+        this.saveImagePlanSelection(plan, selected.includes(id) ? selected.filter(i => i !== id) : [...selected, id]);
+    }
+    moveImagePlan(plan, index, delta) {
+        const selected = [...this.imagePlanSelection(plan)], next = index + delta;
+        if (next >= 0 && next < selected.length) [selected[index], selected[next]] = [selected[next], selected[index]];
+        this.saveImagePlanSelection(plan, selected);
+    }
+    resetImagePlan(plan) { delete this.state.imagePlanSelections[plan.planId]; try { sessionStorage.setItem(this.imagePlanKey, JSON.stringify(this.state.imagePlanSelections)); } catch {} }
+    async proposeImagePlan(plan) {
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        const selected=this.imagePlanSelection(plan);
+        await this.perform(async () => {
+            const proposal=await this.rpc('workbench_image_plan_propose',[context.case_id,Number(plan.planId),selected]);
+            if (this.contextMatches(context)) { this.state.preview={...proposal,case_id:context.case_id,revision:context.revision}; this.state.modal='preview'; }
+        });
+    }
     get visibleTasks() {
         const kinds={titles:['title.generate'],research:['research.bestseller','research.keywords'],gallery:['gallery.collect'],images:['image.generate','image.qc']};
         return this.groupedTasks.filter(t => (kinds[this.state.tab] || []).includes(t.task_type));
+    }
+    get unmappedResultTasks() {
+        if (this.state.tab !== 'images') return this.visibleTasks;
+        const shown = new Set(this.imagePlans.flatMap(plan => (plan.rows || []).map(row => row.task?.id).filter(id => id != null)));
+        return this.visibleTasks.filter(task => !shown.has(task.id));
     }
     get hostOfflineHint() {
         const detail = this.state.detail;
@@ -413,7 +498,7 @@ export class OptimizationWorkbench extends Component {
         }
         return this.label(task.state);
     }
-    label(state) { return ({queued:'排队中',running:'执行中',waiting:'等待条件',succeeded:'已完成',failed:'失败',cancelled:'已取消'})[state] || state; }
+    label(state) { return ({queued:'排队中',running:'执行中',waiting:'等待条件',succeeded:'已完成',failed:'失败',cancelled:'已取消',skipped:'已跳过'})[state] || state; }
     safeUrl(value) { return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : ''; }
     imageUrl(row) {
         const artifact = (this.state.detail?.artifacts || []).find(a => String(a.id) === String(row.artifact_id));
@@ -448,6 +533,72 @@ export class OptimizationWorkbench extends Component {
         });
     }
     preview(proposal) { this.state.preview={...proposal,case_id:this.state.detail.id,revision:this.state.detail.revision}; this.state.modal='preview'; }
+    async previewImagePublish(proposal, variantId=null) {
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        await this.perform(async () => {
+            const args=[context.case_id,proposal.id,proposal.digest];
+            if (variantId) args.push(variantId);
+            const preview=await this.rpc('workbench_image_publish_preview',args);
+            if (!this.contextMatches(context)) return;
+            this.state.imagePublishPreview={...preview,proposal_id:proposal.id};
+            this.state.imagePublishVariant=variantId || '';
+            this.state.imagePublishSkuConfirmed=false;
+            this.state.modal='image-publish-preview';
+        });
+    }
+    async startImagePublish() {
+        const p=this.state.imagePublishPreview;
+        if (!p || this.state.detail?.id !== p.case_id) return;
+        if (p.target?.selected_variant_id && !this.state.imagePublishSkuConfirmed) return;
+        const context={version:this.navigationVersion,case_id:p.case_id,revision:this.state.detail.revision};
+        await this.perform(async () => {
+            const args=[p.case_id,p.proposal_id,p.proposal_digest,p.digest];
+            if (p.target?.selected_variant_id) args.push(p.target.selected_variant_id, true);
+            const job=await this.rpc('workbench_image_publish_start',args);
+            if (!this.contextMatches(context)) return;
+            await this.runImagePublication(context,job.id);
+        });
+    }
+    async resumeImagePublication(job) {
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        await this.perform(async () => this.runImagePublication(context,job.id));
+    }
+    async reconcileImagePublication(job) {
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        await this.perform(async () => {
+            const result=await this.rpc('workbench_image_publish_reconcile',[context.case_id,job.id]);
+            if (!this.contextMatches(context)) return;
+            await this.load();
+            const message=result.state === 'published' ? '平台图片已核验' : result.code === 'link_verified' ? '图片绑定已核验，可继续发布' : result.message || '平台结果仍需核对';
+            this.notification.add(message, {type:['published','linking'].includes(result.state) ? 'success' : 'warning'});
+        });
+    }
+    async abandonImagePublication(job) {
+        if (!globalThis.confirm('确认放弃本次未知上传？该图片未绑定到商品，已上传文件可能仍留在平台。')) return;
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        await this.perform(async () => {
+            await this.rpc('workbench_image_publish_abandon',[context.case_id,job.id]);
+            if (!this.contextMatches(context)) return;
+            await this.load();
+            this.notification.add('已放弃本次上传，可以重新核验并发布', {type:'success'});
+        });
+    }
+    async runImagePublication(context, jobId) {
+        let result={id:jobId,state:'queued'};
+        for (let i=0;i<101 && this.contextMatches(context);i++) {
+            const step=await this.rpc('workbench_image_publish_reserve',[context.case_id,jobId]);
+            if (!this.contextMatches(context)) return;
+            if (!step.nonce) { result=step; break; }
+            result=await this.rpc('workbench_image_publish_dispatch',[context.case_id,jobId,step.nonce]);
+            if (['published','failed','reconciliation_required'].includes(result.state)) break;
+        }
+        if (!this.contextMatches(context)) return;
+        this.state.imagePublishResult=result;
+        this.state.modal=''; this.state.tab='proposals';
+        await this.load();
+        const message=result.state === 'published' ? '图片已发布并核验' : result.state === 'reconciliation_required' ? '发布结果待核对，请勿重复提交' : result.code === 'dispatch_in_progress' ? '平台请求处理中，请稍后查看' : '图片发布尚未完成，请查看记录';
+        this.notification.add(message,{type:result.state === 'published' ? 'success' : 'warning'});
+    }
     async confirm() {
         const p=this.state.preview;
         if (!p || this.disposed || this.state.detail?.id !== p.case_id || this.state.detail?.revision !== p.revision) return;
@@ -456,7 +607,7 @@ export class OptimizationWorkbench extends Component {
             await this.rpc('workbench_confirm',[p.case_id,p.id,p.digest]);
             if (!this.contextMatches(context)) return;
             this.state.modal=''; this.state.tab='proposals'; await this.load();
-        }, '已确认确切方案；平台发布尚未接入');
+        }, '已确认确切方案；图片方案可继续核验平台发布范围');
     }
 }
 registry.category('actions').add('meli_optimization.workbench', OptimizationWorkbench);

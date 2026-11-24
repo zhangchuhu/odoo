@@ -10,6 +10,122 @@ from ..domain import canonical_hash
 class WorkbenchBrowserCase(HttpCase):
     browser_size = '1440x1000'
 
+    def test_variant_create_dialog_separates_two_colors(self):
+        from odoo import api
+        from ..domain.variant_groups import traditional_groups
+        self.env.ref('base.user_admin').write({'group_ids':[(4,self.env.ref('meli_optimization.group_editor').id),(4,self.env.ref('meli_bff.group_reader').id)]})
+        shop=self.env['meli.independent.store'].create({'name':'Variant browser shop','seller_id':'8','marketplace_seller_id':'9','site':'MLM','state':'connected'})
+        parent={'pictures':[{'id':'p1','secure_url':'https://http2.mlstatic.com/a.jpg'},{'id':'p2','secure_url':'https://http2.mlstatic.com/b.jpg'}],
+                'variations':[{'id':11,'attribute_combinations':[{'id':'COLOR','value_name':'Violeta'},{'id':'SIZE','value_name':'S'}],'picture_ids':['p1'],'available_quantity':2},
+                              {'id':12,'attribute_combinations':[{'id':'COLOR','value_name':'Gray'},{'id':'SIZE','value_name':'M'}],'picture_ids':['p2'],'available_quantity':3}]}
+        def product(shop,item):return {'item_id':item,'parent_id':'CBT1','site':'MLM','title':'Variant fixture','model':'traditional','groups':traditional_groups(parent)}
+        action=self.env.ref('meli_optimization.workbench_action').id
+        spawn=ChromeBrowser._spawn_chrome
+        def fixed(browser,cmd):
+            Path(browser.user_data_dir,'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            return spawn(browser,cmd)
+        ui=self.env['meli.optimization.case']
+        @api.model
+        def fake_sync(self,case_id,revision):return True
+        with patch.object(type(ui),'_screen_shop',return_value=shop),patch.object(type(ui),'_variant_read_product',side_effect=product),patch.object(type(ui),'workbench_archive_snapshot_gallery',new=fake_sync),patch.object(ChromeBrowser,'remote_debugging_port',55441),patch.object(ChromeBrowser,'_spawn_chrome',fixed):
+            self.browser_js('/odoo/action-%s'%action, """
+              (async()=>{const wait=async f=>{for(let i=0;i<150;i++){let x=f();if(x)return x;await new Promise(r=>setTimeout(r,100))}throw Error('variant timeout')};
+              const button=t=>[...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(t));
+              (await wait(()=>button('新建优化'))).click();const sel=await wait(()=>[...document.querySelectorAll('.mw-modal select')].find(e=>[...e.options].some(o=>o.textContent.includes('Variant browser shop'))));
+              sel.value=[...sel.options].find(o=>o.textContent.includes('Variant browser shop')).value;sel.dispatchEvent(new Event('change',{bubbles:true}));
+              const input=document.querySelector('.mw-modal input[placeholder="MLM1234567890"]');input.value='MLM1';input.dispatchEvent(new Event('input',{bubbles:true}));
+              (await wait(()=>{let b=button('读取商品');return b&&!b.disabled&&b})).click();await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('Violeta'));
+              if(!document.querySelector('.mw-modal').textContent.includes('Gray'))throw Error('第二个变体缺失');
+              (await wait(()=>{let b=button('创建优化记录');return b&&!b.disabled&&b})).click();await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('已创建，原图同步完成'));
+              if([...document.querySelectorAll('.mw-modal p')].filter(e=>e.textContent.includes('已创建，原图同步完成')).length!==2)throw Error('变体未分开创建');
+              console.log('test successful')})().catch(e=>console.error(e));
+            """,login='admin',timeout=50)
+
+    def test_confirm_and_publish_user_product_through_workbench(self):
+        import base64, hashlib
+        from types import SimpleNamespace
+        admin=self.env.ref('base.user_admin')
+        admin.write({'group_ids':[(4,self.env.ref('meli_optimization.group_editor').id),(4,self.env.ref('meli_bff.group_writer').id)]})
+        ui=self.env['meli.optimization.case']
+        detail=ui.workbench_create({'shop':'Browser test','item_id':'MLM123','title':'Publish browser fixture'})
+        raw=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        digest=hashlib.sha256(raw).hexdigest()
+        artifact=self.env['meli.optimization.artifact'].create({'case_id':detail['id'],'data':base64.b64encode(raw),'digest':digest,'mime_type':'image/png'})
+        payload={'operation':'garment_swap','case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],
+                 'selected_indices':[0],'source_artifact_ids':[str(artifact.id)],'target_artifact_ids':[str(artifact.id)]}
+        plan=self.env['meli.optimization.artifact'].create({'case_id':detail['id'],'payload':payload,'digest':canonical_hash(payload)})
+        task=self.env['meli.optimization.task'].create({'case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':[str(artifact.id)],'target_artifact_id':str(artifact.id),'generation_plan_id':str(plan.id)}})
+        claim=task.claim(['image.generate']);image={'image_id':'generated','order':0,'role':'front','artifact_id':str(artifact.id),'source':'fixture',
+            'evidence_ids':['e'],'mime_type':'image/png','width':1,'height':1,'sha256':digest}
+        task.complete(claim['lease_token'],claim['lease_epoch'],'publish-browser',{'schema_version':'1','request_id':'browser',
+            'evidence':[{'id':'e','source':'fixture','observed_at':'2026-11-15T00:00:00Z'}],'image':image,
+            'visual_qc':{'status':'passed','candidate_sha256':digest,'report':{'decision':'accept'}}})
+        from datetime import timedelta
+        from odoo import fields
+        other_plan=self.env['meli.optimization.artifact'].create({'case_id':detail['id'],'payload':payload,'digest':canonical_hash(payload)})
+        expired=self.env['meli.optimization.task'].create({'case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':[str(artifact.id)],'target_artifact_id':str(artifact.id),'generation_plan_id':str(other_plan.id)}})
+        c2=expired.claim(['image.generate']);expired.checkpoint(c2['lease_token'],c2['lease_epoch'],'old',{'request_id':'expired-plan','state':'unknown'})
+        expired._set({'lease_expires_at':fields.Datetime.now()-timedelta(seconds=1)})
+        shop=SimpleNamespace(id=1,name='Browser test',site='MLM',seller_id='11',marketplace_seller_id='22',logistic_type='remote',company_id=self.env.company,_token=lambda:'fixture')
+        responses={'/users/me':{'id':11},'/marketplace/users/11':{'user_id':11,'marketplaces':[{'user_id':22,'site_id':'MLM','logistic_type':'remote'}]},
+            '/marketplace/items/MLM123':{'id':'MLM123','site_id':'MLM','seller_id':22,'cbt_item_id':'CBT456','user_product_id':'MLMU999','tags':['user_product_listing']},
+            '/marketplace/items/CBT456':{'id':'CBT456','site_id':'CBT','seller_id':11,'category_id':'CBT321','marketplace_items':[{'item_id':'MLM123','site_id':'MLM','user_id':22,'logistic_type':'remote','parent_id':'CBT456','parent_user_id':11,'user_product_id':'MLMU999','siteless_user_product_id':'U999'}]},
+            '/categories/CBT321':{'id':'CBT321','settings':{'max_pictures_per_item':12}},'/user-products/U999':{'id':'U999','user_id':11,'pictures':[{'id':'111-CBT123_012026'}]}}
+        calls=[]
+        switched=[False]
+        def read(shop,path):
+            if path == '/users/me' and ('PUT','/global/user-products/U999') in calls and not switched[0]:
+                switched[0]=True
+                responses['/marketplace/items/MLM123']['tags']=[]
+                parent=responses['/marketplace/items/CBT456']
+                parent['pictures']=[{'id':'111-CBT123_012026'},{'id':'222-CBT123_012026'}]
+                parent['variations']=[{'id':12,'seller_custom_field':'BLACK-S','picture_ids':['111-CBT123_012026']},
+                                      {'id':13,'seller_custom_field':'BLACK-M','picture_ids':['222-CBT123_012026']}]
+                responses['/categories/CBT321']['settings']['max_pictures_per_item_var']=6
+            return responses[path]
+        def send(method,path,**kwargs):
+            calls.append((method,path))
+            if path == '/pictures/items/upload': data={'id':'333-CBT123_012026' if switched[0] else '222-CBT123_012026'}
+            elif path == '/items/CBT456/pictures':
+                responses['/marketplace/items/CBT456']['pictures'].append({'id':'333-CBT123_012026'});data={'id':'333-CBT123_012026'}
+            elif path == '/global/items/CBT456':
+                import json
+                sent=json.loads(kwargs['body']);parent=responses['/marketplace/items/CBT456'];parent['pictures']=sent['pictures']
+                parent['variations'][0]['picture_ids']=['333-CBT123_012026'];data={'success':True}
+            else: responses['/user-products/U999']['pictures']=[{'id':'222-CBT123_012026'}];data={'success':True}
+            return SimpleNamespace(status=200,json=lambda:data,close=lambda:None)
+        spawn=ChromeBrowser._spawn_chrome
+        def fixed(browser,cmd):
+            Path(browser.user_data_dir,'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            return spawn(browser,cmd)
+        action=self.env.ref('meli_optimization.workbench_action').id
+        with patch.object(type(ui),'_gallery_shop',return_value=shop), patch.object(type(ui),'_image_publish_read',side_effect=read), patch('odoo.addons.meli_optimization.models.image_publish.transport.send',side_effect=send), patch.object(ChromeBrowser,'remote_debugging_port',55441), patch.object(ChromeBrowser,'_spawn_chrome',fixed):
+            self.browser_js('/odoo/action-%s' % action, """
+                (async()=>{const wait=async f=>{for(let i=0;i<150;i++){let x=f();if(x)return x;await new Promise(r=>setTimeout(r,100));}throw Error('publish UI timeout')};
+                const button=t=>[...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(t));
+                const row=await wait(()=>[...document.querySelectorAll('.mw-table tbody tr')].find(e=>e.textContent.includes('Publish browser fixture')));row.querySelector('.mw-link').click();
+                (await wait(()=>button('图片与质检'))).click();
+                const expired=await wait(()=>[...document.querySelectorAll('.mw-image-plan .mw-candidate')].find(e=>e.textContent.includes('租约已过期')));
+                if(!expired.closest('.mw-image-plan')?.textContent.includes('计划 #'))throw Error('任务未归入计划');
+                expired.querySelector('button').click();(await wait(()=>button('确认重新生成'))).click();
+                await wait(()=>!document.querySelector('.mw-modal'));
+                const complete=await wait(()=>[...document.querySelectorAll('.mw-image-plan')].find(e=>e.textContent.includes('已完成') && e.textContent.includes('成功 1 张')));
+                complete.querySelector('.mw-selection button.primary').click();
+                (await wait(()=>button('确认以上确切方案'))).click();(await wait(()=>button('核验平台发布范围'))).click();
+                (await wait(()=>button('确认替换并发布'))).click();await wait(()=>document.body.textContent.includes('已发布并核验'));
+                (await wait(()=>button('核验平台发布范围'))).click();
+                const sku=await wait(()=>document.querySelector('.mw-preview select'));sku.value='12';sku.dispatchEvent(new Event('change',{bubbles:true}));
+                (await wait(()=>{const b=button('核验所选 SKU');return b && !b.disabled && b})).click();
+                (await wait(()=>document.querySelector('.mw-preview input[type=checkbox]'))).click();
+                (await wait(()=>{const b=button('确认替换并发布');return b && !b.disabled && b})).click();
+                await wait(()=>[...document.querySelectorAll('.mw-task')].filter(e=>e.textContent.includes('已发布并核验')).length===2);
+                console.log('test successful');})().catch(e=>console.error(e));
+            """,login='admin',timeout=100)
+        self.assertEqual(calls,[('POST','/pictures/items/upload'),('PUT','/global/user-products/U999'),
+            ('POST','/pictures/items/upload'),('POST','/items/CBT456/pictures'),('PUT','/global/items/CBT456')])
+
     def test_best_candidate_review_renders_in_images_tab(self):
         import hashlib
         import base64
@@ -47,6 +163,13 @@ class WorkbenchBrowserCase(HttpCase):
               'checks':[{'name':name,'status':'failed','evidence':'fixture'} for name in
                         ('garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout')],
               'skill_report':{'decision':'reject'}}})
+        from datetime import timedelta
+        from odoo import fields
+        expired = self.env['meli.optimization.task'].create({'case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],
+            'task_type':'image.generate','payload':task.payload})
+        old = expired.claim(['image.generate'])
+        expired.checkpoint(old['lease_token'],old['lease_epoch'],'old-image',{'request_id':'browser-expired','state':'unknown'})
+        expired._set({'lease_expires_at':fields.Datetime.now()-timedelta(seconds=1)})
         action_id = self.env.ref('meli_optimization.workbench_action').id
         spawn = ChromeBrowser._spawn_chrome
         def fixed_port_spawn(browser, cmd):
@@ -88,8 +211,8 @@ class WorkbenchBrowserCase(HttpCase):
                     const ordinaryImage=await wait(()=>document.querySelector('img[alt="待人工确认的候选图"]'));
                     await wait(()=>ordinaryImage.complete && ordinaryImage.naturalWidth>0);
                     if(!ordinaryImage.closest('.mw-result')?.textContent.includes('尚未通过质检')) throw Error('Pending candidate warning missing');
-                    if (!document.querySelector('.mw-result')?.textContent.includes('待处理')) throw Error('Review state missing');
-                    await wait(()=>button('重新生成'));button('重新生成').click();
+                    if (!ordinaryImage.closest('.mw-result')?.textContent.includes('待处理')) throw Error('Review state missing');
+                    ordinaryImage.closest('.mw-result').querySelector('button').click();
                     await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('确认重新生成'));
                     if(!document.querySelector('.mw-modal').textContent.includes('原任务')) throw Error('Regeneration must reuse task');
                     document.querySelector('[aria-label="关闭对话框"]').click();
@@ -98,7 +221,12 @@ class WorkbenchBrowserCase(HttpCase):
                     await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('原质检报告会保留'));
                     if(!document.querySelector('.mw-modal').textContent.includes('原质检报告会保留')) throw Error('Manual accept warning missing');
                     button('确认使用未通过质检的图片').click();
-                    await wait(()=>document.querySelector('.mw-result')?.textContent.includes('已记录人工处理决定'));
+                    await wait(()=>[...document.querySelectorAll('.mw-result')].some(e=>e.textContent.includes('已记录人工处理决定')));
+                    const expired=await wait(()=>[...document.querySelectorAll('.mw-result')].find(e=>e.textContent.includes('租约已过期')));
+                    expired.querySelector('button').click();
+                    await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('原请求可能已经产生图片或费用'));
+                    button('确认重新生成').click();
+                    await wait(()=>![...document.querySelectorAll('.mw-result')].some(e=>e.textContent.includes('租约已过期')));
                     console.log('test successful');
                 })().catch(e=>console.error(e));
             """, login='admin', timeout=40)
@@ -163,7 +291,8 @@ class WorkbenchBrowserCase(HttpCase):
                     button('确认以上确切方案').click();
                     await wait(()=>document.querySelector('.mw-task')?.textContent.includes('已确认'));
                     button('返回列表').click(); button('新建优化').click();
-                    await wait(()=>document.querySelector('.mw-form'));
+                    await wait(()=>{const b=button('手动创建快照');return b && !b.disabled && b});button('手动创建快照').click();
+                    await wait(()=>button('保存快照'));
                     if(document.querySelectorAll('.mw-form input').length < 7) throw Error('Product fields missing');
                     console.log('workbench-shot-form');
                     await new Promise(r=>setTimeout(r,300));
@@ -253,7 +382,8 @@ class WorkbenchBrowserCase(HttpCase):
                     const displayed=[...document.querySelectorAll('.mw-source-images img')].map(i=>i.getAttribute('src'));
                     if(!displayed.every((url,i)=>url.includes('/'+sourceRefs[i]+'/')))throw Error('Source gallery order changed');
                     await wait(()=>button('图片与质检'));button('图片与质检').click();await wait(()=>button('从公司图库选择换装目标'));if(!document.body.textContent.includes('文本宿主心跳不代表图片能力可用'))throw Error('Missing image host capability guidance');button('从公司图库选择换装目标').click();
-                    await wait(()=>button('TEST-LIBRARY-REF'));button('TEST-LIBRARY-REF').click();
+                    const libraryRow=await wait(()=>[...document.querySelectorAll('.mw-library-select-table tbody tr')].find(row=>row.textContent.includes('TEST-SOURCE-SKU')));
+                    libraryRow.querySelector('button').click();
                     await wait(()=>document.querySelector('.mw-library-dialog .mw-choice input'));document.querySelector('.mw-library-dialog .mw-choice input').click();
                     document.querySelectorAll('.o_notification_close').forEach(el=>el.click());
                     const dialog=document.querySelector('.mw-modal');dialog.scrollTop=dialog.scrollHeight;

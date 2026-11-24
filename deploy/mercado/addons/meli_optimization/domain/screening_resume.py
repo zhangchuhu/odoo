@@ -52,14 +52,16 @@ def minimized(path, data):
     if path.startswith('/marketplace/items/'):
         def attrs(values):
             return [{k: value.get(k) for k in ('id', 'name', 'value_id', 'value_name')} for value in values] if isinstance(values, list) else None
-        result = {k: data.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'thumbnail', 'seller_custom_field')}
+        result = {k: data.get(k) for k in ('id', 'seller_id', 'site_id', 'title', 'available_quantity', 'thumbnail', 'seller_custom_field', 'cbt_item_id', 'tags', 'catalog_listing', 'user_product_id')}
+        mappings=data.get('marketplace_items')
+        result['marketplace_items']=[{k:m.get(k) for k in ('item_id','site_id','user_id','logistic_type','parent_id','parent_user_id','user_product_id','siteless_user_product_id')} if isinstance(m,dict) else None for m in mappings] if isinstance(mappings,list) else None
         pictures = data.get('pictures')
         result['pictures'] = [{k: picture[k] for k in ('id', 'secure_url', 'url') if k in picture}
                               if isinstance(picture, dict) else None
                               for picture in pictures] if isinstance(pictures, list) else None
         result['attributes'] = attrs(data.get('attributes'))
         variations = data.get('variations')
-        result['variations'] = [dict(id=v.get('id'), available_quantity=v.get('available_quantity'), attributes=attrs(v.get('attributes', [])), attribute_combinations=attrs(v.get('attribute_combinations', []))) for v in variations] if isinstance(variations, list) else None
+        result['variations'] = [dict(id=v.get('id'), available_quantity=v.get('available_quantity'), picture_ids=v.get('picture_ids'), attributes=attrs(v.get('attributes', [])), attribute_combinations=attrs(v.get('attribute_combinations', []))) for v in variations] if isinstance(variations, list) else None
         return result
     raise ValueError('Unsupported checkpoint resource')
 

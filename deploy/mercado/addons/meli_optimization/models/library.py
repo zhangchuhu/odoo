@@ -363,6 +363,40 @@ class CollectionWorkbench(models.Model):
     qc_revision = fields.Integer(default=0, readonly=True)
 
     @api.model
+    def workbench_regenerate_expired_image(self, case_id, task_id, expected_epoch):
+        case = self._wb_case(case_id, True)
+        if type(task_id) is not int or type(expected_epoch) is not int or expected_epoch < 1:
+            raise ValidationError('任务或租约版本无效')
+        task = self.env[PREFIX + 'task'].browse(task_id).exists()
+        if not task or task.case_id != case:
+            raise ValidationError('任务不属于当前商品')
+        task._authorize('editor')
+        case._lock()
+        task._lock()
+        events = self.env[PREFIX + 'event'].sudo()
+        key = 'expired-image-regenerate:%s' % expected_epoch
+        prior = events.search([('task_id', '=', task.id), ('submission_key', '=', key)], limit=1)
+        if prior:
+            return dict(prior.receipt)
+        if (task.task_type != 'image.generate' or task.state != 'running'
+                or task.lease_epoch != expected_epoch or not task.lease_expires_at
+                or task.lease_expires_at > fields.Datetime.now()
+                or task.snapshot_id != self._wb_snapshot(case) or case.collection_archived):
+            raise ValidationError('任务、快照或租约状态已变化，请刷新')
+        task._set({'state':'waiting', 'lease_token':False, 'lease_expires_at':False, 'worker_uid':False})
+        if task._unresolved_requests():
+            receipt = task.retry_unknown_task()
+        else:
+            task._transition('queued')
+            task._set({'status_detail':None})
+            receipt = {'task_id':task.id, 'source_task_id':task.id, 'state':'queued'}
+        payload = {'epoch':expected_epoch, 'actor_id':self.env.uid, 'accepted_duplicate_results':True}
+        events._append({'task_id':task.id, 'company_id':task.company_id.id, 'submission_key':key,
+            'digest':canonical_hash(payload), 'kind':'expired_image_regenerate', 'payload':payload,
+            'receipt':receipt, 'worker_uid':self.env.uid})
+        return receipt
+
+    @api.model
     def workbench_image_review_decide(self, case_id, task_id, action, review_seq, candidate_sha256, report_hash, note, intent_id):
         case = self._wb_case(case_id, True)
         task = self.env[PREFIX + 'task'].browse(int(task_id)).exists()
@@ -681,6 +715,8 @@ class CollectionWorkbench(models.Model):
     @api.model
     def workbench_snapshot_source_image(self, case_id, data, mime_type, expected_revision):
         case = self._wb_case(case_id, True)
+        if case.variant_identity:
+            raise ValidationError('变体商品原图必须从平台验证并同步')
         case._lock()
         if type(expected_revision) is not int or expected_revision != case.revision:
             raise ValidationError('商品快照已改变，请刷新后重试')

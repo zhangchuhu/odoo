@@ -9,6 +9,66 @@ from odoo.exceptions import AccessError, ValidationError
 
 @tagged('post_install', '-at_install')
 class OptimizationQueueCase(TransactionCase):
+    def test_image_skip_requires_resolved_request_and_is_idempotent(self):
+        ui = self.env['meli.optimization.case']
+        detail = ui.workbench_create({'shop':'test','item_id':'SKIP-IMAGE','title':'Test'})
+        case = ui.browse(detail['id'])
+        snapshot = self.env['meli.optimization.snapshot'].browse(detail['snapshot']['id'])
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snapshot.id,'task_type':'product.facts',
+            'payload':{'schema_version':'1','product_snapshot_id':str(snapshot.id)}})
+        task._set({'task_type':'image.generate'})
+        claim = task.claim(['image.generate'])
+        token, epoch = claim['lease_token'], claim['lease_epoch']
+        task.checkpoint(token, epoch, 'intent', {'request_id':'skip-test','state':'unknown'})
+        from ..domain import canonical_hash
+        data = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        image = self.env['meli.optimization.artifact'].create({'case_id':case.id,'data':base64.b64encode(data),'mime_type':'image/png','digest':hashlib.sha256(data).hexdigest()})
+        plan_payload = {'case_id':case.id,'snapshot_id':snapshot.id,'source_artifact_ids':[str(image.id)],'target_artifact_ids':[str(image.id)]}
+        plan = self.env['meli.optimization.artifact'].create({'case_id':case.id,'mime_type':'application/json','payload':plan_payload,'digest':canonical_hash(plan_payload)})
+        task._set({'payload':{'schema_version':'1','generation_plan_id':str(plan.id),'target_artifact_id':str(image.id),'source_artifact_ids':[str(image.id)]}})
+        evidence={'input_hash':canonical_hash(task.payload), 'snapshot_id':snapshot.id, 'generation_plan_id':str(plan.id),
+                  'target_artifact_id':str(image.id),'source_artifact_ids':[str(image.id)],'artifact_digests':{str(image.id):image.digest},
+                  'regions':[{'index':0,'decision':'unsupported','source_ids':[],'detail':'No back view'}],'texts':[]}
+        body = {'code':'reference_insufficient','message':'缺少背面参考图','request_id':'skip-test','evidence':evidence}
+        with self.assertRaises(ValidationError):
+            task.skip(token, epoch, 'skip', body)
+        task.checkpoint(token, epoch, 'no-dispatch', {'request_id':'skip-test','state':'failed'})
+        with self.assertRaises(ValidationError):
+            task.skip(token, epoch, 'wrong-scope', dict(body, evidence=dict(evidence, snapshot_id=snapshot.id+1)))
+        with self.assertRaises(ValidationError):
+            task.skip(token, epoch, 'wrong-image', dict(body, evidence=dict(evidence, artifact_digests={str(image.id):'0'*64})))
+        receipt = task.skip(token, epoch, 'skip', body)
+        self.assertEqual(receipt['state'], 'skipped')
+        self.assertEqual(task.skip(token, epoch, 'skip', body), receipt)
+        self.assertFalse(task.lease_token)
+        self.assertFalse(task.lease_expires_at)
+
+    def test_expired_image_regeneration_is_fenced_and_idempotent(self):
+        ui = self.env['meli.optimization.case']
+        detail = ui.workbench_create({'shop':'test','item_id':'RETRY-IMAGE','title':'Test'})
+        case = ui.browse(detail['id']); snap = self.env['meli.optimization.snapshot'].browse(detail['snapshot']['id'])
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts',
+            'payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        task._set({'task_type':'image.generate'})
+        claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        task.checkpoint(token,epoch,'intent',{'request_id':'old-image','state':'unknown'})
+        with self.assertRaises(ValidationError): ui.workbench_regenerate_expired_image(case.id,task.id,epoch)
+        task._set({'lease_expires_at':fields.Datetime.now()-timedelta(seconds=1)})
+        with self.assertRaises(ValidationError): ui.workbench_regenerate_expired_image(case.id,task.id,epoch+1)
+        receipt=ui.workbench_regenerate_expired_image(case.id,task.id,epoch)
+        self.assertEqual(receipt['state'],'queued')
+        self.assertEqual(ui.workbench_regenerate_expired_image(case.id,task.id,epoch),receipt)
+        self.assertTrue(task.request_ids.filtered(lambda r:r.request_id=='old-image').retry_superseded)
+        self.assertEqual(task.state,'queued')
+        with self.assertRaises(ValidationError): task.checkpoint(token,epoch,'old-result',{'request_id':'old-image','state':'succeeded'})
+        other = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts',
+            'payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        other._set({'task_type':'image.generate'})
+        claim2=other.claim(['image.generate'])
+        other._set({'lease_expires_at':fields.Datetime.now()-timedelta(seconds=1)})
+        self.assertEqual(ui.workbench_regenerate_expired_image(case.id,other.id,claim2['lease_epoch'])['state'],'queued')
+        self.assertEqual(other.state,'queued')
+
     def test_review_decision_is_bound_audited_and_idempotent(self):
         from ..domain import canonical_hash
         ui = self.env['meli.optimization.case']

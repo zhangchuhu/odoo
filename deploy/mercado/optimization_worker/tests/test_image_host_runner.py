@@ -3,6 +3,26 @@ from unittest.mock import patch
 from optimization_worker import image_host
 
 class ImageHostRunnerTest(unittest.TestCase):
+    def test_codex_usage_limit_is_distinguished_from_rate_limit(self):
+        self.assertEqual(image_host.codex_error('You’ve hit your usage limit.')[0], 'codex_usage_limit')
+    def test_failed_codex_reports_sanitized_error_and_exit(self):
+        import tempfile, io, json
+        from types import SimpleNamespace
+        class Store:
+            path='/tmp/image-host-test.sqlite'
+            def next(self, **kw): return {'action':'select_references','request_id':'r-1'}
+            def inspect(self, request): return {'state':'planning'}
+            def mark_interrupted_text(self, kinds): pass
+        def runner(args, **kw):
+            kw['stderr'].write(b'ERROR: 401 Unauthorized secret-token-value')
+            return SimpleNamespace(returncode=1)
+        out=io.StringIO()
+        with tempfile.TemporaryDirectory() as home, patch.dict('os.environ', {'OPTIMIZATION_CODEX_HOME':home}), patch.object(image_host,'synchronize_live'), patch.object(image_host,'fence'), patch('sys.stdout',out):
+            self.assertEqual(image_host.run_one(Store(),SimpleNamespace(base_url='http://localhost',_api_key='secret-token-value'),'j',runner=runner),'unknown')
+        events=[json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(events[-1]['code'],'codex_auth_failed')
+        self.assertEqual(events[-1]['exit_code'],1)
+        self.assertNotIn('secret-token-value',out.getvalue())
     def test_waiting_action_never_runs_codex(self):
         class Store:
             def next(self, **kw): return {'action':'waiting'}

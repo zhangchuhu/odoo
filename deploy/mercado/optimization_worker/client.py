@@ -125,7 +125,7 @@ class Client:
                             {'lease_token': claim['lease_token'], 'lease_epoch': claim['lease_epoch'], 'evidence': evidence})
 
     def submit(self, claim, operation, envelope):
-        if operation not in ('checkpoint', 'complete', 'wait', 'fail'):
+        if operation not in ('checkpoint', 'complete', 'wait', 'fail', 'skip'):
             raise ValueError('Invalid submission operation')
         return self.request('POST', '/internal/meli-optimization/tasks/%s/%s' % (claim['id'], operation), envelope)
 

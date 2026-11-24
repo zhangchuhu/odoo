@@ -262,6 +262,10 @@ class OptimizationAPI(http.Controller):
     def wait(self, task_id):
         return self._submission(task_id, 'wait')
 
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/skip', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def skip(self, task_id):
+        return self._submission(task_id, 'skip')
+
     @http.route('/api/meli/optimization/tasks/<int:task_id>/resume', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def resume(self, task_id):
         def run():
@@ -287,6 +291,6 @@ class OptimizationAPI(http.Controller):
         def run():
             data = body()
             task = record('task', task_id)
-            method = {'complete': task.complete, 'checkpoint': task.checkpoint, 'fail': task.fail, 'wait': task.wait}[kind]
+            method = {'complete': task.complete, 'checkpoint': task.checkpoint, 'fail': task.fail, 'wait': task.wait, 'skip': task.skip}[kind]
             return reply(method(data['lease_token'], data['lease_epoch'], data['submission_key'], data['body']))
         return operation(run)

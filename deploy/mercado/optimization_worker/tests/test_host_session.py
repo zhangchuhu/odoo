@@ -29,6 +29,19 @@ def caps():
 
 
 class HostSessionTests(unittest.TestCase):
+    def test_ordinary_back_view_requires_evidence_assessment_before_dispatch(self):
+        self.store.enqueue('request-1', 'image.generate', self.payload, self.context)
+        action=self.store.next()
+        plan={'selected_reference_ids':['2'],'garment_facts':{'required':['garment_type:dress'],'forbidden':[]},
+              'classification':'back','source_evidence':[{'source_id':'2','angle':'front','roles':['model'],'information_score':90}],
+              'garment_instances':['dress'],'viewed_digests':action['input_digests']}
+        self.store.plan('request-1',plan)
+        action=self.store.next()
+        self.assertTrue(action['adaptation_required'])
+        self.store.adaptation('request-1', {'viewed_digests':action['input_digests'], 'texts':[], 'regions':[
+            {'index':0,'decision':'unsupported','source_ids':[],'detail':'Missing back view'}]})
+        self.store.plan('request-1',plan)
+        self.assertEqual(self.store.inspect('request-1')['state'],'skipped')
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -36,7 +49,7 @@ class HostSessionTests(unittest.TestCase):
         self.store = hs.SessionStore(self.root / 'host.sqlite', 'identity')
         self.payload = {'schema_version': '1', 'source_artifact_ids': ['2'],
                         'target_artifact_id': '1', 'generation_plan_id': '3'}
-        self.context = {'snapshot': {'case_id': 12, 'company_id': 1, 'payload': {'title': 'Dress red'}}, 'artifacts': {
+        self.context = {'snapshot': {'snapshot_id': 15, 'case_id': 12, 'company_id': 1, 'payload': {'title': 'Dress red'}}, 'artifacts': {
             str(i): {'digest': hashlib.sha256(png()).hexdigest(), 'data': base64.b64encode(png()).decode(),
                      'mime_type': 'image/png'} for i in (1, 2)}}
         self.context['artifacts']['3'] = {'payload': {'operation': 'garment_swap'}, 'digest': canonical_hash({'operation': 'garment_swap'})}
@@ -48,6 +61,10 @@ class HostSessionTests(unittest.TestCase):
         plan = {'selected_reference_ids': ['2'], 'target_color':'red', 'garment_facts': {'required':['garment_type:dress'], 'forbidden':[]},
                 'classification': 'front', 'source_evidence':[{'source_id':'2','angle':'front','roles':['model'],'information_score':90,'observed_color':'red'}],
                 'garment_instances':['dress'], 'viewed_digests': action['input_digests']}
+        self.store.plan('request-1', plan)
+        action = self.store.next()
+        self.store.adaptation('request-1', {'viewed_digests':action['input_digests'], 'texts':[], 'regions':[
+            {'index':0,'decision':'direct','source_ids':['2'],'detail':'Front view visible'}]})
         self.store.plan('request-1', plan)
         return self.store.next()
 
@@ -64,6 +81,10 @@ class HostSessionTests(unittest.TestCase):
         self.store.enqueue('request-1', 'image.generate', self.payload, self.context)
         action = self.store.next()
         plan = {'selected_reference_ids':['2'], 'garment_facts':{'required':['garment_type:dress'],'forbidden':[]}, 'classification':'front', 'source_evidence':[{'source_id':'2','angle':'front','roles':['model'],'information_score':90}], 'garment_instances':['dress'], 'viewed_digests':action['input_digests']}
+        self.store.plan('request-1', plan)
+        action = self.store.next()
+        self.store.adaptation('request-1', {'viewed_digests':action['input_digests'], 'texts':[], 'regions':[
+            {'index':0,'decision':'direct','source_ids':['2'],'detail':'Front view visible'}]})
         self.store.plan('request-1', plan)
         self.assertEqual(self.store.inspect('request-1')['state'], 'prepared')
 

@@ -14,4 +14,5 @@
 <record id="rule_confirmation" model="ir.rule"><field name="name">Optimization company: confirmation</field><field name="model_id" ref="model_meli_optimization_confirmation"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 <record id="rule_library" model="ir.rule"><field name="name">Optimization company: library</field><field name="model_id" ref="model_meli_optimization_library"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 <record id="rule_screening" model="ir.rule"><field name="name">Optimization company: screening</field><field name="model_id" ref="model_meli_optimization_screening"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
+<record id="rule_image_publication" model="ir.rule"><field name="name">Optimization company: image publication</field><field name="model_id" ref="model_meli_optimization_image_publication"/><field name="domain_force">[('company_id', 'in', company_ids)]</field></record>
 </odoo>

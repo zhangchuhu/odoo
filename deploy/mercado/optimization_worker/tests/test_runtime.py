@@ -35,6 +35,50 @@ class Provider:
             raise self.error
         return copy.deepcopy(self.output)
 
+class SkipRuntimeTest(unittest.TestCase):
+    def test_skipped_request_is_checkpointed_then_ends_lease(self):
+        from unittest.mock import Mock
+        from optimization_worker.host_session import SessionSkipped
+        from optimization_worker.journal import Journal
+        class Skipper:
+            durable_session = True
+            def run(self, *args):
+                raise SessionSkipped('缺少背面参考图', {'input_hash':'a'*64})
+        client = Mock(identity='fixture', timeout=1)
+        client.submit.side_effect = lambda claim, op, env: {'state': 'skipped' if op == 'skip' else 'running'}
+        claim = {'id':256, 'task_type':'image.generate', 'payload':{}, 'lease_token':'token',
+                 'lease_epoch':1, 'heartbeat_seconds':30}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'journal.sqlite'
+            journal = Journal(path, client.identity)
+            record = {'claim':claim, 'request_id':'req', 'phase':'host_pending', 'sequence':1, 'context':{}}
+            journal.save(record)
+            result = Worker(client, path, providers={'image.generate':Skipper()}, capabilities=('image.generate',))._run(journal, record)
+            self.assertEqual(result, 'skipped')
+            self.assertEqual([c.args[1] for c in client.submit.call_args_list], ['checkpoint', 'skip'])
+            self.assertTrue(record['done'])
+            self.assertEqual(journal.active(), [])
+            journal.close()
+
+    def test_skipped_task_allows_next_claim_without_renewing_old_lease(self):
+        from unittest.mock import Mock, patch
+        from optimization_worker.journal import Journal
+        client = Mock(identity='fixture', timeout=1)
+        next_claim={'id':257,'task_type':'image.generate','payload':{},'input_hash':'b',
+                    'lease_token':'new','lease_epoch':1,'heartbeat_seconds':30}
+        client.claim.return_value=next_claim
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'journal.sqlite'
+            journal=Journal(path,client.identity)
+            journal.save({'claim':{'id':256,'task_type':'image.generate','input_hash':'a','lease_epoch':1},
+                          'request_id':'old','phase':'terminal_checkpoint','done':True,'outcome':'skipped'})
+            journal.close()
+            worker=Worker(client,path,capabilities=('image.generate',))
+            with patch.object(worker,'_run',return_value='host_pending') as run:
+                self.assertEqual(worker.once(),'host_pending')
+            self.assertEqual(run.call_args.args[1]['claim']['id'],257)
+            client.heartbeat.assert_not_called()
+
 class SingleActiveResearchTest(unittest.TestCase):
     def test_resumes_waiting_request_before_claiming_more_work(self):
         from unittest.mock import Mock, patch

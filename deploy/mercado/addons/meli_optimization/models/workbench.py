@@ -171,9 +171,11 @@ class OperationsWorkbench(models.Model):
         proposals = self.env[PREFIX + 'proposal'].search([('case_id', '=', case.id)], order='id desc')
         confirmations = self.env[PREFIX + 'confirmation'].search([('proposal_id', 'in', proposals.ids)])
         return {'id': case.id, 'name': case.name, 'revision': case.revision, 'batch': case.batch_id.name,
+            'shop_id':case.shop_id.id or False, 'variant_scoped':bool(case.variant_identity),
             'collection': case.collection, 'collection_started': bool(case.collection and snap and case.collection_started_snapshot_id == snap), 'snapshot': {'id': snap.id, 'payload': snap.payload, 'digest': snap.digest, 'source_images': self._wb_source_images(case, snap)} if snap else None,
             'retry_events': self.env[PREFIX + 'event'].search_read([('task_id', 'in', tasks.ids), ('kind', '=', 'unknown_research_retry')], ['kind', 'task_id', 'receipt'], order='id asc'),
             'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state,
+                'lease_epoch': t.lease_epoch,
                 'lease_expired': bool(t.state == 'running' and t.lease_expires_at and t.lease_expires_at <= fields.Datetime.now()),
                 'snapshot_id': t.snapshot_id.id, 'result': t.result,
                 'generation_plan_id': t.payload.get('generation_plan_id') if t.task_type == 'image.generate' else False,
@@ -220,6 +222,8 @@ class OperationsWorkbench(models.Model):
     @api.model
     def workbench_snapshot(self, case_id, values):
         case = self._wb_case(case_id, True)
+        if case.variant_identity:
+            raise ValidationError('变体商品请通过平台同步更新快照')
         self.env[PREFIX + 'snapshot'].create({'case_id': case.id, 'payload': self._wb_product(values)})
         return self.workbench_detail(case.id)
 
@@ -333,13 +337,67 @@ class OperationsWorkbench(models.Model):
         return {'id': proposal.id, 'digest': proposal.digest, 'payload': payload}
 
     @api.model
+    def workbench_image_plan_propose(self, case_id, plan_id, task_ids):
+        case = self._wb_case(case_id, True)
+        case._lock()
+        if type(plan_id) is not int or plan_id <= 0 or not isinstance(task_ids, list) or not task_ids or any(type(i) is not int or i <= 0 for i in task_ids) or len(set(task_ids)) != len(task_ids):
+            raise ValidationError('请选择有效且不重复的图片任务')
+        tasks = self.env[PREFIX + 'task'].browse(task_ids).exists()
+        if len(tasks) != len(task_ids):
+            raise ValidationError('图片任务不存在')
+        payload = {'action': 'images', 'generation_plan_id': plan_id, 'snapshot_id': self._wb_snapshot(case).id,
+                   'task_ids': task_ids, 'result_hashes': [canonical_hash(t.result) for t in tasks],
+                   'desired_value': [t.result.get('image') if isinstance(t.result, dict) else None for t in tasks],
+                   'quality_resolutions': [(t.result.get('visual_qc') or {}).get('status', 'passed') for t in tasks],
+                   'before_value': self._wb_snapshot(case).payload.get('image_url'),
+                   'scope': self._wb_snapshot(case).payload.get('item_id'), 'execution_available': False}
+        case._validate_image_plan_proposal(payload)
+        bounded(payload)
+        proposal = self.env[PREFIX + 'proposal'].create({'case_id': case.id, 'payload': payload})
+        return {'id': proposal.id, 'digest': proposal.digest, 'payload': payload}
+
+    def _validate_image_plan_proposal(self, payload):
+        self.ensure_one()
+        ids, hashes, images = payload.get('task_ids'), payload.get('result_hashes'), payload.get('desired_value')
+        resolutions = payload.get('quality_resolutions')
+        plan_id = payload.get('generation_plan_id')
+        if (type(plan_id) is not int or plan_id <= 0 or not isinstance(ids, list) or not ids
+                or any(type(i) is not int or i <= 0 for i in ids) or len(set(ids)) != len(ids)
+                or not isinstance(hashes, list) or not isinstance(images, list) or not isinstance(resolutions, list)
+                or len(ids) != len(hashes) or len(ids) != len(images) or len(ids) != len(resolutions)):
+            raise ValidationError('图片方案来源无效')
+        plan = self.env[PREFIX + 'artifact'].browse(plan_id).exists()
+        data = plan.payload if plan else None
+        snap = self._wb_snapshot(self)
+        if (not plan or plan.case_id != self or plan.company_id != self.company_id or not isinstance(data, dict)
+                or plan.digest != canonical_hash(data) or data.get('operation') != 'garment_swap'
+                or data.get('case_id') != self.id or data.get('snapshot_id') != snap.id or payload.get('snapshot_id') != snap.id
+                or not isinstance(data.get('target_artifact_ids'), list)):
+            raise ValidationError('生成计划或商品快照已失效')
+        targets = set()
+        for task_id, result_hash, image, resolution in zip(ids, hashes, images, resolutions):
+            task = self.env[PREFIX + 'task'].browse(task_id).exists()
+            if (not task or task.task_type != 'image.generate' or task.case_id != self or task.company_id != self.company_id
+                    or task.snapshot_id != snap or str(task.payload.get('generation_plan_id')) != str(plan_id)
+                    or canonical_hash(task.result) != result_hash or not isinstance(image, dict)
+                    or resolution != (task.result.get('visual_qc') or {}).get('status', 'passed')):
+                raise ValidationError('图片任务、计划或结果已变化')
+            target = str(task.payload.get('target_artifact_id') or '')
+            if not target or target in targets or target not in [str(x) for x in data['target_artifact_ids']]:
+                raise ValidationError('目标构图不存在或重复')
+            targets.add(target)
+            self._require_passed_image_qc(task, [image])
+
+    @api.model
     def workbench_confirm(self, case_id, proposal_id, digest):
         case = self._wb_case(case_id, True)
         proposal = self.env[PREFIX + 'proposal'].browse(int(proposal_id)).exists()
         proposal._authorize()
         if not proposal or proposal.case_id != case:
             raise ValidationError('方案不属于当前商品')
-        if proposal.payload.get('action') == 'images':
+        if proposal.payload.get('action') == 'images' and proposal.payload.get('task_ids'):
+            case._validate_image_plan_proposal(proposal.payload)
+        elif proposal.payload.get('action') == 'images':
             task = self.env[PREFIX + 'task'].browse(int(proposal.payload.get('task_id') or 0)).exists()
             if not task or task.case_id != case or task.snapshot_id != case._wb_snapshot(case) or task.task_type != 'image.generate' or canonical_hash(task.result) != proposal.payload.get('result_hash'):
                 raise ValidationError('图片方案已过期或来源无效')
@@ -390,7 +448,9 @@ class ImageProposalConfirmation(models.Model):
             self.case_id._bump_qc_revision()
         self.case_id._lock()
         payload = self.payload or {}
-        if payload.get('action') == 'images':
+        if payload.get('action') == 'images' and payload.get('task_ids'):
+            self.case_id._validate_image_plan_proposal(payload)
+        elif payload.get('action') == 'images':
             ref = payload.get('task_id')
             task = self.env[PREFIX + 'task'].browse(int(ref)).exists() if str(ref or '').isdigit() else self.env[PREFIX + 'task']
             if (not task or task.case_id != self.case_id or task.snapshot_id != self.case_id._wb_snapshot(self.case_id)

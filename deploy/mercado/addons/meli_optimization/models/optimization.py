@@ -170,7 +170,7 @@ class Task(models.Model):
     snapshot_id = fields.Many2one(PREFIX + 'snapshot', required=True, ondelete='restrict')
     task_type = fields.Char(required=True, index=True)
     payload = ExactJson(required=True)
-    state = fields.Selection([(s, s) for s in ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')], default='queued', required=True, index=True)
+    state = fields.Selection([(s, s) for s in ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled', 'skipped')], default='queued', required=True, index=True)
     dependency_ids = fields.Many2many(PREFIX + 'task', 'meli_opt_task_dependency', 'task_id', 'dependency_id')
     lease_token = fields.Char(readonly=True)
     lease_epoch = fields.Integer(default=0, readonly=True)
@@ -735,6 +735,42 @@ class Task(models.Model):
                     raise ValidationError('生成图片产物归属、摘要或类型不匹配')
             self._transition('succeeded')
             self._set({'result': body, 'status_detail': None})
+        elif kind == 'skip':
+            if (self.task_type != 'image.generate' or not isinstance(body, dict)
+                    or set(body) != {'code', 'message', 'request_id', 'evidence'}
+                    or body['code'] != 'reference_insufficient'
+                    or not isinstance(body['message'], str) or not body['message'].strip() or len(body['message']) > 4096
+                    or not isinstance(body['request_id'], str) or not body['request_id'] or len(body['request_id']) > 200):
+                raise ValidationError('Invalid image skip report')
+            evidence = body['evidence']
+            fields_required = {'input_hash','snapshot_id','generation_plan_id','target_artifact_id','source_artifact_ids','artifact_digests','regions','texts'}
+            if (not isinstance(evidence, dict) or set(evidence) != fields_required
+                    or evidence['input_hash'] != canonical_hash(self.payload) or evidence['snapshot_id'] != self.snapshot_id.id
+                    or any(evidence[k] != self.payload.get(k) for k in ('generation_plan_id','target_artifact_id','source_artifact_ids'))
+                    or not isinstance(evidence['regions'], list) or not isinstance(evidence['texts'], list)
+                    or not any(isinstance(x, dict) and x.get('decision') == 'unsupported' for x in evidence['regions'] + evidence['texts'])):
+                raise ValidationError('Skip evidence does not match the task inputs')
+            refs = [evidence['target_artifact_id']] + evidence['source_artifact_ids']
+            digests = evidence['artifact_digests']
+            if (not isinstance(digests, dict) or set(digests) != set(refs)
+                    or any(not isinstance(ref, str) or not ref.isdigit() for ref in refs)):
+                raise ValidationError('Skip evidence has invalid image references')
+            artifacts = self.env[PREFIX + 'artifact'].sudo().browse([int(ref) for ref in set(refs)]).exists()
+            if (len(artifacts) != len(set(refs)) or any(a.case_id != self.case_id or a.company_id != self.company_id
+                    or not a.data or digests[str(a.id)] != a.digest for a in artifacts)):
+                raise ValidationError('Skip evidence image digest or scope mismatch')
+            plan_ref = evidence['generation_plan_id']
+            plan = self.env[PREFIX + 'artifact'].sudo().browse(int(plan_ref)).exists() if isinstance(plan_ref, str) and plan_ref.isdigit() else self.env[PREFIX + 'artifact']
+            if (not plan or plan.case_id != self.case_id or plan.company_id != self.company_id
+                    or not isinstance(plan.payload, dict) or plan.payload.get('snapshot_id') != self.snapshot_id.id
+                    or evidence['target_artifact_id'] not in plan.payload.get('target_artifact_ids', [])
+                    or evidence['source_artifact_ids'] != plan.payload.get('source_artifact_ids')):
+                raise ValidationError('Skip evidence plan or snapshot mismatch')
+            request_record = self.request_ids.filtered(lambda r: r.request_id == body['request_id'] and r.state == 'failed' and not r.retry_superseded)
+            if len(request_record) != 1 or self._unresolved_requests():
+                raise ValidationError('A resolved original request is required before skipping')
+            self._transition('skipped')
+            self._set({'status_detail': body})
         elif kind in ('fail', 'wait'):
             if (not isinstance(body, dict) or set(body) != {'code', 'message'}
                     or any(not isinstance(body[k], str) or not body[k].strip() for k in ('code', 'message'))
@@ -786,6 +822,9 @@ class Task(models.Model):
 
     def wait(self, token, epoch, key, body):
         return self._submit(token, epoch, key, body, 'wait')
+
+    def skip(self, token, epoch, key, body):
+        return self._submit(token, epoch, key, body, 'skip')
 
     def _unresolved_requests(self):
         return self.env[PREFIX + 'external.request'].search_count([

@@ -42,11 +42,45 @@ export function moveSelection(selection, index, delta) {
     return copy;
 }
 
+// Frozen library indices, not task IDs or completion times, determine the initial order.
+export function imagePlanRows(plan, tasks) {
+    const indices = plan?.selected_indices, targets = plan?.target_artifact_ids;
+    if (!Array.isArray(indices) || !Array.isArray(targets) || !indices.length || indices.length !== targets.length
+        || indices.some(i => !Number.isSafeInteger(i) || i < 0) || new Set(indices).size !== indices.length
+        || targets.some(id => typeof id !== 'string' || !id) || new Set(targets).size !== targets.length) return null;
+    return indices.map((libraryIndex, i) => {
+        const targetId = targets[i];
+        const matches = (tasks || []).filter(t => String(t.target_artifact_id) === targetId && t.snapshot_id === plan.snapshot_id);
+        const task = matches.sort((a,b) => b.id - a.id).find(t => t.state === 'succeeded') || matches[0] || null;
+        return {libraryIndex, targetId, task};
+    }).sort((a,b) => a.libraryIndex - b.libraryIndex);
+}
+
+export function imagePlanGroups(tasks, artifacts, snapshotId) {
+    return groupImageTasks((tasks || []).filter(t => t.task_type === 'image.generate' && t.snapshot_id === snapshotId))
+        .filter(group => group.isImage)
+        .map(group => {
+            const planId = group.tasks[0].generation_plan_id;
+            const artifact = (artifacts || []).find(a => String(a.id) === String(planId));
+            const payload = artifact?.payload;
+            const rows = payload?.operation === 'garment_swap' && payload.snapshot_id === snapshotId
+                ? imagePlanRows(payload, group.tasks) : null;
+            const selected = rows ? rows.map(row => row.task) : group.tasks;
+            const total = selected.length;
+            const completed = selected.filter(t => t?.state === 'succeeded').length;
+            const skipped = selected.filter(t => t?.state === 'skipped').length;
+            const failed = selected.filter(t => ['failed','cancelled'].includes(t?.state)).length;
+            const done = completed + skipped + failed;
+            const summary = done < total ? '处理中' : failed ? '部分失败' : completed ? '已完成' : '已结束，无可用图片';
+            return {...group, planId, rows, total, completed, skipped, failed, done, summary};
+        });
+}
+
 // Facts are observations from a completed task, never inferred from today's snapshot.
 const factLabels = {
     shop:'店铺',site_id:'站点',item_id:'商品 ID',id:'ID',title:'原标题',
     seller_sku:'SKU',seller_custom_field:'卖家 SKU',available_quantity:'库存',
-    sales_units:'窗口销量',value_status:'数据状态',source:'来源',variations:'SKU 明细',
+    sales_units:'窗口销量',sales_scope:'销量范围',value_status:'数据状态',source:'来源',variations:'SKU 明细',
     sku_size_evidence:'SKU / 尺码库存证据',sku_id:'SKU ID',size:'尺码',
     attribute_combinations:'规格',value_name:'显示值',value_id:'值 ID',
     screening_criteria:'筛选条件',observed_at:'采集时间',start:'开始',end:'结束',
@@ -67,7 +101,7 @@ export function factValueRows(value) {
             if (!entries.length) { rows.push({path,value:Array.isArray(item)?'空列表':'空记录'}); return; }
             for (const [key, child] of entries) walk(child,[path,factLabel(key)].filter(Boolean).join(' · '),depth+1);
         } else {
-            rows.push({path,value:displayValue(item)});
+            rows.push({path,value:path === '销量范围' && item === 'product' ? '商品总销量' : displayValue(item)});
         }
     };
     walk(value,'',0);
@@ -83,7 +117,7 @@ export function productFactsView(detail) {
         const result = task.result || {};
         const evidence = Array.isArray(result.evidence) ? result.evidence : [];
         const facts=(Array.isArray(result.facts) ? result.facts : []).filter(f=>typeof f.name==='string' && !confidentialFact(f.name)).map(f=>({
-                name:factLabel(f.name), category:f.category === 'visual' ? 'visual' : 'known', rows:factValueRows(f.value),
+                name:factLabel(f.name), category:f.category === 'visual' ? 'visual' : 'known', rows:factValueRows(f.name === 'sales_scope' && f.value === 'product' ? '商品总销量' : f.value),
                 evidence:(Array.isArray(f.evidence_ids)?f.evidence_ids:[]).map(id=>{
                     const e=evidence.find(e=>e.id===id);
                     return {id,source:e?.source || '来源缺失',observed_at:e?.observed_at || '时间未知'};
@@ -128,8 +162,16 @@ export function groupImageTasks(tasks) {
     }
     for (const group of groups) {
         if (group.isImage) group.tasks.sort((a,b) => a.id - b.id);
-        group.total = group.tasks.length;
-        group.completed = group.tasks.filter(task => task.state === 'succeeded').length;
+        const current = new Map();
+        for (const task of group.tasks) {
+            const key = group.isImage && task.target_artifact_id ? String(task.target_artifact_id) : `task:${task.id}`;
+            const old = current.get(key);
+            if (!old || task.state === 'succeeded' || old.state !== 'succeeded') current.set(key, task);
+        }
+        const counted = [...current.values()];
+        group.total = counted.length;
+        group.completed = counted.filter(task => task.state === 'succeeded').length;
+        group.skipped = counted.filter(task => task.state === 'skipped').length;
     }
     return groups;
 }
