@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .keyword_worker_service import ServiceLock, codex_ready
@@ -17,6 +18,22 @@ from .client import Client
 from .research_service import UnknownRetryPoll
 from .research_launchd import _private_source
 
+def image_error_event(stage, exc, *, task_id=None, epoch=None):
+    from .client import APIError
+    return {'at': datetime.now(timezone.utc).isoformat(), 'stage': stage,
+            'code': 'odoo_request_failed' if isinstance(exc, APIError) else 'worker_error',
+            'http_status': exc.status if isinstance(exc, APIError) else None,
+            'task_id': task_id, 'lease_epoch': epoch, 'exception_type': type(exc).__name__}
+
+def image_diagnostic(stage, code, claim, exc):
+    messages = {'claim_succeeded': '任务领取成功', 'claim_error': '任务领取请求失败',
+                'lease_renewed': '任务租约续期成功', 'lease_rejected': '任务租约已失效或被拒绝',
+                'lease_renewal_error': '任务租约续期请求失败'}
+    print(json.dumps({'at': datetime.now(timezone.utc).isoformat(), 'stage': stage, 'code': code,
+        'task_id': claim.get('id') if claim else None, 'lease_epoch': claim.get('lease_epoch') if claim else None,
+        'http_status': getattr(exc, 'status', None), 'exception_type': type(exc).__name__ if exc else None,
+        'message': messages.get(code, '图片任务执行异常')},
+        ensure_ascii=False), flush=True)
 
 
 class HostBackoff:
@@ -50,7 +67,8 @@ def review_parked(store, record):
 def build_worker(client, journal, host):
     store = SessionStore(host, client.identity)
     return Worker(client, journal, providers={'image.generate': SessionProvider(store)},
-                  capabilities=('image.generate',), park=lambda record: review_parked(store, record))
+                  capabilities=('image.generate',), park=lambda record: review_parked(store, record),
+                  maintain_active_leases=True, diagnostic=image_diagnostic)
 
 
 def claim_loop(worker, stop, retry_poll=None, *, ready):
@@ -60,8 +78,17 @@ def claim_loop(worker, stop, retry_poll=None, *, ready):
                 retry_poll.tick()
             worker.once(allow_claim=ready())
         except Exception as exc:
-            print("image_claim_error", type(exc).__name__, flush=True)
+            print(json.dumps(image_error_event('claim_or_heartbeat', exc), ensure_ascii=False), flush=True)
         stop.wait(5)
+
+def start_claimant(worker, stop, retry_poll, probe):
+    ready = threading.Event()
+    thread = threading.Thread(target=claim_loop, args=(worker, stop, retry_poll),
+                              kwargs={'ready': ready.is_set}, daemon=True)
+    thread.start()
+    if probe():
+        ready.set()
+    return ready, thread
 
 def verify_image_tool(home, *, runner=subprocess.run):
     """Exercise native image generation and verify a fresh decodable PNG."""
@@ -149,16 +176,16 @@ def main():
         store = SessionStore(host, client.identity)
         recover_interrupted(store)
         worker = build_worker(client, journal, host)
-        ready = codex_ready() and verify_image_tool(Path(os.environ['OPTIMIZATION_CODEX_HOME']))
-        print('image_host_ready' if ready else 'waiting_for_image_host', flush=True)
-        thread = threading.Thread(target=claim_loop, args=(worker, stop, retry_poll),
-                                  kwargs={'ready': lambda: ready}, daemon=True)
-        thread.start()
+        # Resume existing leases immediately; the image capability probe can take
+        # several minutes and must only gate *new* claims, not renewals.
+        ready, thread = start_claimant(worker, stop, retry_poll,
+            lambda: codex_ready() and verify_image_tool(Path(os.environ['OPTIMIZATION_CODEX_HOME'])))
+        print('image_host_ready' if ready.is_set() else 'waiting_for_image_host', flush=True)
         backoff = HostBackoff()
         while not stop.wait(5):
             if not thread.is_alive():
                 raise RuntimeError('Image queue claimant stopped')
-            if ready and backoff.ready():
+            if ready.is_set() and backoff.ready():
                 backoff.record(safe_run_one(store, client, journal))
         thread.join(timeout=35)
 

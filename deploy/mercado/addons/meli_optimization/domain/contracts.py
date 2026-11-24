@@ -273,6 +273,30 @@ def validate_gallery(result):
     return result
 
 
+def validate_internal_image_qc(result, *, allow_legacy=False):
+    """Verify the host's pass marker refers to the exact result image."""
+    image = result.get('image') if isinstance(result, dict) else None
+    qc = result.get('visual_qc') if isinstance(result, dict) else None
+    _require(isinstance(image, dict) and _hash(image.get('sha256')), 'invalid_result', 'Invalid generated image digest')
+    if allow_legacy and isinstance(qc, dict) and 'status' not in qc:
+        checks = qc.get('checks')
+        names = {'garment_construction', 'color_material', 'garment_details', 'identity_pose',
+                 'accessories', 'scene_lighting_framing', 'text_layout'}
+        _require(isinstance(checks, list) and len(checks) == len(names)
+                 and all(isinstance(c, dict) and c.get('status') == 'passed' for c in checks)
+                 and {c.get('name') for c in checks} == names
+                 and isinstance(qc.get('skill_report'), dict) and qc['skill_report'].get('decision') == 'accept'
+                 and isinstance(qc.get('quality_binding'), dict)
+                 and qc['quality_binding'].get('candidate_sha256') == image['sha256'],
+                 'invalid_result', 'Legacy internal image QC missing or mismatched')
+        return result
+    _require(isinstance(qc, dict) and qc.get('status') in ('passed', 'manual_accepted') and isinstance(qc.get('report'), dict) and bool(qc['report'])
+             and qc.get('candidate_sha256') == image['sha256']
+             and (qc['status'] != 'manual_accepted' or _integer(qc.get('decision_event_id'), 1)),
+             'invalid_result', 'Internal image QC missing or mismatched')
+    return result
+
+
 def validate_result(task_type, result):
     _task(task_type)
     if task_type == 'title.generate':
@@ -297,6 +321,7 @@ def validate_result(task_type, result):
     elif task_type == 'image.generate':
         _require(_text(result.get('request_id')), 'invalid_result', 'Request identity required')
         _image(result.get('image'), ids)
+        validate_internal_image_qc(result)
     elif task_type == 'image.qc':
         _require(_text(result.get('image_artifact_id')), 'invalid_result', 'Image reference required')
         checks = _items(result.get('checks'), 'checks')

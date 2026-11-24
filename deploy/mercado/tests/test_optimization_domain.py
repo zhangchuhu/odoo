@@ -24,6 +24,39 @@ def evidence():
     return [{'id': 'source:any-id', 'source': 'https://example.test/item',
              'observed_at': '2026-11-15T00:00:00Z'}]
 
+class InternalImageQCContract(unittest.TestCase):
+    def test_manual_accept_preserves_report_and_identifies_decision(self):
+        digest = 'a' * 64
+        qc = {'status':'manual_accepted','candidate_sha256':digest,'report':{'decision':'reject'},'decision_event_id':42}
+        domain.validate_internal_image_qc({'image':{'sha256':digest},'visual_qc':qc})
+        for invalid in (dict(qc, decision_event_id=0), dict(qc, decision_event_id=True), dict(qc, candidate_sha256='b'*64)):
+            with self.assertRaises(domain.DomainError):
+                domain.validate_internal_image_qc({'image':{'sha256':digest},'visual_qc':invalid})
+    def test_completed_legacy_report_can_be_checked_without_accepting_new_legacy_results(self):
+        digest = 'a' * 64
+        names = ('garment_construction', 'color_material', 'garment_details', 'identity_pose',
+                 'accessories', 'scene_lighting_framing', 'text_layout')
+        report = {'quality_binding': {'candidate_sha256': digest}, 'skill_report': {'decision': 'accept'},
+                  'checks': [{'name': name, 'status': 'passed'} for name in names]}
+        result = {'image': {'sha256': digest}, 'visual_qc': report}
+        domain.validate_internal_image_qc(result, allow_legacy=True)
+        with self.assertRaises(domain.DomainError):
+            domain.validate_internal_image_qc(result)
+        report['checks'][0]['status'] = 'failed'
+        with self.assertRaises(domain.DomainError):
+            domain.validate_internal_image_qc(result, allow_legacy=True)
+
+    def test_passed_report_binds_the_actual_image(self):
+        digest = 'a' * 64
+        result = {'image': {'sha256': digest}, 'visual_qc': {'status': 'passed', 'candidate_sha256': digest, 'report': {'decision': 'accept'}}}
+        domain.validate_internal_image_qc(result)
+        for qc in ({'status': 'failed', 'candidate_sha256': digest, 'report': {}},
+                   {'status': 'passed', 'candidate_sha256': digest, 'report': {}},
+                   {'status': 'passed', 'candidate_sha256': 'b' * 64, 'report': {}},
+                   {'candidate_sha256': digest, 'report': {}}, None):
+            with self.subTest(qc=qc), self.assertRaises(domain.DomainError):
+                domain.validate_internal_image_qc({'image': {'sha256': digest}, 'visual_qc': qc})
+
 
 def titles():
     return {'schema_version': '1', 'evidence': evidence(),
@@ -167,7 +200,7 @@ class DomainTests(unittest.TestCase):
         cases = {
             'product.facts': {'facts': [{'name': 'category', 'value': 'dress', 'evidence_ids': ['source:any-id']}], 'uncertainties': []},
             'research.keywords': {'status': 'complete', 'keywords': [{'text': 'vestido', 'evidence_ids': ['source:any-id']}]},
-            'image.generate': {'image': gallery()['images'][0], 'request_id': 'req-1'},
+            'image.generate': {'image': gallery()['images'][0], 'request_id': 'req-1', 'visual_qc': {'status': 'passed', 'candidate_sha256': gallery()['images'][0]['sha256'], 'report': {'decision': 'accept'}}},
             'image.qc': {'image_artifact_id': 'img', 'status': 'passed', 'checks': [
                 {'name': 'garment', 'status': 'passed', 'evidence_ids': ['source:any-id']}]},
         }

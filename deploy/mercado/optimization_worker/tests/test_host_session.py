@@ -59,22 +59,20 @@ class HostSessionTests(unittest.TestCase):
         self.assertEqual(self.store.next(request_id='request-2')['request_id'], 'request-2')
         self.assertEqual(self.store.next(request_id='missing')['action'], 'idle')
 
-    def test_wrong_color_never_advances_to_dispatch(self):
-        self.context['snapshot']['payload'] = {'title': 'Conjunto Caqui'}
+    def test_plan_without_color_in_title_or_observations_can_advance(self):
+        self.context['snapshot']['payload'] = {'title': 'Conjunto'}
         self.store.enqueue('request-1', 'image.generate', self.payload, self.context)
         action = self.store.next()
-        plan = {'selected_reference_ids': ['2'], 'target_color':'khaki', 'source_evidence':[{'source_id':'2','observed_color':'black'}], 'viewed_digests':action['input_digests']}
+        plan = {'selected_reference_ids':['2'], 'garment_facts':{'required':['garment_type:dress'],'forbidden':[]}, 'classification':'front', 'source_evidence':[{'source_id':'2','angle':'front','roles':['model'],'information_score':90}], 'garment_instances':['dress'], 'viewed_digests':action['input_digests']}
         self.store.plan('request-1', plan)
-        self.assertEqual(self.store.inspect('request-1')['state'], 'waiting')
-        self.assertEqual(self.store.inspect('request-1')['reason'], 'target_color_unconfirmed')
+        self.assertEqual(self.store.inspect('request-1')['state'], 'prepared')
 
-    def test_dispatch_rechecks_color_of_existing_plan(self):
+    def test_dispatch_does_not_block_on_color_metadata(self):
         action=self.prepare()
         with self.store._db() as db:
-            r=self.store._get(db,'request-1'); r['plan']['source_evidence'][0]['observed_color']='black'; self.store._put(db,r)
+            r=self.store._get(db,'request-1'); r['context']['snapshot']['payload']['title']='Conjunto'; self.store._put(db,r)
         result=self.store.dispatch('request-1', caps(), action['input_digests'])
-        self.assertFalse(result['should_invoke'])
-        self.assertEqual(result['reason'], 'target_color_unconfirmed')
+        self.assertTrue(result['should_invoke'])
 
     def test_generation_dispatch_once_across_restart_and_unknown(self):
         action = self.prepare()
@@ -279,6 +277,10 @@ class HostSessionTests(unittest.TestCase):
         self.store.qc('request-1', {'viewed_digests': qc['input_digests'], 'quality_binding':qc['quality_binding'], 'review_binding':qc['review_binding'], 'skill_report': {'schema_version':1, 'candidate':'candidate_1', 'scores':{'garment_construction':90,'color_material':88,'garment_details':88,'target_preservation':90,'text_layout':None}, 'critical_defects':[], 'primary_defect':None, 'evidence':['visible garment'], 'confidence':0.85, 'decision':'accept', 'exact_text':None,'added_text':None,'missing_text':None,'instances_exact':None,'panel_count_exact':None,'panel_layout_exact':None}, 'checks': [
             {'name': name, 'status': 'passed', 'evidence': 'Visible region inspected'} for name in hs.QC_CHECKS]})
         self.assertEqual(self.store.result('request-1')['image']['artifact_id'], '91')
+        internal_qc = self.store.result('request-1')['visual_qc']
+        self.assertEqual(internal_qc['status'], 'passed')
+        self.assertEqual(internal_qc['candidate_sha256'], self.store.result('request-1')['image']['sha256'])
+        self.assertEqual(internal_qc['report']['skill_report']['decision'], 'accept')
         self.assertEqual(self.store.inspect('request-1')['quality_cycle']['attempts'][0]['status'], 'early_qc_pass')
         self.store.image('request-1', path, client)
         self.assertEqual(client.calls, 1)
@@ -297,7 +299,55 @@ class HostSessionTests(unittest.TestCase):
             'checks':[{'name':n,'status':'passed','evidence':'visible'} for n in hs.QC_CHECKS]})
         self.assertEqual(self.store.inspect('request-1')['state'],'waiting')
         self.assertEqual(self.store.inspect('request-1')['uploads']['candidate']['artifact_id'],'91')
+        attempt = self.store.inspect('request-1')['quality_cycle']['attempts'][0]
+        self.assertEqual(attempt['full_qc_report']['quality_binding']['candidate_sha256'],
+                         self.store.inspect('request-1')['uploads']['candidate']['sha256'])
+        evidence = self.store.review_evidence('request-1')
+        self.assertEqual(evidence['candidate_artifact_id'], 91)
+        self.assertEqual(evidence['candidate_sha256'], attempt['digest'])
+        self.assertEqual(evidence['report'], attempt['full_qc_report'])
         self.assertFalse(self.store.dispatch('request-1',caps(),qc['input_digests'])['should_invoke'])
+        decision = {'action':'manual_accept','request_id':'request-1','review_seq':evidence['review_seq'],
+                    'candidate_artifact_id':evidence['candidate_artifact_id'],'candidate_sha256':evidence['candidate_sha256'],
+                    'candidate_attempt_id':evidence['candidate_attempt_id'],'candidate_attempt_number':evidence['candidate_attempt_number'],
+                    'report_hash':hs.canonical_hash(evidence['report']),
+                    'intent_id':'f'*32}
+        self.store.consume_image_decision('request-1', decision, 42)
+        self.assertIsNone(self.store.result('request-1'))
+        self.store.acknowledge_review_resume('request-1', decision['intent_id'])
+        result = self.store.result('request-1')
+        self.assertEqual(result['visual_qc']['status'], 'manual_accepted')
+        self.assertEqual(result['visual_qc']['decision_event_id'], 42)
+        self.assertEqual(result['visual_qc']['report'], evidence['report'])
+        self.assertFalse(self.store.consume_image_decision('request-1', decision, 42))
+
+    def test_user_regeneration_archives_original_candidate_and_waits_for_ack(self):
+        from test_outfit_quality import report
+        action = self.prepare()
+        invocation = self.store.dispatch('request-1', caps(), action['input_digests'])
+        path = self.root / 'candidate-again.png'; path.write_bytes(png('blue'))
+        class Upload:
+            def create_artifact(inner, case_id, **kwargs):
+                return {'artifact_id':91, 'digest':hashlib.sha256(kwargs['data']).hexdigest()}
+        self.store.image('request-1', path, Upload(), invocation['attempt_id'], invocation['invocation_id'])
+        qc = self.store.next(); skill = report(); skill['confidence'] = .5
+        self.store.qc('request-1', {'viewed_digests':qc['input_digests'],'quality_binding':qc['quality_binding'],
+            'review_binding':qc['review_binding'],'skill_report':skill,
+            'checks':[{'name':n,'status':'passed','evidence':'visible'} for n in hs.QC_CHECKS]})
+        evidence = self.store.review_evidence('request-1')
+        decision = {'action':'regenerate','request_id':'request-1','review_seq':evidence['review_seq'],
+            'candidate_artifact_id':evidence['candidate_artifact_id'],'candidate_sha256':evidence['candidate_sha256'],
+            'candidate_attempt_id':evidence['candidate_attempt_id'],'candidate_attempt_number':evidence['candidate_attempt_number'],
+            'report_hash':hs.canonical_hash(evidence['report']),
+            'intent_id':'e'*32}
+        self.store.consume_image_decision('request-1', decision, 41)
+        self.assertFalse(self.store.dispatch('request-1',caps(),action['input_digests'])['should_invoke'])
+        self.store.acknowledge_review_resume('request-1', decision['intent_id'])
+        self.assertEqual(self.store.inspect('request-1')['quality_round_history'][0]['uploads']['candidate']['artifact_id'],'91')
+        fresh = self.store.dispatch('request-1', caps(), action['input_digests'])
+        self.assertTrue(fresh['should_invoke'])
+        self.assertNotEqual(fresh['invocation_id'],invocation['invocation_id'])
+        self.assertEqual(fresh['attempt_number'],1)
 
     def test_low_score_accept_can_resume_same_candidate(self):
         from test_outfit_quality import report
@@ -419,6 +469,9 @@ class HostSessionTests(unittest.TestCase):
         self.assertEqual(record['review_seq'], 1)
         self.assertEqual(record['best_of_budget']['artifact_id'], str(int(selected['candidate_digests'][selected['alias']][:8], 16)))
         self.assertEqual(len(self.store.inspect('request-1')['quality_cycle']['attempts']), 3)
+        reviewed = self.store.review_evidence('request-1')
+        self.assertEqual(reviewed['candidate_sha256'], selected['candidate_digests'][selected['alias']])
+        self.assertEqual(reviewed['report']['skill_report']['candidate'], selected['alias'])
         chosen = record['best_of_budget']
         with self.assertRaises(ValueError): self.store.consume_best_resume('request-1','intent',1,dict(chosen, sha256='0'*64))
         self.store.consume_best_resume('request-1','intent',1,chosen)

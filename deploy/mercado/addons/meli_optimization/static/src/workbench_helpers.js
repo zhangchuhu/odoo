@@ -117,3 +117,39 @@ export function productSourceImages(value) {
     if (Array.isArray(value?.source_image_artifact_ids)) return value.source_image_artifact_ids.map(artifact_id => ({artifact_id}));
     return [];
 }
+export function groupImageTasks(tasks) {
+    const groups = [], byKey = new Map();
+    for (const task of tasks) {
+        const plan = task.task_type === 'image.generate' && task.generation_plan_id;
+        const key = plan && task.snapshot_id ? `image:${task.snapshot_id}:${plan}` : `task:${task.id}`;
+        let group = byKey.get(key);
+        if (!group) { group = {key, isImage: Boolean(plan && task.snapshot_id), tasks: []}; byKey.set(key, group); groups.push(group); }
+        group.tasks.push(task);
+    }
+    for (const group of groups) {
+        if (group.isImage) group.tasks.sort((a,b) => a.id - b.id);
+        group.total = group.tasks.length;
+        group.completed = group.tasks.filter(task => task.state === 'succeeded').length;
+    }
+    return groups;
+}
+export function imageReviewWaiting(task) {
+    return task?.task_type === 'image.generate' && task.state === 'running' && task.status_detail?.code === 'host_review_required';
+}
+export function workbenchLocation(value) {
+    value = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const section = ['cases','batches','collections','library'].includes(value.section) ? value.section : 'cases';
+    const caseId = ['cases','collections'].includes(section) && Number.isSafeInteger(value.caseId) && value.caseId > 0 ? value.caseId : null;
+    const tabs = ['snapshot','facts','tasks','titles','research','gallery','images','proposals','activity','effects','audit'];
+    const tab = caseId && tabs.includes(value.tab) ? value.tab : 'snapshot';
+    const scrollTop = Number.isFinite(value.scrollTop) && value.scrollTop >= 0 ? Math.min(value.scrollTop, 10000000) : 0;
+    return {section,caseId,tab,scrollTop};
+}
+export function workbenchListPosition(value) {
+    value = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const text = key => typeof value[key] === 'string' ? value[key].slice(0, 200) : '';
+    const batch = typeof value.batch === 'string' && /^[1-9][0-9]*$/.test(value.batch) ? Number(value.batch) : value.batch;
+    return {query:text('query'),page:Number.isSafeInteger(value.page) && value.page >= 0 ? Math.min(value.page,100000) : 0,
+        batch:Number.isSafeInteger(batch) && batch > 0 ? batch : '',
+        status:text('status'),shop:text('shop'),site:text('site')};
+}

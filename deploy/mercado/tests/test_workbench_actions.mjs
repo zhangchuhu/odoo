@@ -1,16 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { imageReviewWaiting } from '../addons/meli_optimization/static/src/workbench_helpers.js';
+globalThis.__imageReviewWaiting = imageReviewWaiting;
 const source = (await readFile(new URL('../addons/meli_optimization/static/src/workbench.js', import.meta.url), 'utf8'))
     .replace(/^import .*;$/gm, '')
     .replace("registry.category('actions').add('meli_optimization.workbench', OptimizationWorkbench);", '');
-const { OptimizationWorkbench } = await import('data:text/javascript,' + encodeURIComponent('class Component {}\n' + source));
+const { OptimizationWorkbench } = await import('data:text/javascript,' + encodeURIComponent('class Component {}\nconst imageReviewWaiting=globalThis.__imageReviewWaiting;\n' + source));
 function fixture() {
     const ui = Object.create(OptimizationWorkbench.prototype);
     ui.state = {loading:false, detail:{id:1,revision:1,snapshot:{id:1},artifacts:[]}, selections:{7:[0]},modal:'',preview:null};
     ui.notification = {add(){}};
     return ui;
 }
+test('refresh restoration reloads the authorized case and tab and falls back if inaccessible', async () => {
+    const ui=fixture(), notices=[];
+    ui.tabs=[['snapshot','商品快照'],['images','图片与质检']];
+    ui.notification={add:message=>notices.push(message)};
+    ui.refresh=async()=>true;
+    ui.rpc=async(method,args)=>({id:args[0],collection:false});
+    await ui.restoreWorkbenchLocation({section:'cases',caseId:23,tab:'images'});
+    assert.equal(ui.state.detail.id,23);
+    assert.equal(ui.state.tab,'images');
+    ui.rpc=async()=>{throw new Error('access denied')};
+    await ui.restoreWorkbenchLocation({section:'cases',caseId:23,tab:'images'});
+    assert.equal(ui.state.detail,null);
+    assert.equal(ui.state.section,'cases');
+    assert.match(notices[0],/不可访问或暂时无法加载/);
+});
 test('expired lease is displayed as interrupted rather than running', () => {
     const ui=fixture();
     assert.equal(ui.taskStatusLabel({state:'running',lease_expired:true}), '租约已过期');
@@ -35,7 +52,7 @@ test('research with pending image import does not present as completed', async (
     assert.equal(ui.taskStatusLabel({task_type:'research.bestseller',state:'succeeded',result:{candidates:[]}}),'未找到候选商品');
     assert.equal(ui.taskStatusLabel({task_type:'research.keywords',state:'running'}),'执行中');
     const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
-    assert.equal((xml.match(/t-esc="taskStatusLabel\(task\)"/g)||[]).length,2);
+    assert.equal((xml.match(/t-esc="taskStatusLabel\(task\)"/g)||[]).length,3);
     assert.ok((xml.match(/t-esc="task.status_detail.message"/g)||[]).length >= 2);
 });
 test('independent research import failure is not displayed as complete', async () => {
@@ -46,9 +63,9 @@ test('independent research import failure is not displayed as complete', async (
     ui.state.detail.collection=false;
     assert.equal(ui.taskStatusLabel(task),'已完成');
     const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
-    assert.equal((xml.match(/t-esc="task.status_detail.message"/g)||[]).length,2);
+    assert.equal((xml.match(/t-esc="task.status_detail.message"/g)||[]).length,3);
     assert.equal((xml.match(/this.retryDerived\(task\)/g)||[]).length,2);
-    assert.equal((xml.match(/taskStatusClass\(task\)/g)||[]).length,2);
+    assert.equal((xml.match(/taskStatusClass\(task\)/g)||[]).length,3);
 });
 test('independent collection supplies platform and numeric criteria', async () => {
     const ui=fixture(), calls=[];

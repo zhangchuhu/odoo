@@ -10,6 +10,99 @@ from ..domain import canonical_hash
 class WorkbenchBrowserCase(HttpCase):
     browser_size = '1440x1000'
 
+    def test_best_candidate_review_renders_in_images_tab(self):
+        import hashlib
+        import base64
+        self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref('meli_optimization.group_editor').id)]})
+        ui = self.env['meli.optimization.case']
+        detail = ui.workbench_create({'shop': 'Browser fixture', 'item_id': 'BEST-REVIEW-UI', 'title': 'Review fixture'})
+        png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        artifact = self.env['meli.optimization.artifact'].create({'case_id': detail['id'], 'data': base64.b64encode(png),
+            'digest': hashlib.sha256(png).hexdigest(), 'mime_type': 'image/png'})
+        plan_payload = {'case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],
+                        'source_artifact_ids':[str(artifact.id)],'target_artifact_ids':[str(artifact.id)]}
+        plan = self.env['meli.optimization.artifact'].create({'case_id':detail['id'],'mime_type':'application/json',
+                         'payload':plan_payload,'digest':canonical_hash(plan_payload)})
+        task = self.env['meli.optimization.task'].create({'case_id': detail['id'], 'snapshot_id': detail['snapshot']['id'],
+            'task_type': 'image.generate', 'payload': {'schema_version': '1', 'source_artifact_ids': [str(artifact.id)],
+            'target_artifact_id': str(artifact.id), 'generation_plan_id': str(plan.id)}})
+        claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        task.checkpoint(token,epoch,'intent',{'request_id':'browser-review','state':'unknown'})
+        task.host_progress(token,epoch,'browser-review','review_required',review_seq=1,review_kind='best_of_budget',
+            candidate_artifact_id=artifact.id,candidate_sha256=artifact.digest,candidate_attempt_id='a'*32,candidate_attempt_number=1)
+        task.host_review_evidence(token,epoch,{'request_id':'browser-review','review_seq':1,'candidate_artifact_id':artifact.id,
+            'candidate_sha256':artifact.digest,'candidate_attempt_id':'a'*32,'candidate_attempt_number':1,'report':{
+              'quality_binding':{'request_id':'browser-review','candidate_sha256':artifact.digest},
+              'checks':[{'name':name,'status':'failed','evidence':'fixture'} for name in
+                        ('garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout')],
+              'skill_report':{'decision':'reject'}}})
+        ordinary = self.env['meli.optimization.task'].create({'case_id':detail['id'],'snapshot_id':detail['snapshot']['id'],
+            'task_type':'image.generate','payload':task.payload})
+        claim2=ordinary.claim(['image.generate']); token2,epoch2=claim2['lease_token'],claim2['lease_epoch']
+        ordinary.checkpoint(token2,epoch2,'intent2',{'request_id':'browser-ordinary','state':'unknown'})
+        ordinary.host_progress(token2,epoch2,'browser-ordinary','review_required',review_seq=1)
+        ordinary.host_review_evidence(token2,epoch2,{'request_id':'browser-ordinary','review_seq':1,'candidate_artifact_id':artifact.id,
+            'candidate_sha256':artifact.digest,'candidate_attempt_id':'b'*32,'candidate_attempt_number':1,'report':{
+              'quality_binding':{'request_id':'browser-ordinary','candidate_sha256':artifact.digest},
+              'checks':[{'name':name,'status':'failed','evidence':'fixture'} for name in
+                        ('garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout')],
+              'skill_report':{'decision':'reject'}}})
+        action_id = self.env.ref('meli_optimization.workbench_action').id
+        spawn = ChromeBrowser._spawn_chrome
+        def fixed_port_spawn(browser, cmd):
+            import time
+            import urllib.request
+            Path(browser.user_data_dir, 'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            process, port = spawn(browser, cmd)
+            for _ in range(100):
+                try:
+                    with urllib.request.urlopen('http://127.0.0.1:55441/json/version', timeout=1):
+                        return process, port
+                except OSError:
+                    time.sleep(.1)
+            raise AssertionError('Chrome debugger did not become ready')
+        original_wait = ChromeBrowser._wait_code_ok
+        def verify_reload(browser, *args, **kwargs):
+            import time
+            result = original_wait(browser, *args, **kwargs)
+            scroll = browser._websocket_request('Runtime.evaluate', params={'expression': """(async()=>{const el=document.querySelector('.mw-main');el.scrollTop=Math.min(250,el.scrollHeight-el.clientHeight);await new Promise(r=>setTimeout(r,150));return el.scrollTop;})()""",'awaitPromise':True,'returnByValue':True})['result']['value']
+            browser._websocket_request('Runtime.evaluate', params={'expression': 'window.__beforeWorkbenchReload = true'})
+            browser._websocket_request('Page.reload')
+            expression = """Boolean(!window.__beforeWorkbenchReload && document.querySelector('h1')?.textContent.includes('BEST-REVIEW-UI') && [...document.querySelectorAll('.mw-tabs button')].some(b=>b.classList.contains('active') && b.textContent.includes('图片与质检')) && Math.abs(document.querySelector('.mw-main').scrollTop - %s) < 3)""" % scroll
+            for _ in range(150):
+                response = browser._websocket_request('Runtime.evaluate',params={'expression':expression,'returnByValue':True})
+                if response.get('result',{}).get('value') is True:
+                    return result
+                time.sleep(.1)
+            raise AssertionError('Browser reload did not restore product and image tab')
+        with patch.object(ChromeBrowser, 'remote_debugging_port', 55441), patch.object(ChromeBrowser, '_spawn_chrome', fixed_port_spawn), patch.object(ChromeBrowser, '_wait_code_ok', verify_reload):
+            self.browser_js('/odoo/action-%s' % action_id, r"""
+                (async () => {
+                    const wait = async fn => { for (let i=0; i<150; i++) { const value=fn(); if(value) return value; await new Promise(r=>setTimeout(r,100)); } throw Error('Review UI timeout'); };
+                    const button = text => [...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(text));
+                    const row=await wait(()=>[...document.querySelectorAll('.mw-table tbody tr')].find(r=>r.textContent.includes('BEST-REVIEW-UI')));
+                    row.querySelector('.mw-link').click();
+                    await wait(()=>button('图片与质检')); button('图片与质检').click();
+                    const image=await wait(()=>document.querySelector('img[alt="待复核最佳候选图"]'));
+                    await wait(()=>image.complete && image.naturalWidth>0);
+                    const ordinaryImage=await wait(()=>document.querySelector('img[alt="待人工确认的候选图"]'));
+                    await wait(()=>ordinaryImage.complete && ordinaryImage.naturalWidth>0);
+                    if(!ordinaryImage.closest('.mw-result')?.textContent.includes('尚未通过质检')) throw Error('Pending candidate warning missing');
+                    if (!document.querySelector('.mw-result')?.textContent.includes('待处理')) throw Error('Review state missing');
+                    await wait(()=>button('重新生成'));button('重新生成').click();
+                    await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('确认重新生成'));
+                    if(!document.querySelector('.mw-modal').textContent.includes('原任务')) throw Error('Regeneration must reuse task');
+                    document.querySelector('[aria-label="关闭对话框"]').click();
+                    await wait(()=>!document.querySelector('.mw-modal'));
+                    await wait(()=>button('人工确认使用'));button('人工确认使用').click();
+                    await wait(()=>document.querySelector('.mw-modal')?.textContent.includes('原质检报告会保留'));
+                    if(!document.querySelector('.mw-modal').textContent.includes('原质检报告会保留')) throw Error('Manual accept warning missing');
+                    button('确认使用未通过质检的图片').click();
+                    await wait(()=>document.querySelector('.mw-result')?.textContent.includes('已记录人工处理决定'));
+                    console.log('test successful');
+                })().catch(e=>console.error(e));
+            """, login='admin', timeout=40)
+
     def test_workbench_browser_create_select_confirm(self):
         self.env.ref('base.user_admin').write({'group_ids': [(4, self.env.ref('meli_optimization.group_editor').id)]})
         ui = self.env['meli.optimization.case']

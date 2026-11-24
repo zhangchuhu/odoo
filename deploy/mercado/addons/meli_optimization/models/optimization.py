@@ -726,6 +726,13 @@ class Task(models.Model):
                 validate_result(self.task_type, body)
             except DomainError as exc:
                 raise ValidationError(str(exc)) from exc
+            if self.task_type == 'image.generate':
+                self._validate_manual_review_decision(body)
+                image = body['image']
+                ref = str(image.get('artifact_id') or '')
+                artifact = self.env[PREFIX + 'artifact'].sudo().browse(int(ref)).exists() if ref.isdigit() else self.env[PREFIX + 'artifact']
+                if not artifact or artifact.case_id != self.case_id or artifact.company_id != self.company_id or not artifact.data or artifact.digest != image.get('sha256') or artifact.mime_type != image.get('mime_type'):
+                    raise ValidationError('生成图片产物归属、摘要或类型不匹配')
             self._transition('succeeded')
             self._set({'result': body, 'status_detail': None})
         elif kind in ('fail', 'wait'):

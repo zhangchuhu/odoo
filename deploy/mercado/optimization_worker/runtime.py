@@ -42,8 +42,9 @@ def continue_registered_run(client, record, journal):
 
 
 class _Heartbeat:
-    def __init__(self, client, claim):
+    def __init__(self, client, claim, diagnostic=None):
         self.client, self.claim = client, claim
+        self.diagnostic = diagnostic
         self.stop, self.lost = threading.Event(), threading.Event()
         self.error = None
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -52,9 +53,19 @@ class _Heartbeat:
         while not self.stop.wait(max(.01, min(30, self.claim['heartbeat_seconds']))):
             try:
                 self.client.heartbeat(self.claim)
+                if self.diagnostic:
+                    self.diagnostic('heartbeat', 'lease_renewed', self.claim, None)
             except APIError as exc:
                 self.error = exc
                 self.lost.set()
+                if self.diagnostic:
+                    self.diagnostic('heartbeat', 'lease_rejected' if exc.status in (403, 404, 409) else 'lease_renewal_error', self.claim, exc)
+                return
+            except Exception as exc:
+                self.error = APIError(0)
+                self.lost.set()
+                if self.diagnostic:
+                    self.diagnostic('heartbeat', 'lease_renewal_error', self.claim, exc)
                 return
 
     def check(self):
@@ -65,7 +76,7 @@ class _Heartbeat:
 
 
 class Worker:
-    def __init__(self, client, journal_path, *, providers=None, provider_timeout=90, capabilities=TASK_TYPES, task_id=None, park=None, single_active=False, resume_waiting=None):
+    def __init__(self, client, journal_path, *, providers=None, provider_timeout=90, capabilities=TASK_TYPES, task_id=None, park=None, single_active=False, resume_waiting=None, maintain_active_leases=False, diagnostic=None):
         if not 0 < provider_timeout <= 3600:
             raise ValueError('Invalid provider timeout')
         self.client, self.journal_path = client, journal_path
@@ -79,6 +90,7 @@ class Worker:
             raise ValueError('Single-active workers cannot park tasks')
         self.single_active = single_active
         self.resume_waiting = resume_waiting
+        self.maintain_active_leases, self.diagnostic = maintain_active_leases, diagnostic
         if not self.capabilities or set(self.capabilities) - set(TASK_TYPES):
             raise ValueError('Unsupported capabilities')
 
@@ -103,7 +115,7 @@ class Worker:
             if self.park is not None and self.task_id is None:
                 parked = [r for r in active if self.park(r)]
                 for item in parked:
-                    self._run(journal, item)
+                    self._run_with_peers(journal, item)
                 active = journal.active()
                 runnable = [r for r in active if not self.park(r)]
             if runnable:
@@ -113,14 +125,21 @@ class Worker:
             else:
                 if not allow_claim or len(active) >= 20:
                     return 'idle'
-                claim = self.client.claim(self.capabilities, task_id=self.task_id) if self.task_id is not None else self.client.claim(self.capabilities)
+                try:
+                    claim = self.client.claim(self.capabilities, task_id=self.task_id) if self.task_id is not None else self.client.claim(self.capabilities)
+                except APIError as exc:
+                    if self.diagnostic:
+                        self.diagnostic('claim', 'claim_error', None, exc)
+                    raise
                 if claim is False:
                     return 'idle'
+                if self.diagnostic:
+                    self.diagnostic('claim', 'claim_succeeded', claim, None)
                 if self.task_id is not None and claim.get('id') != self.task_id:
                     raise ValueError('Claim returned a different task')
                 record = {'claim': claim, 'phase': 'prepare', 'request_id': str(uuid.uuid4()), 'sequence': 0}
                 journal.save(record)
-            return self._run(journal, record)
+            return self._run_with_peers(journal, record)
         finally:
             try:
                 if safe_to_sync:
@@ -129,6 +148,29 @@ class Worker:
                             provider.synchronize(journal.active())
             finally:
                 journal.close()
+
+    def _run_with_peers(self, journal, record):
+        if not self.maintain_active_leases:
+            return self._run(journal, record)
+        peers = []
+        for peer in journal.active():
+            if (peer['claim']['id'], peer['claim']['lease_epoch']) == (record['claim']['id'], record['claim']['lease_epoch']):
+                continue
+            pulse = _Heartbeat(self.client, peer['claim'], self.diagnostic)
+            pulse.thread.start()
+            peers.append((peer, pulse))
+        try:
+            return self._run(journal, record)
+        finally:
+            for _, pulse in peers:
+                pulse.stop.set()
+            for peer, pulse in peers:
+                pulse.thread.join(timeout=self.client.timeout + 1)
+                if pulse.lost.is_set():
+                    peer['lease_diagnostic'] = {'source': 'heartbeat', 'status': pulse.error.status}
+                    if pulse.error.status in (403, 404, 409):
+                        peer.update(done=True, outcome='lease_lost')
+                    journal.save(peer)
 
     def loop(self, stop=None, poll_seconds=5):
         stop = stop or threading.Event()
@@ -141,7 +183,7 @@ class Worker:
 
     def _run(self, journal, record):
         claim = record['claim']
-        pulse = _Heartbeat(self.client, claim)
+        pulse = _Heartbeat(self.client, claim, self.diagnostic)
         pulse_started = False
         def save():
             journal.save(record)
@@ -181,7 +223,11 @@ class Worker:
                     return record['outcome']
             try:
                 self.client.heartbeat(claim)  # Fence before reading inputs or dispatching a provider.
+                if self.diagnostic:
+                    self.diagnostic('heartbeat', 'lease_renewed', claim, None)
             except APIError as exc:
+                if self.diagnostic:
+                    self.diagnostic('heartbeat', 'lease_rejected' if exc.status in (403, 404, 409) else 'lease_renewal_error', claim, exc)
                 provider = self.providers.get(claim['task_type'])
                 scoped = claim['task_type'] == 'research.bestseller' and getattr(self.client, 'research_ledger_enabled', False)
                 recovery = 'continue_registered_research' if scoped else 'recover_lease'

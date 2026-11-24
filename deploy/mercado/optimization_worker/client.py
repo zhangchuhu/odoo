@@ -120,6 +120,10 @@ class Client:
         return self.request('POST', '/internal/meli-optimization/tasks/%s/host-progress' % claim['id'],
                             {'lease_token': claim['lease_token'], 'lease_epoch': claim['lease_epoch'], 'request_id': request_id, 'stage': stage, **({'intent_id': intent_id} if intent_id is not None else {}), **({'review_seq': review_seq} if review_seq is not None else {}), **({'review_kind': review_kind} if review_kind is not None else {}), **({'candidate_artifact_id': candidate_artifact_id} if candidate_artifact_id is not None else {}), **({'candidate_sha256': candidate_sha256} if candidate_sha256 is not None else {}), **({'candidate_attempt_id': candidate_attempt_id} if candidate_attempt_id is not None else {}), **({'candidate_attempt_number': candidate_attempt_number} if candidate_attempt_number is not None else {})})
 
+    def host_review_evidence(self, claim, evidence):
+        return self.request('POST', '/internal/meli-optimization/tasks/%s/host-review-evidence' % claim['id'],
+                            {'lease_token': claim['lease_token'], 'lease_epoch': claim['lease_epoch'], 'evidence': evidence})
+
     def submit(self, claim, operation, envelope):
         if operation not in ('checkpoint', 'complete', 'wait', 'fail'):
             raise ValueError('Invalid submission operation')

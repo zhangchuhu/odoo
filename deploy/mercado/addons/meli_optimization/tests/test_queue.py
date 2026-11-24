@@ -9,6 +9,71 @@ from odoo.exceptions import AccessError, ValidationError
 
 @tagged('post_install', '-at_install')
 class OptimizationQueueCase(TransactionCase):
+    def test_review_decision_is_bound_audited_and_idempotent(self):
+        from ..domain import canonical_hash
+        ui = self.env['meli.optimization.case']
+        detail = ui.workbench_create({'shop':'test','item_id':'REVIEW-DECISION','title':'Test'})
+        case = ui.browse(detail['id']); snap = self.env['meli.optimization.snapshot'].browse(detail['snapshot']['id'])
+        data = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC')
+        image = self.env['meli.optimization.artifact'].create({'case_id':case.id,'data':base64.b64encode(data),'mime_type':'image/png','digest':hashlib.sha256(data).hexdigest()})
+        plan_payload = {'case_id':case.id,'snapshot_id':snap.id,'source_artifact_ids':[str(image.id)],'target_artifact_ids':[str(image.id)]}
+        plan = self.env['meli.optimization.artifact'].create({'case_id':case.id,'mime_type':'application/json','payload':plan_payload,'digest':canonical_hash(plan_payload)})
+        task = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'image.generate',
+            'payload':{'schema_version':'1','source_artifact_ids':[str(image.id)],'target_artifact_id':str(image.id),'generation_plan_id':str(plan.id)}})
+        claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        task.checkpoint(token,epoch,'intent',{'request_id':'original','state':'unknown'})
+        task.host_progress(token,epoch,'original','review_required',review_seq=1)
+        evidence = {'request_id':'original','review_seq':1,'candidate_artifact_id':image.id,'candidate_sha256':image.digest,
+                    'candidate_attempt_id':'a'*32,'candidate_attempt_number':1,'report':{
+                      'quality_binding':{'request_id':'original','candidate_sha256':image.digest},
+                      'checks':[{'name':name,'status':'failed','evidence':'fixture'} for name in
+                                ('garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout')],
+                      'skill_report':{'decision':'reject'}}}
+        task.host_review_evidence(token,epoch,evidence)
+        for seq,digest,report_hash in ((2,image.digest,canonical_hash(evidence['report'])),
+                                       (1,'0'*64,canonical_hash(evidence['report'])),
+                                       (1,image.digest,'0'*64)):
+            with self.assertRaises(ValidationError):
+                ui.workbench_image_review_decide(case.id,task.id,'manual_accept',seq,digest,report_hash,'','d'*32)
+        args=[case.id,task.id,'manual_accept',1,image.digest,canonical_hash(evidence['report']),'accepted','f'*32]
+        receipt = ui.workbench_image_review_decide(*args)
+        self.assertEqual(ui.workbench_image_review_decide(*args), receipt)
+        self.assertEqual(task.status_detail['code'],'image_decision_requested')
+        event = self.env['meli.optimization.event'].browse(receipt['event_id'])
+        self.assertEqual(event.payload['action'],'manual_accept')
+        self.assertEqual(event.payload['candidate_sha256'],image.digest)
+        result = {'request_id':'original','image':{'artifact_id':str(image.id),'sha256':image.digest},'visual_qc':{
+            'status':'manual_accepted','candidate_sha256':image.digest,'report':evidence['report'],'decision_event_id':event.id}}
+        task._validate_manual_review_decision(result)
+        forged = dict(result, visual_qc=dict(result['visual_qc'], decision_event_id=999999))
+        with self.assertRaises(ValidationError): task._validate_manual_review_decision(forged)
+        forged = dict(result, visual_qc=dict(result['visual_qc'], report={'decision':'accept'}))
+        with self.assertRaises(ValidationError): task._validate_manual_review_decision(forged)
+        with self.assertRaises(ValidationError):
+            ui.workbench_image_review_decide(case.id,task.id,'regenerate',1,image.digest,canonical_hash(evidence['report']),'','e'*32)
+        task.host_progress(token,epoch,'original','resumed','f'*32,1)
+        task.checkpoint(token,epoch,'finished',{'request_id':'original','state':'succeeded'})
+        full = {'schema_version':'1','request_id':'original',
+                'evidence':[{'id':'host','source':'fixture','observed_at':'2026-11-24T00:00:00Z'}],
+                'image':{'image_id':'candidate','order':0,'role':'generated','artifact_id':str(image.id),'source':'fixture',
+                         'evidence_ids':['host'],'mime_type':'image/png','width':1,'height':1,'sha256':image.digest},
+                'visual_qc':result['visual_qc']}
+        task.complete(token,epoch,'complete',full)
+        proposal = ui.workbench_propose(case.id,task.id,canonical_hash(full),'images',[0])
+        self.assertTrue(ui.workbench_confirm(case.id,proposal['id'],proposal['digest']))
+        other = self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'image.generate',
+            'payload':task.payload})
+        claim2=other.claim(['image.generate']); t2,e2=claim2['lease_token'],claim2['lease_epoch']
+        other.checkpoint(t2,e2,'intent2',{'request_id':'original-2','state':'unknown'})
+        other.host_progress(t2,e2,'original-2','review_required',review_seq=1)
+        next_evidence=dict(evidence, request_id='original-2', report=dict(evidence['report'],quality_binding={
+            'request_id':'original-2','candidate_sha256':image.digest}))
+        other.host_review_evidence(t2,e2,next_evidence)
+        ui.workbench_image_review_decide(case.id,other.id,'regenerate',1,image.digest,canonical_hash(next_evidence['report']),'','e'*32)
+        other.host_progress(t2,e2,'original-2','resumed','e'*32,1)
+        other.host_progress(t2,e2,'original-2','review_required',review_seq=2)
+        self.assertEqual(other.status_detail['review_seq'],2)
+
     def test_window_registration_failure_can_resume_original_task(self):
         batch = self.env['meli.optimization.batch'].create({'name': 'window recovery'})
         case = self.env['meli.optimization.case'].create({'name': 'window recovery', 'batch_id': batch.id})
@@ -173,6 +238,17 @@ class OptimizationQueueCase(TransactionCase):
         claim=task.claim(['image.generate']); token,epoch=claim['lease_token'],claim['lease_epoch']
         task.checkpoint(token,epoch,'intent',{'request_id':'original','state':'unknown'})
         task.host_progress(token,epoch,'original','review_required',review_seq=1,review_kind='best_of_budget',candidate_artifact_id=image.id,candidate_sha256=image.digest,candidate_attempt_id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',candidate_attempt_number=1)
+        evidence = {'request_id':'original','review_seq':1,'candidate_artifact_id':image.id,
+                    'candidate_sha256':image.digest,'candidate_attempt_id':'a'*32,'candidate_attempt_number':1,
+                    'report':{'quality_binding':{'request_id':'original','candidate_sha256':image.digest},
+                              'checks':[{'name':name,'status':'failed','evidence':'fixture'} for name in
+                                        ('garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout')],
+                              'skill_report':{'decision':'reject'}}}
+        task.host_review_evidence(token, epoch, evidence)
+        task.host_review_evidence(token, epoch, evidence)
+        self.assertEqual(task.status_detail['review_evidence']['report'], evidence['report'])
+        forged = dict(evidence, candidate_sha256='0'*64)
+        with self.assertRaises(ValidationError): task.host_review_evidence(token, epoch, forged)
         self.assertEqual(task.state,'running')
         self.assertEqual(task.status_detail['review_kind'],'best_of_budget')
         self.assertEqual(task.status_detail['candidate_artifact_id'],image.id)

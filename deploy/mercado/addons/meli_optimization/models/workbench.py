@@ -176,6 +176,8 @@ class OperationsWorkbench(models.Model):
             'tasks': [{'id': t.id, 'task_type': t.task_type, 'state': t.state,
                 'lease_expired': bool(t.state == 'running' and t.lease_expires_at and t.lease_expires_at <= fields.Datetime.now()),
                 'snapshot_id': t.snapshot_id.id, 'result': t.result,
+                'generation_plan_id': t.payload.get('generation_plan_id') if t.task_type == 'image.generate' else False,
+                'target_artifact_id': t.payload.get('target_artifact_id') if t.task_type == 'image.generate' else False,
                 'result_hash': canonical_hash(t.result), 'status_detail': t.status_detail, 'attempts': attempt_rows.get(t.id, [])} for t in tasks],
             'artifacts': self.env[PREFIX + 'artifact'].search_read([('case_id', '=', case.id)], ['digest', 'mime_type', 'payload', 'result_task_id', 'result_snapshot_id', 'result_hash', 'library_origin_id', 'library_artifact_id']),
             'proposals': [{'id': p.id, 'digest': p.digest, 'payload': p.payload,
@@ -224,6 +226,8 @@ class OperationsWorkbench(models.Model):
     @api.model
     def workbench_task(self, case_id, task_type, values):
         case = self._wb_case(case_id, True)
+        if task_type == 'image.qc':
+            raise ValidationError('图片质检已包含在逐图生成任务中')
         case._lock()
         snap = self._wb_snapshot(case)
         if not snap or task_type not in TASK_INPUTS or not isinstance(values, dict):
@@ -322,6 +326,8 @@ class OperationsWorkbench(models.Model):
         payload = {'action': kind, 'before_value': before, 'desired_value': desired,
             'snapshot_id': snap.id, 'task_id': task.id, 'result_hash': result_hash,
             'indices': indices, 'scope': snap.payload.get('item_id'), 'execution_available': False}
+        if kind == 'images':
+            payload['quality_resolution'] = (task.result.get('visual_qc') or {}).get('status', 'passed')
         bounded(payload)
         proposal = self.env[PREFIX + 'proposal'].create({'case_id': case.id, 'payload': payload})
         return {'id': proposal.id, 'digest': proposal.digest, 'payload': payload}
@@ -342,19 +348,21 @@ class OperationsWorkbench(models.Model):
 
     def _require_passed_image_qc(self, task, images):
         self.ensure_one()
-        plan = task.payload.get('generation_plan_id')
-        required = {'garment_construction', 'color_material', 'garment_details', 'identity_pose',
-                    'accessories', 'scene_lighting_framing', 'text_layout'}
+        from ..domain import validate_internal_image_qc, DomainError
+        if task.state != 'succeeded' or task.case_id != self or task.snapshot_id != self._wb_snapshot(self):
+            raise ValidationError('生成任务或商品快照无效')
+        try:
+            validate_internal_image_qc(task.result, allow_legacy=True)
+            task._validate_manual_review_decision(task.result)
+        except DomainError as exc:
+            raise ValidationError('图片需要通过当前任务的内部质检') from exc
         for image in images:
             ref = str(image.get('artifact_id') or '')
-            qcs = self.env[PREFIX + 'task'].search([('company_id', '=', self.company_id.id), ('case_id', '=', self.id),
-                ('snapshot_id', '=', task.snapshot_id.id), ('task_type', '=', 'image.qc')])
-            matching = qcs.filtered(lambda q: q.payload.get('image_artifact_id') == ref and q.payload.get('generation_plan_id') == plan).sorted('id', reverse=True)
-            q = matching[:1]
-            if not (q and q.state == 'succeeded' and q.result and q.result.get('image_artifact_id') == ref and q.result.get('status') == 'passed'
-                    and {c.get('name') for c in q.result.get('checks', [])} == required
-                    and all(c.get('status') == 'passed' for c in q.result.get('checks', []))):
-                raise ValidationError('图片需要通过当前快照和生成计划的质检')
+            result_image = task.result.get('image') or {}
+            artifact = self.env[PREFIX + 'artifact'].browse(int(ref)).exists() if ref.isdigit() else self.env[PREFIX + 'artifact']
+            if (image != result_image or not artifact or artifact.case_id != self or artifact.company_id != self.company_id
+                    or not artifact.data or artifact.digest != image.get('sha256') or artifact.mime_type != image.get('mime_type')):
+                raise ValidationError('生成图片与质检报告不匹配')
 
 
 class ResultArtifact(models.Model):
@@ -388,6 +396,7 @@ class ImageProposalConfirmation(models.Model):
             if (not task or task.case_id != self.case_id or task.snapshot_id != self.case_id._wb_snapshot(self.case_id)
                     or task.task_type != 'image.generate' or task.state != 'succeeded'
                     or canonical_hash(task.result) != payload.get('result_hash')
+                    or (payload.get('quality_resolution') is not None and payload.get('quality_resolution') != (task.result.get('visual_qc') or {}).get('status', 'passed'))
                     or payload.get('desired_value') != [task.result.get('image')]):
                 raise ValidationError('图片方案已过期或来源无效')
             self.case_id._require_passed_image_qc(task, payload['desired_value'])

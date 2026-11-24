@@ -81,6 +81,50 @@ class SingleActiveResearchTest(unittest.TestCase):
         journal.close.assert_called_once()
 
 
+class MultipleLeaseHeartbeatTest(unittest.TestCase):
+    def test_other_active_lease_is_renewed_while_a_task_runs(self):
+        from unittest.mock import Mock, patch
+        from optimization_worker.journal import Journal
+        client = Mock(identity='fixture', timeout=.2)
+        records = [{'claim': {'id': i, 'input_hash': str(i), 'lease_epoch': 1,
+                    'task_type': 'image.generate', 'heartbeat_seconds': .02},
+                    'request_id': str(i), 'phase': 'host_pending'} for i in (1, 2)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'journal.sqlite'
+            journal = Journal(path, client.identity)
+            for record in records:
+                journal.save(record)
+            journal.close()
+            worker = Worker(client, path, capabilities=('image.generate',), maintain_active_leases=True)
+            with patch.object(worker, '_run', side_effect=lambda *args: time.sleep(.09) or 'pending'):
+                self.assertEqual(worker.once(), 'pending')
+            self.assertTrue(any(call.args[0]['id'] == 2 for call in client.heartbeat.call_args_list))
+
+    def test_rejected_other_lease_is_recorded_without_running_it(self):
+        from unittest.mock import Mock, patch
+        from optimization_worker.journal import Journal
+        client = Mock(identity='fixture', timeout=.2)
+        client.heartbeat.side_effect = APIError(409)
+        events = []
+        records = [{'claim': {'id': i, 'input_hash': str(i), 'lease_epoch': 1,
+                    'task_type': 'image.generate', 'heartbeat_seconds': .02},
+                    'request_id': str(i), 'phase': 'host_pending'} for i in (1, 2)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'journal.sqlite'
+            journal = Journal(path, client.identity)
+            for record in records:
+                journal.save(record)
+            journal.close()
+            worker = Worker(client, path, capabilities=('image.generate',), maintain_active_leases=True,
+                            diagnostic=lambda *event: events.append(event))
+            with patch.object(worker, '_run', side_effect=lambda *args: time.sleep(.08) or 'pending'):
+                worker.once()
+            journal = Journal(path, client.identity)
+            self.assertEqual([r['claim']['id'] for r in journal.active()], [1])
+            journal.close()
+            self.assertTrue(any(e[1] == 'lease_rejected' and e[2]['id'] == 2 for e in events))
+
+
 class Fixture:
     def __init__(self):
         self.state, self.events, self.receipts = 'queued', [], {}
@@ -389,7 +433,8 @@ class WorkerTests(unittest.TestCase):
             ('title.generate', {'facts_artifact_id': '23', 'keywords_artifact_id': '23', 'language': 'es-MX'}, titles()),
             ('gallery.collect', {'reference_item_id': 'MLM123', 'selected_variant': {'color': 'black'}}, gallery_result),
             ('image.generate', {'source_artifact_ids': ['24'], 'target_artifact_id': '24', 'generation_plan_id': '23'},
-                {'schema_version': '1', 'evidence': evidence(), 'image': image, 'request_id': 'replaced-by-provider'}),
+                {'schema_version': '1', 'evidence': evidence(), 'image': image, 'request_id': 'replaced-by-provider',
+                 'visual_qc': {'status':'passed', 'candidate_sha256':image['sha256'], 'report':{'decision':'accept'}}}),
             ('image.qc', {'image_artifact_id': '24', 'generation_plan_id': '23'},
                 {'schema_version': '1', 'evidence': evidence(), 'image_artifact_id': '24', 'status': 'review',
                  'checks': [{'name': 'garment', 'status': 'unknown', 'evidence_ids': ['source:any-id']}]}),

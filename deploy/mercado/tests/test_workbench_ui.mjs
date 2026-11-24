@@ -19,6 +19,37 @@ test('image ordering preserves selected identity and rejects bounds', () => {
 
 // A stale completed task must never replace facts for the latest snapshot.
 const helpers = await import('../addons/meli_optimization/static/src/workbench_helpers.js');
+test('restored location rejects invalid sections, IDs, tabs, and scroll offsets', () => {
+    assert.deepEqual(helpers.workbenchLocation({section:'cases',caseId:23,tab:'images',scrollTop:325}),
+                     {section:'cases',caseId:23,tab:'images',scrollTop:325});
+    assert.deepEqual(helpers.workbenchLocation({section:'invalid',caseId:-1,tab:'bad',scrollTop:-3}),
+                     {section:'cases',caseId:null,tab:'snapshot',scrollTop:0});
+    assert.deepEqual(helpers.workbenchLocation({section:'library',caseId:23,tab:'images',scrollTop:0}),
+                     {section:'library',caseId:null,tab:'snapshot',scrollTop:0});
+});
+test('list position keeps safe filters and rejects malformed values', () => {
+    assert.deepEqual(helpers.workbenchListPosition({query:'MLM1',page:2,batch:5,status:'waiting',shop:'Shop',site:'MLM'}),
+        {query:'MLM1',page:2,batch:5,status:'waiting',shop:'Shop',site:'MLM'});
+    assert.deepEqual(helpers.workbenchListPosition({query:42,page:-1,batch:-1,status:{},shop:null,site:[]} ),
+        {query:'',page:0,batch:'',status:'',shop:'',site:''});
+    assert.equal(helpers.workbenchListPosition({batch:'5'}).batch,5);
+});
+test('image awaiting a user decision is displayed as waiting, not executing', () => {
+    assert.equal(helpers.imageReviewWaiting({task_type:'image.generate',state:'running',status_detail:{code:'host_review_required'}}), true);
+    assert.equal(helpers.imageReviewWaiting({task_type:'image.generate',state:'running',status_detail:{code:'host_review_resumed'}}), false);
+    assert.equal(helpers.imageReviewWaiting({task_type:'product.facts',state:'running',status_detail:{code:'host_review_required'}}), false);
+});
+test('groups image tasks only by matching plan and snapshot while retaining each task', () => {
+    const tasks=[{id:8,task_type:'image.generate',snapshot_id:3,generation_plan_id:'9',target_artifact_id:'12',state:'queued'},
+      {id:7,task_type:'image.generate',snapshot_id:3,generation_plan_id:'9',target_artifact_id:'11',state:'succeeded'},
+      {id:6,task_type:'image.generate',snapshot_id:4,generation_plan_id:'9',state:'failed'},
+      {id:5,task_type:'product.facts',state:'succeeded'}];
+    const groups=helpers.groupImageTasks(tasks);
+    assert.deepEqual(groups[0].tasks.map(t=>t.id),[7,8]);
+    assert.equal(groups[0].completed,1);
+    assert.equal(groups[0].total,2);
+    assert.deepEqual(groups.slice(1).map(g=>g.tasks[0].id),[6,5]);
+});
 test('unstarted independent collection hides pending workflow tasks but preserves completed history', () => {
     const tasks=[{id:1,task_type:'product.facts',state:'succeeded'},{id:2,task_type:'research.keywords',state:'queued'},{id:3,task_type:'research.bestseller',state:'waiting'},{id:4,task_type:'image.qc',state:'queued'}];
     assert.deepEqual(helpers.visibleCollectionTasks(tasks,{collection:true,collection_started:false}).map(t=>t.id),[1,4]);

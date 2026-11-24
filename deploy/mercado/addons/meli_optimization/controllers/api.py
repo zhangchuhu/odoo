@@ -239,6 +239,13 @@ class OptimizationAPI(http.Controller):
             return reply(record('task', task_id).host_progress(data['lease_token'], data['lease_epoch'], data['request_id'], data['stage'], data.get('intent_id'), data.get('review_seq'), data.get('review_kind'), data.get('candidate_artifact_id'), data.get('candidate_sha256'), data.get('candidate_attempt_id'), data.get('candidate_attempt_number')))
         return operation(run)
 
+    @http.route('/internal/meli-optimization/tasks/<int:task_id>/host-review-evidence', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def host_review_evidence(self, task_id):
+        def run():
+            data = body()
+            return reply(record('task', task_id).host_review_evidence(data['lease_token'], data['lease_epoch'], data['evidence']))
+        return operation(run)
+
     @http.route('/internal/meli-optimization/tasks/<int:task_id>/checkpoint', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def checkpoint(self, task_id):
         return self._submission(task_id, 'checkpoint')

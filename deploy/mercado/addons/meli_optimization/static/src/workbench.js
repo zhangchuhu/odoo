@@ -2,7 +2,8 @@
 import { Component, onWillStart, useState, useEffect, onWillUnmount } from '@odoo/owl';
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
-import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks } from './workbench_helpers';
+import { session } from '@web/session';
+import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks, groupImageTasks, imageReviewWaiting, workbenchLocation, workbenchListPosition } from './workbench_helpers';
 
 export class OptimizationWorkbench extends Component {
     static template = 'meli_optimization.Workbench';
@@ -13,14 +14,34 @@ export class OptimizationWorkbench extends Component {
         onWillUnmount(() => { this.disposed = true; this.navigationVersion++; });
         this.orm = useService('orm');
         this.notification = useService('notification');
+        this.locationKey = `meli.optimization.workbench.location.v1:${session.uid || 'anonymous'}`;
+        let storedLocation;
+        try { storedLocation = JSON.parse(sessionStorage.getItem(this.locationKey) || 'null'); }
+        catch { storedLocation = null; }
+        const initialLocation = workbenchLocation(storedLocation);
+        const initialList = workbenchListPosition(storedLocation?.list);
+        this.initialScrollTop = initialLocation.scrollTop;
+        this.locationReady = false;
         this.state = useState({ loading: false, error: '', data: null, detail: null, tab: 'snapshot', query: '', page: 0,
             batch: '', status: '', shop: '', site: '', section: 'cases', modal: '', form: {}, taskType: 'product.facts',
-            taskValues: {}, selections: {}, preview: null, collections: [], collectionStartStatus: null, collectionFilters: {query:'',platform:''}, collectionApplied: {}, library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', garmentUploadBusy: false, libraryQuery: '', librarySite: '', libraryFilters: {query:'', platform:'', dateFrom:'', dateTo:''}, libraryApplied: {}, libraryPage: 0, libraryPageSize: 50, libraryTotal: 0, libraryResults: [] });
+            taskValues: {}, selections: {}, preview: null, imageDecision: null, collections: [], collectionStartStatus: null, collectionFilters: {query:'',platform:''}, collectionApplied: {}, library: [], librarySelection: null, libraryContext: null, libraryIndices: [], garmentArtifact: '', garmentUploadBusy: false, libraryQuery: '', librarySite: '', libraryFilters: {query:'', platform:'', dateFrom:'', dateTo:''}, libraryApplied: {}, libraryPage: 0, libraryPageSize: 50, libraryTotal: 0, libraryResults: [] });
+        Object.assign(this.state, initialList);
         this.tabs = [['snapshot','商品快照'],['facts','商品事实'],['tasks','任务队列'],['titles','标题候选'],['research','爆款研究'],
             ['gallery','类似爆款'],['images','图片与质检'],['proposals','变更确认'],['activity','活动与广告'],['effects','效果观察'],['audit','审计记录']];
         this.taskLabels = {'product.facts':'整理商品事实','research.keywords':'关键词研究','research.bestseller':'爆款研究',
             'gallery.collect':'采集 SKU 图库','title.generate':'生成标题候选','image.generate':'逐图生成','image.qc':'图片质检'};
         this.labels = {cases:'商品流程', batches:'优化批次', waiting:'等待条件', failed:'失败任务', pending:'待确认方案'};
+        useEffect(() => { if (this.locationReady) this.saveWorkbenchLocation(); },
+            () => [this.state.section, this.state.detail?.id || null, this.state.tab, this.state.query, this.state.page,
+                   this.state.batch, this.state.status, this.state.shop, this.state.site]);
+        useEffect(() => {
+            const main = document.querySelector('.meli-workbench .mw-main');
+            if (!main) return;
+            const save = () => this.saveWorkbenchLocation(main.scrollTop);
+            main.addEventListener('scroll', save, {passive:true});
+            const frame = requestAnimationFrame(() => { main.scrollTop = this.initialScrollTop; });
+            return () => { cancelAnimationFrame(frame); main.removeEventListener('scroll', save); };
+        }, () => []);
         useEffect(() => {
             if (!this.state.modal) return;
             const dialog = document.querySelector('.mw-modal');
@@ -36,7 +57,34 @@ export class OptimizationWorkbench extends Component {
             dialog.addEventListener('keydown', trap);
             return () => {dialog.removeEventListener('keydown', trap); previous?.focus();};
         }, () => [this.state.modal]);
-        onWillStart(() => this.refresh());
+        onWillStart(() => this.restoreWorkbenchLocation(initialLocation));
+    }
+    saveWorkbenchLocation(scrollTop = null) {
+        if (!this.locationReady) return;
+        const main = document.querySelector('.meli-workbench .mw-main');
+        const value = workbenchLocation({section:this.state.section,caseId:this.state.detail?.id || null,
+            tab:this.state.tab,scrollTop:scrollTop ?? main?.scrollTop ?? this.initialScrollTop});
+        value.list = workbenchListPosition(this.state);
+        try { sessionStorage.setItem(this.locationKey, JSON.stringify(value)); } catch { /* Storage may be disabled. */ }
+    }
+    async restoreWorkbenchLocation(location) {
+        this.state.section = location.section;
+        if (location.caseId) {
+            try {
+                const detail = await this.rpc('workbench_detail',[location.caseId]);
+                const validTabs = detail.collection ? ['tasks','research','gallery','audit'] : this.tabs.map(([key]) => key);
+                this.state.detail = detail;
+                this.state.tab = validTabs.includes(location.tab) ? location.tab : (detail.collection ? 'tasks' : 'snapshot');
+            } catch {
+                this.state.detail = null;
+                this.state.section = 'cases';
+                this.state.tab = 'snapshot';
+                this.initialScrollTop = 0;
+                this.notification.add('原商品不可访问或暂时无法加载，已返回商品列表。', {type:'warning'});
+            }
+        }
+        this.locationReady = true;
+        return this.refresh();
     }
     modalKeydown(event) { if (event.key === 'Escape') this.state.modal = ''; }
     async rpc(method, args) { return this.orm.call('meli.optimization.case', method, args); }
@@ -160,6 +208,7 @@ export class OptimizationWorkbench extends Component {
     resetCollectionFilters() { this.state.collectionFilters = {query:'',platform:''}; this.state.collectionApplied = {}; }
     productImages(value) { return productSourceImages(value); }
     productImage(image) { return image?.artifact_id ? this.libraryImage(image) : this.safeUrl(image?.url); }
+    validImageArtifactId(id) { return Number.isSafeInteger(id) && id > 0; }
     collectionSourceImage(row) {
         const id = row.snapshot?.source_image_artifact_ids?.[0];
         if (!/^[1-9][0-9]*$/.test(String(id || '')) || !Number.isSafeInteger(Number(id))) return '';
@@ -302,6 +351,26 @@ export class OptimizationWorkbench extends Component {
         }, '任务已加入队列，等待具备能力的 Worker');
     }
     async control(task, operation) { return this.perform(async () => {await this.rpc('workbench_control',[this.state.detail.id,task.id,operation]); await this.load();}, '任务状态已更新'); }
+    imageDecisionAvailable(task) {
+        const detail = task?.status_detail;
+        return imageReviewWaiting(task) && !task.lease_expired && task.snapshot_id === this.state.detail?.snapshot?.id && !!detail?.review_evidence && !!detail?.review_report_hash;
+    }
+    reviewCheckLabel(name) { return ({garment_construction:'服装结构',color_material:'颜色与材质',garment_details:'服装细节',identity_pose:'人物与姿势',accessories:'配饰',scene_lighting_framing:'场景、光线与构图',text_layout:'文字与排版'})[name] || name; }
+    reviewCheckStatus(status) { return ({failed:'未通过',unknown:'无法确定',passed:'通过'})[status] || status; }
+    openImageDecision(task, action) {
+        if (!this.imageDecisionAvailable(task) || !['regenerate','manual_accept'].includes(action)) return;
+        this.state.imageDecision = {task, action, note:'', intent_id:crypto.randomUUID().replaceAll('-', '')};
+        this.state.modal = 'image-decision';
+    }
+    async submitImageDecision() {
+        const item=this.state.imageDecision, task=item?.task, status=task?.status_detail, evidence=status?.review_evidence;
+        if (!item || !this.imageDecisionAvailable(task) || !evidence) return;
+        const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
+        return this.perform(async()=>{
+            await this.rpc('workbench_image_review_decide',[context.case_id,task.id,item.action,evidence.review_seq,evidence.candidate_sha256,status.review_report_hash,item.note,item.intent_id]);
+            if (this.contextMatches(context)) {this.state.modal='';await this.load();}
+        }, '已记录处理决定');
+    }
     async resumeImageReview(task) {
         if (task?.status_detail?.code !== 'host_review_required' || !this.state.detail || task.snapshot_id !== this.state.detail.snapshot?.id) return;
         const context={version:this.navigationVersion,case_id:this.state.detail.id,revision:this.state.detail.revision};
@@ -318,6 +387,7 @@ export class OptimizationWorkbench extends Component {
     }
     async retryDerived(task) { return this.perform(async () => { const result = await this.rpc('workbench_retry_derived',[this.state.detail.id,task.id]); await this.load(); if (!result.ok) throw new Error('后续操作仍未完成，请检查任务详情'); }, '后续操作已完成'); }
     get groupedTasks() { return visibleCollectionTasks(groupResearchRetries(this.state.detail?.tasks || [], this.state.detail?.retry_events || []), this.state.detail); }
+    get taskQueueGroups() { return groupImageTasks(this.groupedTasks); }
     get visibleTasks() {
         const kinds={titles:['title.generate'],research:['research.bestseller','research.keywords'],gallery:['gallery.collect'],images:['image.generate','image.qc']};
         return this.groupedTasks.filter(t => (kinds[this.state.tab] || []).includes(t.task_type));
@@ -331,10 +401,12 @@ export class OptimizationWorkbench extends Component {
     value(value) { return displayValue(value); }
     json(value) { return JSON.stringify(value,null,2); }
     collectionImportFailed(task) { return !!this.state.detail?.collection && task.task_type === 'research.bestseller' && task.state === 'succeeded' && task.status_detail?.code === 'derived_action_failed'; }
-    taskStatusClass(task) { return this.collectionImportFailed(task) ? 'failed' : (task.state === 'running' && task.lease_expired ? 'waiting' : task.state); }
+    taskStatusClass(task) { return this.collectionImportFailed(task) ? 'failed' : (imageReviewWaiting(task) || (task.state === 'running' && task.lease_expired) ? 'waiting' : task.state); }
     taskStatusLabel(task) {
         if (this.collectionImportFailed(task)) return '入库失败／待重试';
         if (task.state === 'running' && task.lease_expired) return '租约已过期';
+        if (imageReviewWaiting(task)) return '待处理';
+        if (task.task_type === 'image.generate' && task.state === 'succeeded' && task.result?.visual_qc?.status === 'manual_accepted') return '已完成 · 人工确认使用';
         if (task.task_type === 'research.bestseller') {
             if (task.status_detail?.code === 'research_images_pending') return '结果待入库';
             if (task.state === 'succeeded' && Array.isArray(task.result?.candidates) && !task.result.candidates.length) return '未找到候选商品';

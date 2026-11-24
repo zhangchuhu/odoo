@@ -113,9 +113,73 @@ class GalleryTaskAutomation(models.Model):
     image_qc_key = fields.Char(readonly=True, index=True)
     _unique_image_qc_key = models.Constraint('UNIQUE(image_qc_key)', 'Image QC already exists')
 
+    def _validate_manual_review_decision(self, result):
+        self.ensure_one()
+        qc = result.get('visual_qc') if isinstance(result, dict) else None
+        if not isinstance(qc, dict) or qc.get('status') != 'manual_accepted':
+            return
+        event_id = qc.get('decision_event_id')
+        event = self.env[PREFIX + 'event'].sudo().browse(event_id).exists() if type(event_id) is int and event_id > 0 else self.env[PREFIX + 'event']
+        p = event.payload if event else None
+        image = result.get('image') or {}
+        if (self.snapshot_id != self.case_id._wb_snapshot(self.case_id)
+                or not event or event.task_id != self or event.company_id != self.company_id or event.kind != 'image_review_decision'
+                or not isinstance(p,dict) or event.digest != canonical_hash(p) or p.get('action') != 'manual_accept'
+                or p.get('case_id') != self.case_id.id or p.get('snapshot_id') != self.snapshot_id.id
+                or str(p.get('generation_plan_id')) != str(self.payload.get('generation_plan_id'))
+                or str(p.get('candidate_artifact_id')) != str(image.get('artifact_id'))
+                or p.get('candidate_sha256') != image.get('sha256') or p.get('candidate_sha256') != qc.get('candidate_sha256')
+                or p.get('report_hash') != canonical_hash(qc.get('report')) or p.get('request_id') != result.get('request_id')):
+            raise ValidationError('人工确认记录与图片或任务不匹配')
+
+    def host_review_evidence(self, token, epoch, evidence):
+        """Attach a worker-reported QC report to its exact waiting candidate."""
+        self._authorize('worker')
+        self._lock()
+        self._fence(token, epoch)
+        current = self.status_detail or {}
+        if self.task_type != 'image.generate' or current.get('code') != 'host_review_required' or not isinstance(evidence, dict):
+            raise ValidationError('当前任务没有待处理候选')
+        required = {'request_id','review_seq','candidate_artifact_id','candidate_sha256','candidate_attempt_id','candidate_attempt_number','report'}
+        if set(evidence) != required or evidence['request_id'] != current.get('request_id') or evidence['review_seq'] != current.get('review_seq'):
+            raise ValidationError('复核请求或轮次不匹配')
+        aid, digest, attempt, number, report = (evidence[k] for k in ('candidate_artifact_id','candidate_sha256','candidate_attempt_id','candidate_attempt_number','report'))
+        if type(aid) is not int or aid <= 0 or not isinstance(attempt, str) or not re.fullmatch(r'[0-9a-f]{32}', attempt) or type(number) is not int or number not in (1,2,3):
+            raise ValidationError('候选尝试标识无效')
+        if current.get('review_kind') == 'best_of_budget' and any(current.get(k) != evidence[k] for k in ('candidate_artifact_id','candidate_sha256','candidate_attempt_id','candidate_attempt_number')):
+            raise ValidationError('候选与所选最佳图片不匹配')
+        artifact = self.env[PREFIX + 'artifact'].browse(aid).exists()
+        if not artifact or artifact.case_id != self.case_id or artifact.company_id != self.company_id or not artifact.data or artifact.mime_type not in ('image/png','image/jpeg','image/webp') or artifact.digest != digest:
+            raise ValidationError('候选图片归属或摘要无效')
+        raw = base64.b64decode(artifact.data, validate=True)
+        verified_image(raw, artifact.mime_type)
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise ValidationError('候选图片摘要无效')
+        names = {'garment_construction','color_material','garment_details','identity_pose','accessories','scene_lighting_framing','text_layout'}
+        checks = report.get('checks') if isinstance(report, dict) else None
+        binding = report.get('quality_binding') if isinstance(report, dict) else None
+        if (not isinstance(binding, dict) or binding.get('request_id') != evidence['request_id'] or binding.get('candidate_sha256') != digest
+                or not isinstance(report.get('skill_report'), dict) or not isinstance(checks, list) or len(checks) != len(names)
+                or any(not isinstance(c, dict) or c.get('status') not in ('passed','failed','unknown') or not c.get('evidence') for c in checks)
+                or {c.get('name') for c in checks} != names):
+            raise ValidationError('质检报告缺失或与候选不匹配')
+        bounded(evidence)
+        existing = current.get('review_evidence')
+        if existing and existing != evidence:
+            raise ValidationError('同一复核轮次的证据不可更改')
+        if not existing:
+            key = 'image-review-evidence:' + hashlib.sha256((evidence['request_id'] + ':' + str(evidence['review_seq'])).encode()).hexdigest()
+            record = self.env[PREFIX + 'event']._append({'task_id': self.id, 'company_id': self.company_id.id,
+                'submission_key': key, 'digest': canonical_hash(evidence), 'kind': 'image_review_evidence',
+                'payload': evidence, 'receipt': {'review_seq': evidence['review_seq']}, 'worker_uid': self.env.uid})
+            progress = dict(current, review_evidence=evidence, review_evidence_event_id=record.id,
+                            review_report_hash=canonical_hash(evidence['report']))
+            self._set({'status_detail': progress})
+        return self._envelope()
+
     def _envelope(self):
         envelope = super()._envelope()
-        if self.task_type == 'image.generate' and (self.status_detail or {}).get('code') in ('host_review_required','host_resume_requested','host_review_resumed','host_color_required'):
+        if self.task_type == 'image.generate' and (self.status_detail or {}).get('code') in ('host_review_required','host_resume_requested','host_review_resumed','host_color_required','image_decision_requested'):
             envelope['host_progress'] = self.status_detail
         if self.task_type != 'image.qc':
             return envelope
@@ -157,7 +221,7 @@ class GalleryTaskAutomation(models.Model):
             self._set({'status_detail': {'code': 'host_color_required', 'request_id': request_id,
                 'message': '目标 SKU 或颜色无法确认。请核对商品规格，选择单一颜色的参考图后新建生成任务。'}})
             return self._envelope()
-        if current.get('code') in ('host_review_required', 'host_resume_requested', 'host_review_resumed') and current.get('request_id') != request_id:
+        if current.get('code') in ('host_review_required', 'host_resume_requested', 'host_review_resumed', 'image_decision_requested') and current.get('request_id') != request_id:
             raise ValidationError('复核请求与当前任务不匹配')
         if stage == 'review_required' and review_seq == 1 and current.get('code') in ('host_review_required','host_resume_requested') and current.get('request_id') == request_id and not current.get('review_seq'):
             current = {}
@@ -183,7 +247,8 @@ class GalleryTaskAutomation(models.Model):
                 raise ValidationError('复核轮次已过期或不连续')
         if stage == 'resumed' and current.get('code') == 'host_review_resumed' and current.get('request_id') == request_id and intent_id and current.get('intent_id') == intent_id and current_seq == review_seq:
             return self._envelope()
-        if stage == 'resumed' and (current.get('code') != 'host_resume_requested' or current.get('request_id') != request_id or not intent_id or current.get('intent_id') != intent_id or current_seq != review_seq):
+        requested_intent = ((current.get('decision') or {}).get('intent_id') if current.get('code') == 'image_decision_requested' else current.get('intent_id'))
+        if stage == 'resumed' and (current.get('code') not in ('host_resume_requested','image_decision_requested') or current.get('request_id') != request_id or not intent_id or requested_intent != intent_id or current_seq != review_seq):
             raise ValidationError('没有匹配的复核恢复请求')
         code, message = ('host_review_required','图片候选等待人工复核；恢复不会重新生成。') if stage == 'review_required' else ('host_review_resumed','已请求继续复核原图片。')
         progress = {'code':code,'message':message,'request_id':request_id,'review_seq':review_seq}
@@ -198,6 +263,8 @@ class GalleryTaskAutomation(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        if any(v.get('task_type', self.env.context.get('default_task_type')) == 'image.qc' for v in vals_list):
+            raise ValidationError('图片质检已包含在逐图生成任务中')
         if 'default_image_qc_key' in self.env.context or any('image_qc_key' in v for v in vals_list):
             raise AccessError('QC key is server managed')
         records = super().create(vals_list)
@@ -284,13 +351,6 @@ class GalleryTaskAutomation(models.Model):
             artifact = self.env[PREFIX + 'artifact'].sudo().browse(int(ref)).exists() if ref.isdigit() else self.env[PREFIX + 'artifact']
             if not artifact or artifact.case_id != case or artifact.company_id != case.company_id or not artifact.data or artifact.digest != image.get('sha256') or artifact.mime_type != image.get('mime_type'):
                 raise ValidationError('生成图片产物归属或摘要无效')
-            plan = self.payload['generation_plan_id']
-            tasks = self.env[PREFIX + 'task'].sudo()
-            prior = tasks.search([('case_id', '=', case.id), ('snapshot_id', '=', self.snapshot_id.id), ('task_type', '=', 'image.qc')])
-            if not any(t.payload.get('image_artifact_id') == ref and t.payload.get('generation_plan_id') == plan for t in prior):
-                created = tasks.create({'case_id': case.id, 'snapshot_id': self.snapshot_id.id, 'task_type': 'image.qc',
-                              'payload': {'schema_version': '1', 'image_artifact_id': ref, 'generation_plan_id': plan}})
-                created._set({'image_qc_key': canonical_hash([case.company_id.id, case.id, self.snapshot_id.id, plan, ref])})
 
 
 class CollectionWorkbench(models.Model):
@@ -301,6 +361,62 @@ class CollectionWorkbench(models.Model):
     collection_list_hidden = fields.Boolean(default=False, readonly=True, index=True)
     collection_fence_version = fields.Integer(default=0, readonly=True)
     qc_revision = fields.Integer(default=0, readonly=True)
+
+    @api.model
+    def workbench_image_review_decide(self, case_id, task_id, action, review_seq, candidate_sha256, report_hash, note, intent_id):
+        case = self._wb_case(case_id, True)
+        task = self.env[PREFIX + 'task'].browse(int(task_id)).exists()
+        if not task or task.case_id != case:
+            raise ValidationError('任务不属于当前商品')
+        task._authorize('editor')
+        case._lock()
+        task._lock()
+        if (action not in ('regenerate','manual_accept') or type(review_seq) is not int or review_seq < 1
+                or not isinstance(intent_id, str) or not re.fullmatch(r'[0-9a-f]{32}', intent_id)
+                or not isinstance(note, str) or len(note) > 1000):
+            raise ValidationError('无效的图片处理决定')
+        events = self.env[PREFIX + 'event']
+        key = 'image-decision:' + intent_id
+        prior = events.search([('task_id','=',task.id), ('submission_key','=',key)], limit=1)
+        if prior:
+            p = prior.payload
+            if any(p.get(k) != v for k,v in {'action':action,'review_seq':review_seq,'candidate_sha256':candidate_sha256,'report_hash':report_hash,'note':note,'actor_id':self.env.uid}.items()):
+                raise ValidationError('处理请求已用于其他决定')
+            return prior.receipt
+        current = task.status_detail or {}
+        evidence = current.get('review_evidence')
+        if (task.task_type != 'image.generate' or task.state != 'running' or not task.lease_expires_at
+                or task.lease_expires_at <= fields.Datetime.now() or task.snapshot_id != self._wb_snapshot(case)
+                or current.get('code') != 'host_review_required' or not isinstance(evidence,dict)
+                or evidence.get('review_seq') != review_seq or evidence.get('candidate_sha256') != candidate_sha256
+                or canonical_hash(evidence.get('report')) != report_hash):
+            raise ValidationError('候选或任务状态已变化，请刷新')
+        request = self.env[PREFIX + 'external.request'].search([('task_id','=',task.id),('request_id','=',evidence['request_id']),('state','=','unknown'),('retry_superseded','=',False)],limit=1)
+        ref = str(task.payload.get('generation_plan_id') or '')
+        plan = self.env[PREFIX + 'artifact'].browse(int(ref)).exists() if ref.isdigit() else self.env[PREFIX + 'artifact']
+        p = plan.payload if plan else None
+        if (not request or not plan or plan.case_id != case or plan.company_id != case.company_id or not isinstance(p,dict)
+                or plan.digest != canonical_hash(p) or str(p.get('snapshot_id')) != str(task.snapshot_id.id)
+                or str(p.get('case_id')) != str(case.id)
+                or not isinstance(p.get('target_artifact_ids'), list) or not isinstance(p.get('source_artifact_ids'), list)
+                or not isinstance(task.payload.get('source_artifact_ids'), list)
+                or str(task.payload.get('target_artifact_id')) not in [str(i) for i in p.get('target_artifact_ids',[])]
+                or [str(i) for i in p.get('source_artifact_ids',[])] != [str(i) for i in task.payload.get('source_artifact_ids',[])]):
+            raise ValidationError('生成计划、图片或原请求无效')
+        payload = {'action':action,'intent_id':intent_id,'case_id':case.id,'snapshot_id':task.snapshot_id.id,
+                   'generation_plan_id':plan.id,'request_id':evidence['request_id'],'review_seq':review_seq,
+                   'candidate_artifact_id':evidence['candidate_artifact_id'],'candidate_sha256':candidate_sha256,
+                   'candidate_attempt_id':evidence['candidate_attempt_id'],'candidate_attempt_number':evidence['candidate_attempt_number'],
+                   'report_hash':report_hash,'note':note,
+                   'actor_id':self.env.uid,'decided_at':fields.Datetime.to_string(fields.Datetime.now())}
+        event = events._append({'task_id':task.id,'company_id':task.company_id.id,'submission_key':key,
+             'digest':canonical_hash(payload),'kind':'image_review_decision','payload':payload,
+             'receipt':{'intent_id':intent_id},'worker_uid':self.env.uid})
+        receipt = {'intent_id':intent_id,'event_id':event.id}
+        event._set({'receipt':receipt})
+        task._set({'status_detail':dict(current,code='image_decision_requested',decision=payload,decision_event_id=event.id,
+                                      message='已记录人工处理决定，等待宿主处理。')})
+        return receipt
 
     @api.model
     def workbench_request_best_review_resume(self, case_id, task_id, candidate_artifact_id, candidate_sha256, candidate_attempt_id, candidate_attempt_number, expected_review_seq):

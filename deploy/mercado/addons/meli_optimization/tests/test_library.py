@@ -411,63 +411,18 @@ class LibraryCase(TransactionCase):
         self.assertEqual(self.env['meli.optimization.artifact'].search_count([('case_id', '=', detail['id'])]), count)
         self.assertEqual(self.ui.workbench_detail(detail['id'])['snapshot']['id'], current['snapshot']['id'])
 
-    def test_concurrent_qc_creation_fences_stale_image_confirmation(self):
-        registry = self.env.registry
-        with registry.cursor() as setup:
-            env = odoo.api.Environment(setup, odoo.SUPERUSER_ID, {})
-            d = env['meli.optimization.case'].workbench_create({'shop':'test','item_id':'concurrent-qc','title':'test'})
-            p = env['meli.optimization.proposal'].create({'case_id':d['id'], 'payload':{'action':'images'}})
-            case_id, snap_id, proposal_id, digest = d['id'], d['snapshot']['id'], p.id, p.digest
-            setup.commit()
-        with registry.cursor() as stale, registry.cursor() as writer:
-            old = odoo.api.Environment(stale, odoo.SUPERUSER_ID, {})
-            fresh = odoo.api.Environment(writer, odoo.SUPERUSER_ID, {})
-            old['meli.optimization.case'].browse(case_id).read(['revision'])
-            fresh['meli.optimization.task'].create({'case_id':case_id, 'snapshot_id':snap_id, 'task_type':'image.qc',
-                'payload':{'schema_version':'1','image_artifact_id':'1','generation_plan_id':'1'}})
-            writer.commit()
-            with self.assertRaises(SerializationFailure):
-                old['meli.optimization.proposal'].browse(proposal_id).confirm(digest)
-
-    def test_qc_key_uniqueness_across_independent_transactions(self):
-        registry = self.env.registry
-        with registry.cursor() as setup:
-            env = odoo.api.Environment(setup, odoo.SUPERUSER_ID, {})
-            d = env['meli.optimization.case'].workbench_create({'shop':'test','item_id':'qc-key-race','title':'test'})
-            values = {'case_id':d['id'], 'snapshot_id':d['snapshot']['id'], 'task_type':'image.qc',
-                      'payload':{'schema_version':'1','image_artifact_id':'1','generation_plan_id':'1'}}
-            one = env['meli.optimization.task'].create(values).id
-            two = env['meli.optimization.task'].create(values).id
-            setup.commit()
-        with registry.cursor() as first, registry.cursor() as second:
-            env1 = odoo.api.Environment(first, odoo.SUPERUSER_ID, {})
-            env2 = odoo.api.Environment(second, odoo.SUPERUSER_ID, {})
-            env2['meli.optimization.task'].browse(two).read(['id'])
-            env1['meli.optimization.task'].browse(one)._set({'image_qc_key':'same-qc-identity'})
-            env1['meli.optimization.task'].flush_model(['image_qc_key'])
-            first.commit()
-            with self.assertRaises(UniqueViolation):
-                env2['meli.optimization.task'].browse(two)._set({'image_qc_key':'same-qc-identity'})
-                env2['meli.optimization.task'].flush_model(['image_qc_key'])
-
-    def test_concurrent_qc_transition_fences_stale_image_confirmation(self):
-        registry = self.env.registry
-        with registry.cursor() as setup:
-            env = odoo.api.Environment(setup, odoo.SUPERUSER_ID, {})
-            d = env['meli.optimization.case'].workbench_create({'shop':'test','item_id':'qc-transition-race','title':'test'})
-            p = env['meli.optimization.proposal'].create({'case_id':d['id'], 'payload':{'action':'images'}})
-            qc = env['meli.optimization.task'].create({'case_id':d['id'], 'snapshot_id':d['snapshot']['id'], 'task_type':'image.qc',
-                'payload':{'schema_version':'1','image_artifact_id':'1','generation_plan_id':'1'}})
-            case_id, proposal_id, digest, qc_id = d['id'], p.id, p.digest, qc.id
-            setup.commit()
-        with registry.cursor() as stale, registry.cursor() as writer:
-            old = odoo.api.Environment(stale, odoo.SUPERUSER_ID, {})
-            fresh = odoo.api.Environment(writer, odoo.SUPERUSER_ID, {})
-            old['meli.optimization.case'].browse(case_id).read(['qc_revision'])
-            fresh['meli.optimization.task'].browse(qc_id)._transition('running')
-            writer.commit()
-            with self.assertRaises(SerializationFailure):
-                old['meli.optimization.proposal'].browse(proposal_id).confirm(digest)
+    def test_independent_qc_creation_rejected_even_via_defaults(self):
+        detail = self.collection()
+        values = {'case_id': detail['id'], 'snapshot_id': detail['snapshot']['id'],
+                  'task_type': 'image.qc', 'payload': {'schema_version': '1',
+                  'image_artifact_id': '1', 'generation_plan_id': '1'}}
+        tasks = self.env['meli.optimization.task']
+        with self.assertRaises(ValidationError):
+            tasks.create(values)
+        with self.assertRaises(ValidationError):
+            tasks.with_context(default_task_type='image.qc').create(
+                {key: value for key, value in values.items() if key != 'task_type'})
+        self.assertFalse(tasks.search([('case_id', '=', detail['id']), ('task_type', '=', 'image.qc')]))
 
     def test_import_error_does_not_rollback_completed_gallery(self):
         detail = self.collection()
@@ -638,52 +593,23 @@ class LibraryCase(TransactionCase):
         evidence = [{'id':'e', 'source':'fixture', 'observed_at':'2026-11-15T00:00:00Z'}]
         image = {'image_id':'generated', 'order':0, 'role':'front', 'artifact_id':str(output.id),
                  'source':'fixture', 'evidence_ids':['e'], 'mime_type':'image/png', 'width':1, 'height':1, 'sha256':output.digest}
-        result = {'schema_version':'1', 'request_id':'fixture', 'evidence':evidence, 'image':image}
+        result = {'schema_version':'1', 'request_id':'fixture', 'evidence':evidence, 'image':image,
+                  'visual_qc': {'status':'passed', 'candidate_sha256':output.digest, 'report':{'decision':'accept'}}}
         claim = generated.claim(['image.generate'])
         generated.complete(claim['lease_token'], claim['lease_epoch'], 'generated', result)
         qcs = self.env['meli.optimization.task'].search([('case_id','=',destination['id']), ('task_type','=','image.qc')])
-        self.assertEqual(len(qcs), 1)
-        self.assertEqual(qcs.payload['image_artifact_id'], str(output.id))
+        self.assertEqual(len(qcs), 0)
         generated.complete(claim['lease_token'], claim['lease_epoch'], 'generated', result)
-        self.assertEqual(self.env['meli.optimization.task'].search_count([('case_id','=',destination['id']), ('task_type','=','image.qc')]), 1)
-        with self.assertRaises(ValidationError):
-            self.ui.workbench_propose(destination['id'], generated.id, canonical_hash(result), 'images', [0])
+        self.assertEqual(self.env['meli.optimization.task'].search_count([('case_id','=',destination['id']), ('task_type','=','image.qc')]), 0)
         forged = self.env['meli.optimization.proposal'].create({'case_id':destination['id'], 'payload': {
             'action':'images', 'task_id':generated.id, 'result_hash':canonical_hash(result), 'desired_value':[image]}})
-        with self.assertRaises(ValidationError):
-            forged.confirm(forged.digest)
-        qc_claim = qcs.claim(['image.qc'])
-        self.assertEqual(qc_claim['generation_task_id'], generated.id)
-        self.assertEqual(qc_claim['generation_target_artifact_id'], generated.payload['target_artifact_id'])
-        duplicate = self.env['meli.optimization.task'].create({'case_id':destination['id'], 'snapshot_id':generated.snapshot_id.id,
-            'task_type':'image.generate', 'payload':generated.payload})
-        duplicate._set({'state':'succeeded', 'result':result})
-        self.assertNotIn('generation_target_artifact_id', qcs._envelope())
-        duplicate._set({'state':'cancelled'})
-        failed_result = {'schema_version':'1', 'evidence':evidence, 'image_artifact_id':str(output.id), 'status':'failed',
-                         'checks':[{'name':'garment_construction','status':'failed','evidence_ids':['e']}]}
-        qcs.complete(qc_claim['lease_token'], qc_claim['lease_epoch'], 'qc-failed', failed_result)
-        with self.assertRaises(ValidationError):
-            self.ui.workbench_propose(destination['id'], generated.id, canonical_hash(result), 'images', [0])
-        passed_id = self.ui.workbench_task(destination['id'], 'image.qc', {'image_artifact_id':str(output.id),
-            'generation_plan_id':str(plan.id)})
-        passed = self.env['meli.optimization.task'].browse(passed_id)
-        qc_claim = passed.claim(['image.qc'])
-        qc_result = {'schema_version':'1', 'evidence':evidence, 'image_artifact_id':str(output.id), 'status':'passed',
-                     'checks':[{'name':name,'status':'passed','evidence_ids':['e']} for name in (
-                         'garment_construction','color_material','garment_details','identity_pose','accessories',
-                         'scene_lighting_framing','text_layout')]}
-        passed.complete(qc_claim['lease_token'], qc_claim['lease_epoch'], 'qc-passed', qc_result)
         proposal = self.ui.workbench_propose(destination['id'], generated.id, canonical_hash(result), 'images', [0])
         self.assertTrue(proposal['id'])
         self.assertTrue(self.ui.workbench_confirm(destination['id'], proposal['id'], proposal['digest']))
-        newest_id = self.ui.workbench_task(destination['id'], 'image.qc', {'image_artifact_id':str(output.id),
-            'generation_plan_id':str(plan.id)})
-        newest = self.env['meli.optimization.task'].browse(newest_id)
-        newest_claim = newest.claim(['image.qc'])
-        newest.complete(newest_claim['lease_token'], newest_claim['lease_epoch'], 'newer-failed', failed_result)
         with self.assertRaises(ValidationError):
-            self.ui.workbench_propose(destination['id'], generated.id, canonical_hash(result), 'images', [0])
+            self.ui.workbench_task(destination['id'], 'image.qc', {'image_artifact_id':str(output.id), 'generation_plan_id':str(plan.id)})
+        tampered = dict(result, visual_qc={'status':'passed', 'candidate_sha256':'0'*64, 'report':{}})
+        generated._set({'result':tampered})
         with self.assertRaises(ValidationError):
             self.env['meli.optimization.proposal'].browse(proposal['id']).confirm(proposal['digest'])
         self.assertEqual(plan.payload['target_count'], 1)

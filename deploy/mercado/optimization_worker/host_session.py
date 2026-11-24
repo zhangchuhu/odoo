@@ -531,13 +531,6 @@ class SessionStore:
             if r['state'] != 'planning':
                 raise ValueError('Plan already immutable')
             self._verify_views(r, plan.get('viewed_digests'))
-            from .color_guard import ColorUncertain, validate_colors
-            try:
-                validate_colors(r['context'].get('snapshot', {}).get('payload', {}), plan)
-            except ColorUncertain:
-                r.update(state='waiting', reason='target_color_unconfirmed', resume_state='planning')
-                self._put(db, r)
-                return
             from .outfit_plan import validate_and_render
             source_ids = r['payload']['source_artifact_ids']
             source_digests = {ref: r['context']['artifacts'][ref]['digest'] for ref in source_ids}
@@ -635,15 +628,8 @@ class SessionStore:
     def dispatch(self, request_id, capabilities, viewed_digests):
         with self._db() as db:
             r = self._get(db, request_id)
-            if r.get('retired') or r['state'] != 'prepared' or r['task_type'] != 'image.generate':
+            if r.get('retired') or r.get('resume_ack_pending') or r['state'] != 'prepared' or r['task_type'] != 'image.generate':
                 return {'should_invoke': False, 'request_id': request_id, 'state': r['state']}
-            from .color_guard import ColorUncertain, validate_colors
-            try:
-                validate_colors(r['context'].get('snapshot', {}).get('payload', {}), r.get('plan'))
-            except ColorUncertain:
-                r.update(state='waiting', reason='target_color_unconfirmed', resume_state='planning')
-                self._put(db, r)
-                return {'should_invoke': False, 'request_id': request_id, 'state': 'waiting', 'reason': 'target_color_unconfirmed'}
             _capabilities(capabilities, 'image.generate')
             self._verify_views(r, viewed_digests, r['ordered_image_paths'])
             if viewed_digests != r['generation_digests']:
@@ -660,6 +646,8 @@ class SessionStore:
             r, number = start(r)
             attempt_id = uuid.uuid4().hex
             invocation = copy.deepcopy(r['invocation'])
+            if number == 1 and r.get('manual_retry_correction'):
+                invocation['prompt'] += '\nCorrection: ' + r['manual_retry_correction']
             if number > 1:
                 defect = r['quality_cycle']['attempts'][-2]['report'].get('primary_defect')
                 if defect not in CORRECTIONS:
@@ -789,6 +777,79 @@ class SessionStore:
                 self._put(db, r)
             return r['review_seq']
 
+    def review_evidence(self, request_id):
+        """Return only a candidate paired with its own complete QC report."""
+        with self._db() as db:
+            r = self._get(db, request_id)
+            if r.get('retired') or r.get('state') != 'waiting' or r.get('reason') not in ('candidate_qc_unsettled', 'best_of_budget_review_required'):
+                raise ValueError('Candidate is not awaiting a decision')
+            attempts = r.get('quality_cycle', {}).get('attempts', [])
+            selected = r.get('best_of_budget') if r.get('reason') == 'best_of_budget_review_required' else None
+            number = selected.get('attempt_number') if selected else len(attempts)
+            if type(number) is not int or not 1 <= number <= len(attempts):
+                raise ValueError('Candidate attempt unavailable')
+            attempt = attempts[number - 1]
+            upload = r.get('uploads', {}).get('candidate' if number == 1 else f'candidate_{number}') or {}
+            digest = upload.get('sha256')
+            report = attempt.get('full_qc_report') or r.get('qc')
+            if (not isinstance(report, dict) or (report.get('quality_binding') or {}).get('candidate_sha256') != digest
+                    or attempt.get('digest') != digest or not str(upload.get('artifact_id', '')).isdigit()
+                    or int(upload['artifact_id']) <= 0 or not attempt.get('attempt_id')
+                    or (selected and (str(selected.get('artifact_id')) != str(upload['artifact_id'])
+                                      or selected.get('sha256') != digest or selected.get('attempt_id') != attempt['attempt_id']))):
+                raise ValueError('Candidate and QC report are not bound')
+            return {'request_id': request_id, 'review_seq': r.get('review_seq'),
+                    'candidate_artifact_id': int(upload['artifact_id']), 'candidate_sha256': digest,
+                    'candidate_attempt_id': attempt['attempt_id'], 'candidate_attempt_number': number,
+                    'report': copy.deepcopy(report)}
+
+    def consume_image_decision(self, request_id, decision, event_id):
+        """Consume a server-recorded decision once, without changing its QC report."""
+        if not isinstance(decision, dict) or decision.get('action') not in ('manual_accept','regenerate') or type(event_id) is not int or event_id <= 0:
+            raise ValueError('Invalid recorded image decision')
+        intent = decision.get('intent_id')
+        if not isinstance(intent, str) or not re.fullmatch(r'[0-9a-f]{32}', intent):
+            raise ValueError('Invalid image decision intent')
+        current = self.inspect(request_id)
+        if current.get('decision_intent_id') == intent:
+            if current.get('decision_event_id') != event_id or current.get('decision_digest') != canonical_hash(decision):
+                raise ValueError('Decision replay differs')
+            return False
+        evidence = self.review_evidence(request_id)
+        for key in ('request_id','review_seq','candidate_artifact_id','candidate_sha256','candidate_attempt_id','candidate_attempt_number'):
+            if decision.get(key) != evidence.get(key):
+                raise ValueError('Decision candidate binding mismatch')
+        if decision.get('report_hash') != canonical_hash(evidence['report']):
+            raise ValueError('Decision report binding mismatch')
+        with self._db() as db:
+            r = self._get(db, request_id)
+            if r.get('retired') or r.get('state') != 'waiting' or r.get('review_seq') != evidence['review_seq']:
+                raise ValueError('Decision became stale')
+            number = evidence['candidate_attempt_number']
+            upload = r['uploads']['candidate' if number == 1 else f'candidate_{number}']
+            if upload.get('sha256') != evidence['candidate_sha256'] or int(upload.get('artifact_id') or 0) != evidence['candidate_artifact_id']:
+                raise ValueError('Candidate changed')
+            r.update(decision_intent_id=intent, decision_event_id=event_id, decision_digest=canonical_hash(decision),
+                     resume_intent_id=intent, resume_ack_pending=True)
+            if decision['action'] == 'manual_accept':
+                image = {k:v for k,v in upload.items() if k != 'path'}
+                image.update(image_id='candidate',order=0,role='generated',source='codex-session:'+request_id,evidence_ids=['host'])
+                r.update(state='resolved', result={'schema_version':'1','request_id':request_id,'image':image,
+                    'evidence':[{'id':'host','source':'codex-session:'+request_id,'observed_at':datetime.now(timezone.utc).isoformat()}],
+                    'visual_qc':{'status':'manual_accepted','candidate_sha256':evidence['candidate_sha256'],
+                                 'report':evidence['report'],'decision_event_id':event_id}})
+            else:
+                r.setdefault('quality_round_history', []).append({'quality_cycle':copy.deepcopy(r.get('quality_cycle')),
+                    'uploads':copy.deepcopy(r.get('uploads')), 'qc':copy.deepcopy(r.get('qc')), 'decision':copy.deepcopy(decision)})
+                defect = (evidence['report'].get('skill_report') or {}).get('primary_defect')
+                r['manual_retry_correction'] = CORRECTIONS.get(defect, 'Match all visible garment details and color to the reference images.')
+                for key in ('quality_cycle','best_of_budget','active_review_binding','qc'):
+                    r.pop(key, None)
+                r['uploads'] = {}
+                r.update(state='prepared',reason='user_regeneration',resume_intent_id=intent,resume_ack_pending=True)
+            self._put(db, r)
+            return True
+
     def consume_best_resume(self, request_id, intent_id, review_seq, selected):
         if not isinstance(intent_id, str) or not intent_id or len(intent_id) > 100:
             raise ValueError('Valid review intent required')
@@ -822,7 +883,7 @@ class SessionStore:
     def result(self, request_id):
         with self._db() as db:
             r = self._get(db, request_id)
-            return copy.deepcopy(r.get('result')) if r['state'] == 'resolved' else None
+            return copy.deepcopy(r.get('result')) if r['state'] == 'resolved' and not r.get('resume_ack_pending') else None
 
     def submit(self, request_id, result, capabilities):
         with self._db() as db:
@@ -1090,6 +1151,9 @@ class SessionStore:
             validate_binding(binding, report.get('quality_binding'))
             actual_digest = hashlib.sha256(Path(r['candidate_path']).read_bytes()).hexdigest()
             quality = evaluate(report.get('skill_report'), f'candidate_{number}', digest, actual_digest, number, infographic=r.get('confirmed_inventory') is not None)
+            # Keep the complete report with its own attempt. The latest report
+            # may belong to a different image than the selected best candidate.
+            attempt['full_qc_report'] = copy.deepcopy(report)
             if best:
                 from .outfit_quality import parse_report, early_accept
                 parsed = parse_report(json.dumps(report['skill_report'], allow_nan=False), infographic=r.get('confirmed_inventory') is not None)
@@ -1119,7 +1183,8 @@ class SessionStore:
                 image.update(image_id='candidate', order=0, role='generated', source='codex-session:' + request_id, evidence_ids=['host'])
                 r.update(state='resolved', result={'schema_version': '1', 'request_id': request_id,
                     'image': image, 'evidence': [{'id': 'host', 'source': 'codex-session:' + request_id,
-                        'observed_at': datetime.now(timezone.utc).isoformat()}], 'visual_qc': report})
+                        'observed_at': datetime.now(timezone.utc).isoformat()}], 'visual_qc': {
+                            'status': 'passed', 'candidate_sha256': digest, 'report': report}})
             self._put(db, r)
 
     def compare(self, request_id, evidence):
@@ -1216,6 +1281,28 @@ def synchronize_live(client, store, journal_path):
             continue
         remote = response.get('host_progress') or {}
         review_seq = local.get('review_seq')
+        if (remote.get('code') == 'image_decision_requested' and remote.get('request_id') == request_id
+                and remote.get('review_seq') == review_seq):
+            decision, event_id = remote.get('decision'), remote.get('decision_event_id')
+            store.consume_image_decision(request_id, decision, event_id)
+            client.host_progress(record['claim'], request_id, 'resumed', decision['intent_id'], review_seq)
+            store.acknowledge_review_resume(request_id, decision['intent_id'])
+            continue
+        if (remote.get('code') == 'host_review_resumed' and local.get('resume_ack_pending')
+                and local.get('decision_intent_id') == remote.get('intent_id')
+                and remote.get('request_id') == request_id and remote.get('review_seq') == review_seq):
+            store.acknowledge_review_resume(request_id, remote['intent_id'])
+            continue
+        if (local.get('state') == 'waiting' and remote.get('code') == 'host_review_required'
+                and remote.get('request_id') == request_id and remote.get('review_seq') == review_seq
+                and callable(getattr(client, 'host_review_evidence', None))):
+            try:
+                evidence = store.review_evidence(request_id)
+            except ValueError:
+                # Historical candidates lacking a bound full report remain waiting.
+                evidence = None
+            if evidence and remote.get('review_evidence') != evidence:
+                client.host_review_evidence(record['claim'], evidence)
         if local.get('state') == 'waiting' and local.get('reason') == 'target_color_unconfirmed':
             if remote.get('code') != 'host_color_required' or remote.get('request_id') != request_id:
                 client.host_progress(record['claim'], request_id, 'color_required', review_seq=1)

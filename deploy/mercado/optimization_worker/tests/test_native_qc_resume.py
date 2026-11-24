@@ -4,6 +4,17 @@ from unittest.mock import patch
 from optimization_worker.host_session import SessionStore,synchronize_live
 
 class NativeQCResumeTest(unittest.TestCase):
+ def test_recorded_decision_is_consumed_and_acknowledged_once(self):
+  from unittest.mock import Mock
+  store=Mock();store.request_ids.return_value=['r']
+  store.inspect.return_value={'state':'waiting','task_type':'image.generate','review_seq':1}
+  store.consume_image_decision.return_value=True
+  decision={'action':'regenerate','request_id':'r','review_seq':1,'intent_id':'f'*32}
+  client=Mock();client.heartbeat.return_value={'host_progress':{'code':'image_decision_requested','request_id':'r','review_seq':1,'decision':decision,'decision_event_id':42}}
+  with patch('optimization_worker.host_session.worker_records',return_value=[{'claim':{'id':1},'request_id':'r'}]):synchronize_live(client,store,'ignored')
+  store.consume_image_decision.assert_called_once_with('r',decision,42)
+  client.host_progress.assert_called_once_with({'id':1},'r','resumed','f'*32,1)
+  store.acknowledge_review_resume.assert_called_once_with('r','f'*32)
  def test_best_of_budget_reports_selected_artifact_but_never_resumes(self):
   with tempfile.TemporaryDirectory() as d:
    s=SessionStore(Path(d)/'host.sqlite','test');s.enqueue('r','image.generate',{}, {'artifacts': {}})

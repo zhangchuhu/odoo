@@ -172,12 +172,8 @@ means the repository virtual environment with the PYTHONPATH above.
    every source), `garment_facts` (`required` and `forbidden` bounded codes),
    `garment_instances`, target-angle `classification`, and `viewed_digests` (the
    complete `input_digests` returned by next). The edit prompt is code-owned;
-   Also include `target_color` and each source observation `observed_color` using
-   canonical codes in `optimization_worker/color_guard.py`; establish color from
-   snapshot and inspect each image. Do not guess a SKU or color. For ambiguity,
-   mixed variants or conflicting/missing evidence, submit `unknown` with the
-   exact viewed digests; the local gate moves the request to waiting. Current
-   gate does not resolve multi-color SKU selection, even with a preferred color.
+   Color metadata does not gate image generation; inspect the actual originals
+   and preserve visible garment evidence without inventing details.
    do not submit free-form instructions as garment facts. Target first is code-owned.
    For `infographic`, the first plan is tentative. Each `read_inventory` action
    requires reopening the same target original and submitting `inventory --request-id
