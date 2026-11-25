@@ -585,7 +585,7 @@ export class OptimizationWorkbench extends Component {
     }
     async runImagePublication(context, jobId) {
         let result={id:jobId,state:'queued'};
-        for (let i=0;i<101 && this.contextMatches(context);i++) {
+        for (let i=0;i<200 && this.contextMatches(context);i++) {
             const step=await this.rpc('workbench_image_publish_reserve',[context.case_id,jobId]);
             if (!this.contextMatches(context)) return;
             if (!step.nonce) { result=step; break; }

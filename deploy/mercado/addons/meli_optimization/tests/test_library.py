@@ -18,6 +18,60 @@ class LibraryCase(TransactionCase):
         super().setUp()
         self.ui = self.env['meli.optimization.case']
 
+    def test_category_attribute_response_is_read_as_an_array(self):
+        import io
+        from odoo.addons.meli_platform_adapter.transport import PlatformResponse
+        response=PlatformResponse(200, {}, io.BytesIO(b'[{"id":"COLOR"}]'))
+        shop=SimpleNamespace(_token=lambda:'fixture')
+        with patch('odoo.addons.meli_optimization.models.image_publish.transport.send',return_value=response):
+            self.assertEqual(self.ui._image_publish_read(shop,'/categories/CBT321/attributes'), [{'id':'COLOR'}])
+        response=PlatformResponse(206, {}, io.BytesIO(b'{}'))
+        with patch('odoo.addons.meli_optimization.models.image_publish.transport.send',return_value=response):
+            with self.assertRaises(ValidationError): self.ui._image_publish_read(shop,'/items/CBT321')
+
+    def test_retry_unknown_link_requires_operator_and_unchanged_readback(self):
+        from datetime import timedelta
+        from odoo import fields
+        from ..domain.image_batch_plan import plan_batches, start_plan, reserve_batch_step, dispatch_batch_step, finish_batch_step
+        detail=self.ui.workbench_create({'shop':'test','item_id':'MLM123','title':'test'})
+        proposal=self.env['meli.optimization.proposal'].create({'case_id':detail['id'],'payload':{'action':'fixture'}})
+        original={'root':['a','b'],'variants':{'1':['a','b']}}
+        plan=plan_batches(['a','b'],[{'id':'1','picture_ids':['a','b']}],['1'],['n'],3,3)
+        batch=finish_batch_step(dispatch_batch_step(reserve_batch_step(start_plan(plan,original),'a'*32),'a'*32),'a'*32,'unknown')
+        progress={'phase':'reconciliation_required','operation':'link','model':'traditional_group','batch':batch,'nonce':'a'*32,
+                  'dispatched_at':fields.Datetime.to_string(fields.Datetime.now()-timedelta(minutes=5))}
+        row=self.env['meli.optimization.image.publication']._append({'case_id':detail['id'],'company_id':self.env.company.id,
+            'proposal_id':proposal.id,'actor_id':self.env.uid,'preview_digest':'retry','preview':{'shop_id':1},'state':'reconciliation_required','progress':progress})
+        shop=SimpleNamespace(id=1,company_id=self.env.company)
+        with patch.object(type(self.ui),'_gallery_shop',return_value=shop),patch.object(type(self.ui),'_image_publish_group_current',return_value=original):
+            with self.assertRaises(ValidationError): self.ui.workbench_image_publish_retry_link(detail['id'],row.id,False)
+            self.assertEqual(self.ui.workbench_image_publish_retry_link(detail['id'],row.id,True)['state'],'linking')
+            self.assertEqual(row.progress['batch']['phase'],'ready')
+
+    def test_migrate_to_global_requires_explicit_rejection_and_unchanged_product(self):
+        from datetime import timedelta
+        from odoo import fields
+        from ..domain.image_batch_plan import plan_batches, start_plan, reserve_batch_step, dispatch_batch_step, finish_batch_step
+        detail=self.ui.workbench_create({'shop':'test','item_id':'MLM123','title':'test'})
+        proposal=self.env['meli.optimization.proposal'].create({'case_id':detail['id'],'payload':{'action':'fixture'}})
+        target={'picture_ids':['a','b'],'variants':[{'id':'1','picture_ids':['a','b']}],'selected_group_variant_ids':['1'], 'picture_limit':3,'variant_picture_limit':3}
+        original={'root':['a','b'],'variants':{'1':['a','b']}}
+        batch=finish_batch_step(dispatch_batch_step(reserve_batch_step(start_plan(plan_batches(['a','b'],target['variants'],['1'],['n'],3,3),original),'a'*32),'a'*32),'a'*32,'unknown')
+        progress={'phase':'reconciliation_required','operation':'link','model':'traditional_group','batch':batch,'nonce':'a'*32,'target':target,'uploaded':['n'],'total':1,
+                  'dispatched_at':fields.Datetime.to_string(fields.Datetime.now()-timedelta(minutes=5)),
+                  'diagnostics':[{'nonce':'a'*32,'operation':'link','http_status':400,'code':'validation_error','message':'item.action.invalid: Cannot modify CBT item from this resource'}]}
+        row=self.env['meli.optimization.image.publication']._append({'case_id':detail['id'],'company_id':self.env.company.id,
+            'proposal_id':proposal.id,'actor_id':self.env.uid,'preview_digest':'migrate','preview':{'shop_id':1},'state':'reconciliation_required','progress':progress})
+        shop=SimpleNamespace(id=1,company_id=self.env.company)
+        with patch.object(type(self.ui),'_gallery_shop',return_value=shop),patch.object(type(self.ui),'_image_publish_group_current',return_value=original):
+            with self.assertRaises(ValidationError): self.ui.workbench_image_publish_migrate_global(detail['id'],row.id,False)
+            changed=dict(progress, batch=dict(batch,index=1))
+            row._set({'progress':changed})
+            with self.assertRaisesRegex(ValidationError,'已经绑定'): self.ui.workbench_image_publish_migrate_global(detail['id'],row.id,True)
+            row._set({'progress':progress})
+            self.assertEqual(self.ui.workbench_image_publish_migrate_global(detail['id'],row.id,True)['state'],'updating')
+            self.assertEqual(row.progress['batch']['plan'][0]['kind'],'update')
+
     def test_abandon_unknown_upload_never_abandons_an_unknown_update(self):
         detail=self.ui.workbench_create({'shop':'test','item_id':'MLM123','title':'test'})
         proposal=self.env['meli.optimization.proposal'].create({'case_id':detail['id'],'payload':{'action':'fixture'}})
@@ -62,8 +116,12 @@ class LibraryCase(TransactionCase):
             ui=api.Environment(call,SUPERUSER_ID,{})['meli.optimization.case']
             ui._image_publish_fence(publication_id,nonce)
             with self.assertRaises(ValidationError): ui._image_publish_fence(publication_id,nonce)
-            completed=ui._image_publish_complete(publication_id,nonce,'success',picture_id='111-CBT123_012026')
+            diagnostic={'operation':'upload','stage':'response','http_status':200,'code':'ok','message':''}
+            completed=ui._image_publish_complete(publication_id,nonce,'success',diagnostic=diagnostic,picture_id='111-CBT123_012026')
             self.assertEqual(completed['progress']['uploaded'],['111-CBT123_012026'])
+            entry=completed['progress']['diagnostics'][-1]
+            self.assertEqual((entry['operation'],entry['http_status'],entry['outcome']),('upload',200,'success'))
+            self.assertTrue(entry['started_at'] and entry['finished_at'])
         with db.cursor() as verify:
             row=api.Environment(verify,SUPERUSER_ID,{})['meli.optimization.image.publication'].browse(publication_id)
             self.assertEqual(row.progress['phase'],'ready')
@@ -763,6 +821,7 @@ class LibraryCase(TransactionCase):
             def fence(job_id, nonce):
                 publication._set({'progress':mark_dispatched(publication.progress,nonce)})
             def complete(job_id, nonce, outcome, **values):
+                values.pop('diagnostic', None)
                 progress=finish_step(publication.progress,nonce,outcome,**values)
                 publication._set({'progress':progress, 'state':'uploading' if progress['phase']=='ready' else progress['phase']})
                 return {'id':job_id,'state':publication.state,'progress':progress}
@@ -814,9 +873,11 @@ class LibraryCase(TransactionCase):
             self.assertEqual(calls,[('POST','/pictures/items/upload'),('POST','/items/CBT456/pictures'),('PUT','/global/items/CBT456')])
             parent=responses['/marketplace/items/CBT456']
             parent['pictures']=[{'id':'111-CBT123_012026'},{'id':'222-CBT123_012026'}]
-            parent['variations']=[{'id':12,'seller_custom_field':'BLACK-S','picture_ids':['111-CBT123_012026']},
-                                  {'id':13,'seller_custom_field':'BLACK-M','picture_ids':['222-CBT123_012026']}]
+            parent['variations']=[{'id':12,'seller_custom_field':'BLACK-S','picture_ids':['111-CBT123_012026'], 'attribute_combinations':[{'id':'COLOR','value_id':'black','value_name':'Black'}]},
+                                  {'id':13,'seller_custom_field':'BLUE-M','picture_ids':['222-CBT123_012026'], 'attribute_combinations':[{'id':'COLOR','value_id':'blue','value_name':'Blue'}]}]
+            responses['/items/CBT456']=parent
             responses['/categories/CBT321']['settings']['max_pictures_per_item_var']=6
+            responses['/categories/CBT321/attributes']=[{'id':'COLOR','tags':{'defines_picture':True}}]
             pending=self.ui.workbench_image_publish_preview(destination['id'], unified['id'], unified['digest'])
             self.assertFalse(pending['execution_available']);self.assertEqual(pending['unavailable_code'],'variant_selection_required')
             selected=self.ui.workbench_image_publish_preview(destination['id'], unified['id'], unified['digest'], '12')
@@ -836,10 +897,34 @@ class LibraryCase(TransactionCase):
                     data={'success':True}
                 return SimpleNamespace(status=200,json=lambda:data,close=lambda:None)
             with patch.object(type(self.ui), '_image_publish_fence', side_effect=fence), patch.object(type(self.ui), '_image_publish_complete', side_effect=complete), patch('odoo.addons.meli_optimization.models.image_publish.transport.send', side_effect=variant_send):
-                for expected in ('upload','link','update'):
+                for expected in ('upload','update'):
                     step=self.ui.workbench_image_publish_reserve(destination['id'],variant_job['id']);self.assertEqual(step['operation'],expected)
                     final=self.ui.workbench_image_publish_dispatch(destination['id'],variant_job['id'],step['nonce'])
             self.assertEqual(final['state'],'published')
+            parent['variations'][1]['picture_ids'] = ['555-CBT123_012026']
+            parent['variations'][1]['attribute_combinations'] = [{'id':'COLOR','value_id':'black','value_name':'Black'}]
+            grouped = self.ui.workbench_image_publish_preview(destination['id'], unified['id'], unified['digest'], '12')
+            self.assertEqual(grouped['target']['selected_group_variant_ids'], ['12','13'])
+            self.assertTrue(grouped['execution_available'])
+            group_job=self.ui.workbench_image_publish_start(destination['id'], unified['id'], unified['digest'], grouped['digest'], '12', True)
+            publication=self.env['meli.optimization.image.publication'].browse(group_job['id'])
+            def group_send(method,path,**kwargs):
+                if path == '/pictures/items/upload': data={'id':'666-CBT123_012026'}
+                else:
+                    sent=json.loads(kwargs['body'])
+                    self.assertEqual([v['picture_ids'] for v in sent['variations']], [['666-CBT123_012026'],['666-CBT123_012026']])
+                    parent['pictures']=sent['pictures']
+                    for v in parent['variations']: v['picture_ids']=['666-CBT123_012026']
+                    raise TimeoutError()
+                return SimpleNamespace(status=200,json=lambda:data,close=lambda:None)
+            with patch.object(type(self.ui), '_image_publish_fence', side_effect=fence), patch.object(type(self.ui), '_image_publish_complete', side_effect=complete), patch('odoo.addons.meli_optimization.models.image_publish.transport.send', side_effect=group_send):
+                for expected in ('upload','update'):
+                    step=self.ui.workbench_image_publish_reserve(destination['id'],group_job['id']); self.assertEqual(step['operation'],expected)
+                    final=self.ui.workbench_image_publish_dispatch(destination['id'],group_job['id'],step['nonce'])
+                    if expected == 'update':
+                        self.assertEqual(final['state'], 'reconciliation_required')
+                        with self.assertRaises(ValidationError): self.ui.workbench_image_publish_reserve(destination['id'],group_job['id'])
+                        self.assertEqual(self.ui.workbench_image_publish_reconcile(destination['id'],group_job['id'])['state'], 'published')
         with self.assertRaises(ValidationError):
             self.ui.workbench_image_plan_propose(destination['id'], plan.id, [generated.id, generated.id])
         second_target = self.env['meli.optimization.artifact'].create({'case_id': destination['id'], 'data': artifact.data,

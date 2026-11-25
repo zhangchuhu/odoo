@@ -81,9 +81,11 @@ class WorkbenchBrowserCase(HttpCase):
                 responses['/marketplace/items/MLM123']['tags']=[]
                 parent=responses['/marketplace/items/CBT456']
                 parent['pictures']=[{'id':'111-CBT123_012026'},{'id':'222-CBT123_012026'}]
-                parent['variations']=[{'id':12,'seller_custom_field':'BLACK-S','picture_ids':['111-CBT123_012026']},
-                                      {'id':13,'seller_custom_field':'BLACK-M','picture_ids':['222-CBT123_012026']}]
+                parent['variations']=[{'id':12,'seller_custom_field':'BLACK-S','picture_ids':['111-CBT123_012026'],'attribute_combinations':[{'id':'COLOR','value_id':'black','value_name':'Black'}]},
+                                      {'id':13,'seller_custom_field':'BLACK-M','picture_ids':['111-CBT123_012026'],'attribute_combinations':[{'id':'COLOR','value_id':'black','value_name':'Black'}]}]
+                responses['/items/CBT456']=parent
                 responses['/categories/CBT321']['settings']['max_pictures_per_item_var']=6
+                responses['/categories/CBT321/attributes']=[{'id':'COLOR','tags':{'defines_picture':True}}]
             return responses[path]
         def send(method,path,**kwargs):
             calls.append((method,path))
@@ -93,7 +95,8 @@ class WorkbenchBrowserCase(HttpCase):
             elif path == '/global/items/CBT456':
                 import json
                 sent=json.loads(kwargs['body']);parent=responses['/marketplace/items/CBT456'];parent['pictures']=sent['pictures']
-                parent['variations'][0]['picture_ids']=['333-CBT123_012026'];data={'success':True}
+                for variant in parent['variations']: variant['picture_ids']=['333-CBT123_012026']
+                data={'success':True}
             else: responses['/user-products/U999']['pictures']=[{'id':'222-CBT123_012026'}];data={'success':True}
             return SimpleNamespace(status=200,json=lambda:data,close=lambda:None)
         spawn=ChromeBrowser._spawn_chrome
@@ -117,14 +120,15 @@ class WorkbenchBrowserCase(HttpCase):
                 (await wait(()=>button('确认替换并发布'))).click();await wait(()=>document.body.textContent.includes('已发布并核验'));
                 (await wait(()=>button('核验平台发布范围'))).click();
                 const sku=await wait(()=>document.querySelector('.mw-preview select'));sku.value='12';sku.dispatchEvent(new Event('change',{bubbles:true}));
-                (await wait(()=>{const b=button('核验所选 SKU');return b && !b.disabled && b})).click();
+                (await wait(()=>{const b=button('核验所选变体');return b && !b.disabled && b})).click();
+                await wait(()=>document.querySelector('.mw-preview')?.textContent.includes('影响规格：12、13'));
                 (await wait(()=>document.querySelector('.mw-preview input[type=checkbox]'))).click();
                 (await wait(()=>{const b=button('确认替换并发布');return b && !b.disabled && b})).click();
                 await wait(()=>[...document.querySelectorAll('.mw-task')].filter(e=>e.textContent.includes('已发布并核验')).length===2);
                 console.log('test successful');})().catch(e=>console.error(e));
             """,login='admin',timeout=100)
         self.assertEqual(calls,[('POST','/pictures/items/upload'),('PUT','/global/user-products/U999'),
-            ('POST','/pictures/items/upload'),('POST','/items/CBT456/pictures'),('PUT','/global/items/CBT456')])
+            ('POST','/pictures/items/upload'),('PUT','/global/items/CBT456')])
 
     def test_best_candidate_review_renders_in_images_tab(self):
         import hashlib

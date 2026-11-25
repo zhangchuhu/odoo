@@ -67,6 +67,13 @@ test('publication sends each step once and stops when an outcome needs reconcili
     assert.deepEqual(calls,['workbench_image_publish_start','workbench_image_publish_reserve','workbench_image_publish_dispatch']);
     assert.equal(ui.state.imagePublishResult.state,'reconciliation_required');
 });
+test('publication can complete a long staged image replacement', async () => {
+    const ui=fixture(); ui.navigationVersion=1;ui.disposed=false;ui.load=async()=>{};
+    let dispatched=0;
+    ui.rpc=async(method)=>method==='workbench_image_publish_reserve' ? {nonce:'a'} : {state:++dispatched===130?'published':'linking'};
+    await ui.runImagePublication({version:1,case_id:1,revision:1},9);
+    assert.equal(dispatched,130);assert.equal(ui.state.imagePublishResult.state,'published');
+});
 test('publishing a selected SKU requires explicit source-garment confirmation', async () => {
     const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;ui.notification={add(){}};
     ui.state.imagePublishPreview={case_id:1,proposal_id:7,proposal_digest:'p',digest:'d',target:{selected_variant_id:'12'}};
