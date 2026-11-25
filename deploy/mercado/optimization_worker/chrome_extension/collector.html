@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mercado Libre Evidence Collector</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 20px; color: #191919; }
+    label { display: block; margin: 12px 0; }
+    input, select, textarea, button { box-sizing: border-box; font: inherit; width: 100%; }
+    input, select, textarea { margin-top: 4px; padding: 8px; }
+    button { margin-top: 10px; padding: 9px; }
+    #error { color: #a40000; white-space: pre-wrap; }
+    #status { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <section id="control-entry" hidden><h1>爆款采集控制</h1><p>先打开专用窗口并确认当前任务，然后创建任务搜索标签。</p><button id="control-entry-button" type="button">打开采集控制页</button><p id="control-entry-status" role="status" aria-live="polite"></p></section>
+  <h1>Mercado Libre México evidence</h1>
+  <form id="setup">
+    <label>Task record ID <input id="record-id" required pattern="rec[A-Za-z0-9_-]+"></label>
+    <label>Platform <select id="platform"><option value="mercado-libre-mx">Mercado Libre México</option></select></label>
+    <label>Codex query 1 <input class="query" required></label>
+    <label>Codex query 2 <input class="query" required></label>
+    <label>Codex query 3 <input class="query" required></label>
+    <label>Cards per query (30–50) <input id="card-limit" type="number" min="30" max="50" value="30" required></label>
+    <label>Task result limit <input id="result-limit" type="number" min="1" value="2" required></label>
+    <button type="submit">Begin collection</button>
+  </form>
+  <section id="controls" hidden>
+    <button id="open-next-candidate" type="button" hidden>在任务标签打开下一候选</button>
+    <button id="collect-search" type="button">Collect current search query</button>
+    <p id="next-product"></p>
+    <button id="screen-detail-sales" type="button">核验销量并保存未达门槛判定</button>
+    <label>待核验图片位置 <input id="review-photo-position" type="number" min="1" max="100" value="1"></label>
+    <button id="capture-review-photo" type="button">下载候选首图供款式核验</button>
+    <label>Detail status
+      <select id="detail-status"><option value="qualified">Qualified</option><option value="rejected">Rejected</option></select>
+    </label>
+    <label>Rejection reason <select id="detail-reason"><option value=""></option><option>visual_category_mismatch</option><option>imagery_ambiguous_or_inaccessible</option><option>metric_missing_or_ambiguous</option><option>threshold_failure</option><option>identity_changed</option><option>detail_inaccessible</option></select></label>
+    <label>Visual category <select id="visual-category-code"><option value="">Unknown</option><option>dress</option><option>formal_gown</option><option>jumpsuit</option><option>overalls</option><option>womens_pants_set</option><option>womens_shorts_set</option><option>womens_skirt_set</option><option>womens_suit</option><option>top</option><option>blouse</option><option>shirt</option><option>vest</option><option>blazer</option><option>jacket</option><option>coat</option><option>sweater</option><option>cardigan</option><option>pants</option><option>shorts</option><option>skirt</option><option>shoes</option></select></label>
+    <label>Match level <select id="match-level"><option value=""></option><option>同款</option><option>高度相似</option><option>类似竞品</option></select></label>
+    <label>Visible visual features, one per line <textarea id="visual-features"></textarea></label>
+    <button id="collect-detail" type="button">Collect current detail</button>
+    <button id="stage-evidence" type="button">回传当前任务证据</button>
+    <button id="export" type="button">Download evidence.json</button>
+  </section>
+  <section><label>详情页商品 ID <input id="gallery-id" placeholder="MLM 或 MLMU 商品 ID"></label><button id="export-gallery" type="button">导出当前规格主图库清单</button></section>
+  <section aria-label="人工逐图核验">
+    <h2>人工逐图核验</h2><p>逐张核对当前规格主图库中的原图、顺序和实际尺寸。需要入库时，在下方回传有序清单，再用 Chrome 下载已核验原图。</p>
+    <label>规范详情页链接 <input id="observed-detail"></label>
+    <label>商品 ID <input id="observed-id"></label>
+    <label>图库总图片数 <input id="observed-total" type="number" min="1" max="100"></label>
+    <button id="observed-start" type="button">开始逐图核验</button>
+    <label>图片序号 <input id="observed-position" type="number" min="1"></label>
+    <label>已核验图片 URL <input id="observed-url"></label>
+    <label>图片实际宽度 <input id="observed-width" type="number" min="100"></label>
+    <label>图片实际高度 <input id="observed-height" type="number" min="100"></label>
+    <button id="observed-add" type="button">记录当前图片</button>
+    <button id="observed-export" type="button">导出已核验清单</button><p id="observed-progress" role="status"></p>
+  </section>
+  <section id="gallery-capture" hidden data-platform="mercado-libre-mx">
+    <h2>回传候选主图库</h2>
+    <p>在商品详情中放大当前规格的主图，按页面顺序逐张核验原图。</p>
+    <label>合格候选的商品 ID <input id="capture-product"></label>
+    <label>当前规格在页面显示的图片总数 <input id="capture-total" type="number" min="1" max="100"></label>
+    <label>当前查看的图片序号 <input id="capture-position" type="number" min="1" value="1"></label>
+    <label>原图网址（同时显示多张大图时填写）<input id="capture-source" type="url"></label>
+    <button id="capture-walk" type="button">从第一张放大图逐项核验并回传图库</button>
+    <button id="capture-inspect" type="button">查看当前原图</button>
+    <p id="capture-preview" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></p>
+    <button id="capture-add" type="button">记录当前可见原图</button>
+    <button id="capture-restore" type="button">查看此候选已记录的原图</button>
+    <button id="capture-submit" type="button">回传有序图库清单与详情截图</button>
+    <button id="capture-download" type="button" hidden>保存此候选全部原图并入库</button>
+    <p id="capture-status" role="status" aria-live="polite"></p>
+    <ol id="capture-links"></ol>
+  </section>
+  <button id="binding-connect" type="button">连接当前任务</button>
+  <button id="recover-session" type="button">恢复本任务采集进度</button>
+  <button id="dedicated-window-register" type="button">准备专用采集窗口</button>
+  <button id="dedicated-task-tab-create" type="button">打开任务专属标签</button>
+  <button id="binding-activate" type="button">切换到已绑定任务标签</button>
+  <p id="binding-status" role="status">尚未连接任务</p>
+  <p id="binding-identity" role="status">标签身份待核验</p>
+  <details><summary>采集器连接诊断记录</summary><pre id="binding-trace"></pre></details>
+  <p id="status" role="status"></p>
+  <p id="error" role="alert"></p>
+  <script src="observed-gallery.js"></script>
+  <script src="observed-gallery-ui.js"></script>
+  <script src="query_gate.js"></script>
+  <script src="binding_validation.js"></script>
+  <script src="request_discovery.js"></script>
+  <script src="native_guard.js"></script>
+  <script src="activation.js"></script>
+  <script src="candidate_navigation.js"></script>
+  <script src="gallery_binding.js"></script>
+  <script src="collector-trace.js"></script>
+  <script src="collector_popup.js"></script>
+  <script src="binding.js"></script>
+  <script src="gallery_download.js"></script>
+  <script src="gallery_walk.js"></script>
+  <script src="gallery_capture.js"></script>
+  <script src="session_persistence.js"></script>
+  <script src="evidence_download.js"></script>
+  <script src="detail_inputs.js"></script>
+  <script src="collector.js"></script>
+  <script src="control-entry.js"></script>
+</body>
+</html>

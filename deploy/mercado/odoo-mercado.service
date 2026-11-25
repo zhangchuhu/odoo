@@ -1,0 +1,16 @@
+[Unit]
+Description=Odoo Mercado Libre
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/odoo
+ExecStart=/home/ubuntu/odoo/.venv/bin/python /home/ubuntu/odoo/odoo-bin -c /home/ubuntu/odoo/deploy/mercado/odoo.conf
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

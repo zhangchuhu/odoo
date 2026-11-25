@@ -1,0 +1,11 @@
+odoo.conf
+private/
+data/
+logs/
+addons/*
+!addons/meli_accounts/
+!addons/meli_bff/
+!addons/meli_optimization/
+backups/
+__pycache__/
+*.py[cod]

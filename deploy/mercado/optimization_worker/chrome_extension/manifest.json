@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "externally_connectable": {"ids": ["*"]},
+  "name": "Mercado Libre 运营中心绑定版采集器",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.mercadolibre.com.mx/*",
+    "https://listado.mercadolibre.com.mx/*",
+    "https://articulo.mercadolibre.com.mx/*"
+  ],
+  "action": {
+    "default_title": "Mercado Libre 运营中心绑定版",
+    "default_popup": "collector.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.mercadolibre.com.mx/*",
+        "https://listado.mercadolibre.com.mx/*",
+        "https://articulo.mercadolibre.com.mx/*"
+      ],
+      "js": [
+        "gallery_visible.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

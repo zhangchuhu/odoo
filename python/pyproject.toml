@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "odoo-bff-mcp"
+version = "0.1.0"
+description = "Stdio MCP adapter for the Odoo Mercado Libre BFF"
+requires-python = ">=3.11"
+dependencies = ["mcp>=2,<3", "pydantic>=2,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
+
+[project.scripts]
+odoo-bff-mcp = "odoo_bff_mcp.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.11"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/odoo_bff_mcp"]

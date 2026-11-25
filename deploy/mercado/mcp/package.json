@@ -1,0 +1,22 @@
+{
+  "name": "odoo-mercado-mcp",
+  "version": "1.0.0",
+  "description": "Odoo BFF MCP Streamable HTTP service",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "ajv": "^8.17.1",
+    "zod": "^4.3.6"
+  }
+}
