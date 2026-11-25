@@ -238,7 +238,36 @@ export class OptimizationWorkbench extends Component {
             if (this.contextMatches(context)) await this.load();
         });
     }
-    collectionForm() { this.state.form={name:'',garment:'',source_sku:'',source_url:'',site_id:'MLM',platform:'mercado-libre-mx',min_sold:500,min_reviews:50,min_rating:4.1,result_limit:15}; this.state.modal='collection'; }
+    collectionForm() {
+        this.state.form={name:'',source_sku:'',source_url:'',source_mode:'existing',platform:'mercado-libre-mx',min_sold:500,min_reviews:50,min_rating:4.1,result_limit:15};
+        this.state.collectionResults=null;this.state.collectionSelected=null;this.state.collectionRequestKey=globalThis.crypto.randomUUID().replaceAll('-','');
+        this.state.collectionRequestPayload=null;this.state.modal='collection';
+    }
+    collectionSourceMode(mode) {
+        this.state.form.source_mode=mode;this.state.collectionResults=null;this.state.collectionSelected=null;
+        for (const k of ['source_case_id','source_snapshot_id','source_revision','source_artifact_id','image_data','image_mime']) delete this.state.form[k];
+    }
+    collectionIdChanged(event) {
+        this.state.form.source_sku=event.target.value;this.state.form.source_url='';this.state.collectionResults=null;this.state.collectionSelected=null;
+        for (const k of ['source_case_id','source_snapshot_id','source_revision','source_artifact_id']) delete this.state.form[k];
+    }
+    async searchCollectionSource(page=0) {
+        const form=this.state.form, id=String(form.source_sku || '').trim(), version=this.navigationVersion;
+        if (!id) { this.state.error='请输入源商品 ID'; return; }
+        this.state.collectionSelected=null;
+        for (const k of ['source_case_id','source_snapshot_id','source_revision','source_artifact_id']) delete form[k];
+        return this.perform(async()=>{
+            const result=await this.rpc('workbench_collection_source_search',[id,page]);
+            if (this.disposed || this.navigationVersion!==version || this.state.modal!=='collection' || this.state.form!==form || String(form.source_sku || '').trim()!==id) return;
+            this.state.collectionResults=result;this.state.collectionSelected=null;
+            if (result.total===1 && result.rows.length===1) this.selectCollectionSource(result.rows[0]);
+        });
+    }
+    selectCollectionSource(row) {
+        this.state.collectionSelected=row;
+        Object.assign(this.state.form,{source_sku:row.item_id,source_case_id:row.case_id,source_snapshot_id:row.snapshot_id,source_revision:row.revision,source_url:row.source_url || '',source_artifact_id:row.images?.[0]?.artifact_id || false});
+    }
+    selectCollectionImage(id) { this.state.form.source_artifact_id=id; }
     applyCollectionFilters() { this.state.collectionApplied = {...this.state.collectionFilters}; }
     resetCollectionFilters() { this.state.collectionFilters = {query:'',platform:''}; this.state.collectionApplied = {}; }
     productImages(value) { return productSourceImages(value); }
@@ -277,13 +306,27 @@ export class OptimizationWorkbench extends Component {
         form.image_data=data;form.image_mime=file.type;
         return {data, mime:file.type};
     }
-    async saveCollection() {
+    async saveCollection(start=false) {
+        const version=this.navigationVersion, sourceForm=this.state.form;
+        const current=()=>!this.disposed && this.navigationVersion===version && this.state.modal==='collection' && this.state.form===sourceForm;
         await this.perform(async()=>{
             const form={...this.state.form};
             for (const key of ['min_sold','min_reviews','min_rating','result_limit']) form[key]=Number(form[key]);
-            this.state.detail=await this.rpc('workbench_collection_create',[form]);
-            this.state.modal='';this.state.tab='tasks';await this.load();
-        }, '独立采集已建立；外部研究由具备能力的 Worker 执行');
+            const fingerprint=JSON.stringify(form);
+            if (this.state.collectionRequestPayload && this.state.collectionRequestPayload!==fingerprint) throw new Error('上次创建结果尚未确认，请恢复原内容后重试，或关闭并重新填写');
+            this.state.collectionRequestPayload=fingerprint;
+            const detail=await this.rpc('workbench_collection_create_request',[this.state.collectionRequestKey,form]);
+            if (start) {
+                try {
+                    const result=await this.rpc('workbench_collection_start',[detail.id,detail.snapshot.id,detail.revision]);
+                    if (current()) this.state.collectionStartStatus={case_id:detail.id,snapshot_id:detail.snapshot.id,message:result?.message || ''};
+                } catch(error) {
+                    if (current()) { this.state.detail=detail;this.state.modal='';this.state.tab='tasks';await this.load(); }
+                    throw new Error('采集记录已保存，但启动失败：'+(error.data?.message || error.message || '请重试启动'));
+                }
+            }
+            if (current()) { this.state.detail=detail;this.state.modal='';this.state.tab='tasks';await this.load(); }
+        }, start ? '采集记录已保存，执行状态请查看任务列表' : '采集记录已保存');
     }
     async loadLibrary() { this.state.library=(await this.rpc('workbench_library',[this.state.libraryQuery,this.state.librarySite])).rows; }
     get filteredLibrary() { return this.state.libraryResults; }

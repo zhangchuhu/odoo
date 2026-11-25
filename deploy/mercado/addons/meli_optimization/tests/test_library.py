@@ -245,6 +245,47 @@ class LibraryCase(TransactionCase):
         self.assertEqual(row['company_id'], self.env.company.id)
         self.assertEqual(row['company_name'], self.env.company.name)
 
+    def test_collection_without_garment_description_can_start(self):
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        values = {'source_sku':'MLM123', 'image_data':image, 'image_mime':'image/png', 'platform':'mercado-libre-mx',
+                  'min_sold':500, 'min_reviews':50, 'min_rating':4.1, 'result_limit':15}
+        detail = self.ui.workbench_collection_create(values)
+        self.assertEqual(detail['name'], 'MLM123')
+        self.assertNotIn('garment', detail['snapshot']['payload'])
+        self.start_collection(detail)
+
+    def test_collection_source_search_copy_and_idempotency(self):
+        image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        product=self.ui.workbench_create({'shop':'Test','item_id':'MLM123','title':'Source product'})
+        artifact=self.env['meli.optimization.artifact'].create({'case_id':product['id'],'data':image,'mime_type':'image/png',
+            'digest':hashlib.sha256(base64.b64decode(image)).hexdigest()})
+        self.env['meli.optimization.snapshot'].create({'case_id':product['id'],'payload':{'item_id':'MLM123','title':'Source product','source_image_artifact_ids':[str(artifact.id)]}})
+        matches=self.ui.workbench_collection_source_search('MLM123',0)
+        row=matches['rows'][0]; self.assertEqual(row['case_id'],product['id'])
+        self.assertFalse(self.ui.workbench_collection_source_search('MLM12',0)['rows'])
+        values={'source_mode':'existing','source_case_id':row['case_id'],'source_snapshot_id':row['snapshot_id'],
+                'source_revision':row['revision'],'source_artifact_id':artifact.id,'source_sku':'MLM123',
+                'platform':'mercado-libre-mx','min_sold':500,'min_reviews':50,'min_rating':4.1,'result_limit':15}
+        first=self.ui.workbench_collection_create_request('a'*32,values)
+        again=self.ui.workbench_collection_create_request('a'*32,values)
+        self.assertEqual(first['id'],again['id'])
+        snap=first['snapshot']['payload'];copy=self.env['meli.optimization.artifact'].browse(int(snap['source_image_artifact_ids'][0]))
+        self.assertNotEqual(copy.id,artifact.id);self.assertEqual(copy.digest,artifact.digest);self.assertEqual(copy.case_id.id,first['id'])
+        self.assertEqual(snap['source_provenance']['snapshot_id'],row['snapshot_id'])
+        self.start_collection(first)
+        with self.assertRaises(ValidationError): self.ui.workbench_collection_create_request('c'*32,dict(values,source_artifact_id=artifact.id+1000000))
+        with self.assertRaises(ValidationError): self.ui.workbench_collection_create_request('d'*32,dict(values,source_sku='OTHER'))
+        self.env['meli.optimization.snapshot'].create({'case_id':product['id'],'payload':{'item_id':'MLM123'}})
+        with self.assertRaises(ValidationError): self.ui.workbench_collection_create_request('b'*32,values)
+        with self.assertRaises(ValidationError): self.ui.workbench_collection_create_request('a'*32,dict(values,result_limit=3))
+
+    def test_collection_source_search_excludes_other_companies(self):
+        company=self.env['res.company'].create({'name':'Other source company'})
+        other=self.ui.with_context(allowed_company_ids=[company.id,self.env.company.id]).with_company(company)
+        other.workbench_create({'shop':'Other','item_id':'MLM555888','title':'Other company product'})
+        result=self.ui.with_context(allowed_company_ids=[self.env.company.id,company.id]).workbench_collection_source_search('MLM555888',0)
+        self.assertEqual(result['total'],0)
+
     def test_collection_config_requires_valid_source_and_thresholds(self):
         image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
         values = {'garment':'dress', 'source_sku':'SKU', 'image_data':image, 'image_mime':'image/png', 'platform':'mercado-libre-mx', 'min_sold':500, 'min_reviews':50, 'min_rating':4.1, 'result_limit':15}
@@ -525,7 +566,7 @@ class LibraryCase(TransactionCase):
     def test_replace_failure_rolls_back_archive(self):
         old=self.create_started_collection(); task=self.env['meli.optimization.task'].search([('case_id','=',old['id'])],limit=1); task.cancel()
         image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
-        row={'record':'1','status':'done','garment':'','source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'mercado-libre-mx','min_sold':0,'min_reviews':0,'min_rating':0,'result_limit':1}
+        row={'record':'1','status':'done','garment':'','source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'mercado-libre-mx','min_sold':0,'min_reviews':0,'min_rating':0,'result_limit':0}
         with self.assertRaises(ValidationError): self.ui.workbench_collection_replace_from_records('bad','base','table',[row])
         case=self.ui.browse(old['id']);case.invalidate_recordset();self.assertFalse(case.collection_archived)
 

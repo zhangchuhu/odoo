@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import io
+import json
 import math
 from decimal import Decimal, InvalidOperation
 import re
@@ -361,6 +362,10 @@ class CollectionWorkbench(models.Model):
     collection_list_hidden = fields.Boolean(default=False, readonly=True, index=True)
     collection_fence_version = fields.Integer(default=0, readonly=True)
     qc_revision = fields.Integer(default=0, readonly=True)
+    collection_request_key = fields.Char(readonly=True, index=True)
+    collection_request_actor = fields.Many2one('res.users', readonly=True)
+    collection_request_hash = fields.Char(readonly=True)
+    _collection_request_unique = models.Constraint('UNIQUE(company_id, collection_request_actor, collection_request_key)', '采集请求已存在')
 
     @api.model
     def workbench_regenerate_expired_image(self, case_id, task_id, expected_epoch):
@@ -520,6 +525,9 @@ class CollectionWorkbench(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        protected=('collection_request_key','collection_request_actor','collection_request_hash')
+        if any('default_'+name in self.env.context for name in protected) or any(any(name in vals for name in protected) for vals in vals_list):
+            raise AccessError('采集请求身份由服务端管理')
         if any('default_' + n in self.env.context for n in ('collection_archived','collection_fence_version','collection_list_hidden','collection_started_snapshot_id')) or any({'collection_archived','collection_fence_version','collection_list_hidden','collection_started_snapshot_id'} & set(v) for v in vals_list):
             raise AccessError('Archive status is server managed')
         if 'default_qc_revision' in self.env.context or any('qc_revision' in v for v in vals_list):
@@ -557,14 +565,91 @@ class CollectionWorkbench(models.Model):
         return {'ok': True}
 
     @api.model
+    def workbench_collection_source_search(self, item_id, page=0):
+        self._authorize('editor')
+        if not isinstance(item_id, str) or not item_id.strip() or len(item_id.strip()) > 200 or type(page) is not int or page < 0:
+            raise ValidationError('请输入有效的商品 ID')
+        wanted = item_id.strip().casefold()
+        matches = []
+        for case in self.search([('company_id','=',self.env.company.id),('collection','=',False)], order='id desc'):
+            snapshot = self._wb_snapshot(case)
+            if not snapshot:
+                continue
+            payload = snapshot.payload if snapshot and isinstance(snapshot.payload,dict) else {}
+            identity = payload.get('item_id') or case.variant_item_id
+            if not isinstance(identity,str) or identity.strip().casefold() != wanted:
+                continue
+            case._authorize('editor')
+            scope=payload.get('variant_scope') or {}
+            images=self._wb_source_images(case,snapshot)
+            matches.append({'case_id':case.id,'snapshot_id':snapshot.id,'revision':case.revision,'item_id':identity,
+                'title':str(payload.get('title') or case.name),'shop':str(payload.get('shop') or ''),
+                'source_url':str(payload.get('source_url') or ''),
+                'variant':str(scope.get('label') or '未区分变体') if isinstance(scope,dict) else '未区分变体',
+                'images':images})
+        return {'rows':matches[page*20:(page+1)*20], 'total':len(matches), 'page':page}
+
+    @api.model
+    def workbench_collection_create_request(self, request_key, values):
+        self._authorize('editor')
+        if not isinstance(request_key,str) or not re.fullmatch(r'[0-9a-f]{32}',request_key) or not isinstance(values,dict):
+            raise ValidationError('采集请求无效')
+        try:
+            request_hash=hashlib.sha256(json.dumps(values,sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode()).hexdigest()
+        except (TypeError,ValueError):
+            raise ValidationError('采集请求无效') from None
+        self.env.cr.execute('SELECT pg_advisory_xact_lock(hashtext(%s), %s)', ('collection-company', self.env.company.id))
+        existing=self.search([('company_id','=',self.env.company.id),('collection_request_actor','=',self.env.uid),('collection_request_key','=',request_key)],limit=1)
+        if existing:
+            if existing.collection_request_hash != request_hash: raise ValidationError('采集请求内容已改变')
+            return self.workbench_detail(existing.id)
+        mode=values.get('source_mode')
+        if mode not in ('existing','manual'): raise ValidationError('请选择源商品方式')
+        clean={k:v for k,v in values.items() if k not in ('source_mode','source_case_id','source_snapshot_id','source_revision','source_artifact_id')}
+        provenance=None
+        if mode == 'existing':
+            for k in ('source_case_id','source_snapshot_id','source_revision','source_artifact_id'):
+                if type(values.get(k)) is not int or values[k] < (0 if k=='source_revision' else 1): raise ValidationError('商品或图片身份无效')
+            source=self._wb_case(values['source_case_id'],True)
+            if source.company_id != self.env.company or source.collection: raise AccessError('商品不属于当前公司')
+            source._lock()
+            snapshot=self._wb_snapshot(source)
+            if not snapshot or snapshot.id != values['source_snapshot_id'] or source.revision != values['source_revision']:
+                raise ValidationError('商品快照已改变，请重新查询')
+            payload=snapshot.payload if isinstance(snapshot.payload,dict) else {}
+            item_id=payload.get('item_id') or source.variant_item_id
+            if not isinstance(item_id,str) or str(clean.get('source_sku') or '').strip().casefold()!=item_id.strip().casefold():
+                raise ValidationError('商品 ID 不匹配，请重新查询')
+            refs=payload.get('source_image_artifact_ids') or []
+            if not isinstance(refs,list) or str(values['source_artifact_id']) not in [str(x) for x in refs]:
+                raise ValidationError('图片不属于当前商品快照')
+            image=self.env[PREFIX+'artifact'].browse(values['source_artifact_id']).exists()
+            if not image or image.case_id != source or image.company_id != source.company_id or not image.data:
+                raise ValidationError('源图片不存在或无权访问')
+            image._authorize('worker')
+            try:
+                raw=base64.b64decode(image.data,validate=True)
+                if hashlib.sha256(raw).hexdigest()!=image.digest: raise ValueError('digest')
+                verified_image(raw,image.mime_type)
+            except (TypeError,ValueError,ValidationError) as exc:
+                raise ValidationError('源图片不可用') from exc
+            clean.update(source_sku=item_id,image_data=image.data.decode() if isinstance(image.data,bytes) else image.data,image_mime=image.mime_type,
+                         source_url=str(payload.get('source_url') or ''))
+            provenance={'case_id':source.id,'snapshot_id':snapshot.id,'artifact_id':image.id,'sha256':image.digest}
+        detail=self._collection_create(clean,source_provenance=provenance)
+        case=self.browse(detail['id'])
+        case._set({'collection_request_key':request_key,'collection_request_actor':self.env.uid,'collection_request_hash':request_hash})
+        return detail
+
+    @api.model
     def workbench_collection_create(self, values):
         return self._collection_create(values)
 
-    def _collection_create(self, values, external_source=None):
+    def _collection_create(self, values, external_source=None, source_provenance=None):
         self._authorize()
         self.env.cr.execute('SELECT pg_advisory_xact_lock(hashtext(%s), %s)', ('collection-company', self.env.company.id))
-        if not isinstance(values, dict) or not str(values.get('garment', '')).strip():
-            raise ValidationError('请填写源服装描述')
+        if not isinstance(values, dict):
+            raise ValidationError('采集信息无效')
         config_keys = ('platform', 'min_sold', 'min_reviews', 'min_rating', 'result_limit')
         config = None
         if any(key in values for key in config_keys):
@@ -589,15 +674,19 @@ class CollectionWorkbench(models.Model):
         source_url = str(values.get('source_url') or '').strip()
         if source_url and urlsplit(source_url).scheme not in ('https', 'http'):
             raise ValidationError('来源链接仅支持 HTTP(S)，不会由服务器抓取')
-        name = str(values.get('name') or values['garment'])[:200]
+        name = str(values.get('name') or values.get('garment') or values.get('source_sku') or '独立采集')[:200]
         batch = self.env[PREFIX + 'batch'].create({'name': '独立爆款采集'})
         case = self.create({'name': name, 'batch_id': batch.id, 'collection': True})
         source_ids = []
         if values.get('image_data'):
             source_ids.append(self.workbench_upload_garment(case.id, values['image_data'], values.get('image_mime')))
         snapshot_payload = {
-            'source_image_artifact_ids': source_ids, 'garment': str(values['garment'])[:4000], 'source_url': source_url[:2000],
+            'source_image_artifact_ids': source_ids, 'source_url': source_url[:2000],
             'site_id': ('MLM' if config and config['platform'] == 'mercado-libre-mx' else 'SHEIN_US' if config else str(values.get('site_id') or 'MLM')[:30]), 'source_sku': str(values.get('source_sku') or '').strip()[:200], 'source': 'user_supplied_research'}
+        if values.get('garment'):
+            snapshot_payload['garment'] = str(values['garment'])[:4000]
+        if source_provenance is not None:
+            snapshot_payload['source_provenance'] = source_provenance
         if config is not None:
             snapshot_payload['collection_config'] = config
         if external_source is not None:

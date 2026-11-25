@@ -10,6 +10,35 @@ from ..domain import canonical_hash
 class WorkbenchBrowserCase(HttpCase):
     browser_size = '1440x1000'
 
+    def test_collection_from_existing_product_starts_with_owned_image(self):
+        import base64, hashlib
+        admin=self.env.ref('base.user_admin')
+        admin.write({'group_ids':[(4,self.env.ref('meli_optimization.group_editor').id)]})
+        ui=self.env['meli.optimization.case']
+        detail=ui.workbench_create({'shop':'Fixture','item_id':'MLM99990001','title':'Source search fixture'})
+        png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        art=self.env['meli.optimization.artifact'].create({'case_id':detail['id'],'data':png,'mime_type':'image/png','digest':hashlib.sha256(base64.b64decode(png)).hexdigest()})
+        self.env['meli.optimization.snapshot'].create({'case_id':detail['id'],'payload':{'item_id':'MLM99990001','title':'Source search fixture','source_image_artifact_ids':[str(art.id)]}})
+        action=self.env.ref('meli_optimization.workbench_action').id
+        spawn=ChromeBrowser._spawn_chrome
+        def fixed(browser,cmd):
+            Path(browser.user_data_dir,'DevToolsActivePort').write_text('55441\n/devtools/browser\n')
+            return spawn(browser,cmd)
+        with patch.object(ChromeBrowser,'remote_debugging_port',55441),patch.object(ChromeBrowser,'_spawn_chrome',fixed):
+            self.browser_js('/odoo/action-%s'%action, """
+              (async()=>{const wait=async f=>{for(let i=0;i<150;i++){let x=f();if(x)return x;await new Promise(r=>setTimeout(r,100))}throw Error('collection search timeout')};
+              const button=t=>[...document.querySelectorAll('.meli-workbench button')].find(b=>b.textContent.includes(t));
+              (await wait(()=>button('独立爆款采集'))).click();(await wait(()=>button('新建独立采集'))).click();
+              const input=await wait(()=>document.querySelector('.mw-form input[placeholder="例如 MLM2466566421"]'));
+              input.value='MLM99990001';input.dispatchEvent(new Event('input',{bubbles:true}));
+              (await wait(()=>{let b=button('查询商品');return b&&!b.disabled&&b})).click();
+              await wait(()=>document.querySelector('.mw-source-images img'));
+              (await wait(()=>{let b=button('创建并开始采集');return b&&!b.disabled&&b})).click();
+              await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('h1')?.textContent.includes('MLM99990001'));
+              await wait(()=>document.body.textContent.includes('整理商品事实'));
+              console.log('test successful')})().catch(e=>console.error(e));
+            """,login='admin',timeout=60)
+
     def test_variant_create_dialog_separates_two_colors(self):
         from odoo import api
         from ..domain.variant_groups import traditional_groups
@@ -341,16 +370,19 @@ class WorkbenchBrowserCase(HttpCase):
                     // Independent research flow. Synthetic image/evidence is test-only.
                     button('独立爆款采集').click();await wait(()=>button('新建独立采集'));button('新建独立采集').click();
                     await wait(()=>document.querySelector('.mw-form input'));
-                    let collectionInputs=document.querySelectorAll('.mw-form input');
-                    set(collectionInputs[0],'TEST ONLY standalone collection');set(collectionInputs[1],'Test-only dress reference');
-                    set(collectionInputs[2],'TEST-SOURCE-SKU');set(collectionInputs[3],'https://example.test/garment');
+                    document.querySelectorAll('.mw-form input[name="collection-source"]')[1].click();
+                    await wait(()=>document.querySelector('.mw-form input[type=file]'));
+                    set(document.querySelector('.mw-form input[placeholder="默认使用源商品 ID"]'),'TEST ONLY standalone collection');
+                    set(document.querySelector('.mw-form input[placeholder="例如 MLM2466566421"]'),'TEST-SOURCE-SKU');
+                    set(document.querySelector('.mw-form input[type=url]'),'https://example.test/garment');
                     const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC';
                     const fileInput=document.querySelector('.mw-form input[type=file]');
                     const files=new DataTransfer();files.items.add(new File([Uint8Array.from(atob(png),c=>c.charCodeAt(0))],'source.png',{type:'image/png'}));
                     fileInput.files=files.files;fileInput.dispatchEvent(new Event('change',{bubbles:true}));
-                    await wait(()=>!button('创建独立采集任务').disabled);
+                    const save=()=>[...document.querySelectorAll('.mw-modal button')].find(b=>b.textContent.trim()==='保存');
+                    await wait(()=>save() && !save().disabled);
                     console.log('workbench-shot-independent-form');await new Promise(r=>setTimeout(r,300));
-                    button('创建独立采集任务').click();
+                    save().click();
                     await wait(()=>!document.querySelector('.mw-modal') && document.querySelector('h1')?.textContent.includes('TEST ONLY standalone'));
                     const collections=await rpc('meli.optimization.case','workbench_collections',[]);
                     const collection=collections.find(c=>c.name==='TEST ONLY standalone collection');

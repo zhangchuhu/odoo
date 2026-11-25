@@ -154,10 +154,27 @@ test('independent collection supplies platform and numeric criteria', async () =
     const ui=fixture(), calls=[];
     ui.collectionForm();
     assert.deepEqual([ui.state.form.platform,ui.state.form.min_sold,ui.state.form.min_reviews,ui.state.form.min_rating,ui.state.form.result_limit],['mercado-libre-mx',500,50,4.1,15]);
-    Object.assign(ui.state.form,{source_sku:'MLM1',garment:'dress',min_sold:'0',min_reviews:'50',min_rating:'4.1',result_limit:'15'});
+    Object.assign(ui.state.form,{source_sku:'MLM1',min_sold:'0',min_reviews:'50',min_rating:'4.1',result_limit:'15'});
     ui.rpc=async(method,args)=>{calls.push([method,args]);return {id:1}};ui.load=async()=>{};
     await ui.saveCollection();
-    const v=calls[0][1][0];assert.equal(v.source_sku,'MLM1');assert.equal(v.min_sold,0);assert.equal(v.min_reviews,50);assert.equal(v.min_rating,4.1);assert.equal(v.result_limit,15);
+    const v=calls[0][1][1];assert.equal(v.source_sku,'MLM1');assert.equal(v.min_sold,0);assert.equal(v.min_reviews,50);assert.equal(v.min_rating,4.1);assert.equal(v.result_limit,15);
+    assert.equal('garment' in v,false);
+});
+test('collection searches exact ID and binds selected snapshot and image', async () => {
+    const ui=fixture(), calls=[];ui.navigationVersion=1;ui.disposed=false;ui.collectionForm();ui.state.form.source_sku='MLM1';
+    const row={case_id:7,snapshot_id:8,revision:2,item_id:'MLM1',images:[{artifact_id:9},{artifact_id:10}]};
+    ui.rpc=async(method,args)=>{calls.push([method,args]);return {rows:[row],total:1,page:0}};
+    await ui.searchCollectionSource();
+    assert.equal(ui.state.collectionSelected.case_id,7);assert.equal(ui.state.form.source_artifact_id,9);
+    ui.selectCollectionImage(10);assert.equal(ui.state.form.source_artifact_id,10);
+    assert.deepEqual(calls[0],['workbench_collection_source_search',['MLM1',0]]);
+});
+test('late collection create does not replace a different page', async () => {
+    const ui=fixture();ui.navigationVersion=1;ui.disposed=false;ui.collectionForm();ui.state.form.source_sku='MLM1';
+    let resolve;ui.rpc=()=>new Promise(r=>{resolve=r});ui.load=async()=>{};
+    const pending=ui.saveCollection(false);ui.navigationVersion=2;ui.state.detail={id:99};
+    resolve({id:1,snapshot:{id:2},revision:1});await pending;
+    assert.equal(ui.state.detail.id,99);
 });
 test('research dependency options only include current snapshot matching result type', () => {
     const ui=fixture();ui.state.detail.snapshot={id:9};
@@ -186,7 +203,8 @@ test('collection table resolves first source image safely and presents columns',
     assert.equal(ui.collectionSourceImage({snapshot:{source_image_artifact_ids:['../unsafe']}}),'');
     assert.equal(ui.collectionSourceImage({}), '');
     const xml=await readFile(new URL('../addons/meli_optimization/static/src/workbench.xml',import.meta.url),'utf8');
-    for(const name of ['原图','任务名称 / 记录','平台','服装描述','来源','操作']) assert.ok(xml.includes(`<th scope="col">${name}</th>`));
+    for(const name of ['原图','任务名称 / 记录','平台','来源','操作']) assert.ok(xml.includes(`<th scope="col">${name}</th>`));
+    assert.ok(!xml.includes('<th scope="col">服装描述</th>'));
     assert.ok(xml.includes('暂无原图'));assert.ok(xml.includes('collectionSourceImage(row)'));
 });
 test('one-click collection start binds snapshot and ignores stale navigation', async () => {

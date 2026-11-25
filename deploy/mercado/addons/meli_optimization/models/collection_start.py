@@ -27,7 +27,7 @@ class CollectionStart(models.Model):
             return ['snapshot']
         payload = snapshot.payload
         missing = []
-        for field in ('source_sku', 'garment'):
+        for field in ('source_sku',):
             if not isinstance(payload.get(field), str) or not payload[field].strip():
                 missing.append(field)
         config = payload.get('collection_config')
