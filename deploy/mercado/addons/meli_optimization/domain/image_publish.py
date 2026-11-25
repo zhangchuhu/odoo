@@ -42,7 +42,7 @@ def group_scope_matches(original, current):
             ids=item['selected_group_variant_ids']
             if not isinstance(ids,list) or len(set(ids))!=len(ids): raise ValueError()
             variants=item['variants']
-            identities={v['id']:(v.get('sku'),tuple(sorted(v.get('attributes') or []))) for v in variants}
+            identities={v['id'] for v in variants}
             if len(identities)!=len(variants): raise ValueError()
             groups=[]
             for g in item['picture_groups']:
@@ -327,13 +327,20 @@ def collect_preflight(get, item_id, site, seller_id, marketplace_seller_id, logi
                 raise ValueError('完整商品图片或规格缺失')
             try:
                 image_ids = [p['id'] for p in pictures]
-                rows = [(str(v['id']), v['picture_ids'], sorted((a['id'], a.get('value_id'), a.get('value_name'))
-                          for a in v.get('attribute_combinations', []))) for v in variations]
+                rows = [(str(v['id']), v['picture_ids']) for v in variations]
             except (KeyError, TypeError):
                 raise ValueError('完整商品图片或规格无效') from None
+            if len({row[0] for row in rows}) != len(rows):
+                raise ValueError('完整商品规格标识重复')
             return image_ids, sorted(rows, key=lambda v: v[0])
-        if complete_scope(full) != complete_scope(parent):
-            raise ValueError('平台商品响应不完整或规格不一致')
+        parent_images, parent_rows = complete_scope(parent)
+        full_images, full_rows = complete_scope(full)
+        if parent_images != full_images:
+            raise ValueError('平台商品图片或顺序不一致，请重新核验')
+        if [row[0] for row in parent_rows] != [row[0] for row in full_rows]:
+            raise ValueError('平台商品规格集合不一致，请重新核验')
+        if parent_rows != full_rows:
+            raise ValueError('平台规格图片或顺序不一致，请重新核验')
         variant_limit = settings.get('max_pictures_per_item_var')
         if type(variant_limit) is not int or variant_limit <= 0:
             raise ValueError('无法确认规格的图片数量限制')
@@ -342,6 +349,12 @@ def collect_preflight(get, item_id, site, seller_id, marketplace_seller_id, logi
         attrs = get('/categories/' + category_id + '/attributes')
         raw_variants = [dict(v, id=str(v['id'])) for v in parent['variations']]
         groups = picture_groups(attrs, raw_variants)
+        full_groups = picture_groups(attrs, [dict(v, id=str(v['id'])) for v in full['variations']])
+        def group_keys(values):
+            return sorted((json.dumps(g['key'], sort_keys=True, separators=(',', ':')),
+                           tuple(sorted(g['variant_ids']))) for g in values)
+        if group_keys(groups) != group_keys(full_groups):
+            raise ValueError('平台图片变体范围不一致，请重新核验')
         target['picture_groups'] = groups
         if variant_id:
             matches = [g for g in groups if variant_id in g['variant_ids']]

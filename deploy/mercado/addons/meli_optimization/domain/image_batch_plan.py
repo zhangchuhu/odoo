@@ -36,6 +36,8 @@ def picture_groups(attributes, variants):
             if not isinstance(a, dict):
                 raise ValueError('图片定义属性缺失')
             value_id, name = a.get('value_id'), a.get('value_name')
+            if value_id == '':
+                value_id = None
             if value_id is not None and (not isinstance(value_id, str) or not value_id.strip()):
                 raise ValueError('图片属性值无效')
             if not value_id and (not isinstance(name, str) or not name.strip()):

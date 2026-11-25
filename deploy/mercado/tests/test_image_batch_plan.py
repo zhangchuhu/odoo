@@ -56,6 +56,23 @@ class ImageBatchPlanTest(unittest.TestCase):
         result=publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
         self.assertEqual(result['selected_group_variant_ids'],['1','2'])
         import copy
+        full=copy.deepcopy(parent)
+        full['variations'][0]['attribute_combinations'][1]['value_id']=None
+        parent['variations'][0]['attribute_combinations'][1]['value_id']=''
+        responses['/items/CBT456']=full
+        self.assertEqual(publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')['selected_group_variant_ids'], ['1','2'])
+        full['variations'][0]['attribute_combinations'][0]['value_id']='blue'
+        with self.assertRaises(ValueError): publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
+        full=copy.deepcopy(parent);full['variations'][0]['attribute_combinations'][0]['value_id']='';responses['/items/CBT456']=full
+        with self.assertRaises(ValueError): publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
+        full=copy.deepcopy(parent); full['variations'].reverse(); responses['/items/CBT456']=full
+        self.assertEqual(publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')['selected_group_variant_ids'], ['1','2'])
+        full['variations'][0]['picture_ids']=['other']
+        with self.assertRaisesRegex(ValueError, '规格图片'): publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
+        full=copy.deepcopy(parent);full['pictures'].append({'id':'other'});responses['/items/CBT456']=full
+        with self.assertRaisesRegex(ValueError, '商品图片'): publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
+        parent['pictures'].append({'id':'other'});full=copy.deepcopy(parent);full['pictures'].reverse();responses['/items/CBT456']=full
+        with self.assertRaisesRegex(ValueError, '商品图片'): publishing.collect_preflight(lambda path: responses[path], 'MLM123','MLM','11','22','remote','1')
         conflicting=copy.deepcopy(parent);conflicting['variations'].pop()
         responses['/items/CBT456']=conflicting
         with self.assertRaises(ValueError):
@@ -71,7 +88,19 @@ class ImageBatchPlanTest(unittest.TestCase):
         current=copy.deepcopy(base);current['selected_group_variant_ids'].reverse();current['variants'].reverse();current['picture_groups'][0]['variant_ids'].reverse()
         self.assertTrue(m.group_scope_matches(base,current))
         current['variants'][0]['sku']='wrong'
+        current['variants'][0]['attributes']=['Size: different']
+        self.assertTrue(m.group_scope_matches(base,current))
+        current['picture_groups'][0]['variant_ids'].pop()
         self.assertFalse(m.group_scope_matches(base,current))
+
+    def test_picture_defining_blank_id_matches_null_but_not_existing_id(self):
+        attrs=[{'id':'COLOR','tags':{'defines_picture':True}}]
+        variants=[{'id':'1','picture_ids':['a'],'attribute_combinations':[{'id':'COLOR','value_id':'','value_name':'Pink'}]}]
+        self.assertEqual(batch.picture_groups(attrs,variants)[0]['key'],[['COLOR',['name','pink']]])
+        variants[0]['attribute_combinations'][0]['value_id']=None
+        self.assertEqual(batch.picture_groups(attrs,variants)[0]['key'],[['COLOR',['name','pink']]])
+        variants[0]['attribute_combinations'][0]['value_name']=''
+        with self.assertRaises(ValueError): batch.picture_groups(attrs,variants)
 
     def test_missing_picture_defining_attribute_fails_closed(self):
         with self.assertRaises(ValueError):
