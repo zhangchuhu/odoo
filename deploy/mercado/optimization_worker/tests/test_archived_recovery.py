@@ -9,6 +9,25 @@ from optimization_worker.archived_recovery import recover_archived
 
 
 class ScopedGalleryTest(unittest.TestCase):
+    def test_staged_gallery_recovery_revalidates_sealed_queries_and_saved_reason(self):
+        from optimization_worker.archived_recovery import _revalidate_staged_result
+        from unittest.mock import Mock
+        plan={'collector_id':'rec','request_id':'r','digest':'digest','plan':{'platform':'mercado-libre-mx',
+              'queries':['a','b','c'],'category':'dress'}}
+        data={'queries':[{'query':q} for q in ['a','b','c','d']]}
+        result={'reason':'time_budget_exhausted'}
+        ledger=Mock()
+        ledger.sealed_queries.return_value=['d']
+        ledger.budget_elapsed.return_value=3601
+        with patch('optimization_worker.collector_import.convert_staged_evidence',return_value={'reason':'time_budget_exhausted'}) as convert:
+            _revalidate_staged_result(ledger,plan,{'lease_epoch':3},data,result,'2026-01-01T00:00:00Z',
+                                      {'result_limit':10,'min_sold':500,'min_reviews':50,'min_rating':4.1})
+            self.assertEqual(convert.call_args.args[4],['d'])
+            ledger.sealed_queries.return_value=['other']
+            with self.assertRaises(ValueError):
+                _revalidate_staged_result(ledger,plan,{'lease_epoch':3},data,result,'2026-01-01T00:00:00Z',
+                                          {'result_limit':10,'min_sold':500,'min_reviews':50,'min_rating':4.1})
+
     def test_waiting_original_resumes_same_epoch_and_only_once_per_gallery_step(self):
         from optimization_worker.archived_recovery import resume_waiting_gallery
         from optimization_worker.domain import canonical_hash
@@ -32,7 +51,7 @@ class ScopedGalleryTest(unittest.TestCase):
                     'candidates':[can]}
             host=dict(request_id=request,context=ctx,payload={},task_type=claim['task_type'],collector_plan=plan,
                       binding=canonical_hash({'kind':claim['task_type'],'payload':{},'context':ctx}),
-                      state='unknown',reason='unknown',resume_state='candidate_images_pending',retired=True,
+                      state='waiting',reason='page_unreadable',resume_state='candidate_images_pending',retired=True,
                       retirement_reason='original_worker_lease_inactive',collector_artifact_id='1611',collector_evidence={},
                       collector_pending={'ledger_v1':True,'artifact_id':'1611','digest':DIGEST,'data':{},'result':result})
             with store._db() as db: store._put(db,host)
@@ -48,7 +67,7 @@ class ScopedGalleryTest(unittest.TestCase):
                 self.assertEqual((row['request_id'],row['phase'],row['claim']['lease_epoch'],row['claim']['lease_token']),
                                  (request,'host_pending',5,'rotated'))
                 self.assertEqual(store.inspect(request)['state'],'candidate_images_pending')
-                dispatcher.acknowledge_reconciliation.assert_called_once_with(request)
+                dispatcher.acknowledge_reconciliation.assert_called_once_with(request, gallery_retry=True)
                 self.assertEqual(client.continue_registered_research.call_args.kwargs,
                                  {'evidence_artifact_id':'1611','evidence_digest':DIGEST,'confirmed_images':{}})
                 row.update(phase='calling',done=True,outcome='waiting')

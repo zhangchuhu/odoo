@@ -62,6 +62,43 @@ def test_waiting_request_does_not_launch(tmp_path):
 
 
 class DispatcherTests(unittest.TestCase):
+    def test_card_v3_progress_preserves_page_checkpoint_count(self):
+        store=Store();dispatcher=Dispatcher('unused',store,progress_probe=lambda _:(1,0,0,8,4))
+        self.assertEqual(dispatcher._verified_progress('r'),(1,0,0,8,4))
+        dispatcher.progress_probe=lambda _:(1,0,0,8,-1)
+        with self.assertRaises(ValueError):dispatcher._verified_progress('r')
+    def test_card_v3_prompt_preserves_page_and_visual_limits(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'card-visual-v3'}})
+        for text in ('card-visual-v3','前三页','100','30','min_sold','supplemental'):
+            self.assertIn(text,prompt)
+        self.assertNotIn('time_budget_exhausted',prompt)
+    def test_visual_v2_timeout_continues_only_after_durable_progress(self):
+        store=Store();store.action['collector_plan']={'plan':{'strategy':'visual-v2'}}
+        progress=[(3,0,0,8)]
+        def runner(*args,**kwargs):
+            progress[0]=(3,1,1,8)
+            raise subprocess.TimeoutExpired(args[0],1)
+        with tempfile.TemporaryDirectory() as tmp:
+            dispatcher=Dispatcher(Path(tmp)/'journal',store,runner=runner,host_probe=lambda:True,
+                                  progress_probe=lambda _request:progress[0])
+            self.assertEqual(dispatcher.tick(),'progress')
+
+    def test_visual_v2_progress_supports_nine_groups_and_expansion_checkpoints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dispatcher=Dispatcher(Path(tmp)/'journal',Store(),host_probe=lambda:True,
+                                  progress_probe=lambda _request:(9,120,2,14))
+            self.assertEqual(dispatcher._verified_progress('r'),(9,120,2,14))
+    def test_visual_v2_prompt_uses_task_threshold_and_no_time_budget(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'visual-v2'}})
+        self.assertIn('visual-v2',prompt)
+        self.assertIn('candidate_primary',prompt)
+        self.assertNotIn('time_budget_exhausted',prompt)
+        self.assertNotIn('先按后台顺序核验重复候选',prompt)
+        self.assertIn('至少等待 30 秒',prompt)
+        self.assertIn('window_registration_failed',prompt)
+        self.assertIn('不得用 page_unreadable 代替窗口绑定失败',prompt)
     def test_child_failure_resumes_only_new_confirmed_gallery_operations(self):
         from copy import deepcopy
         from optimization_worker.domain import canonical_hash
@@ -160,6 +197,15 @@ class DispatcherTests(unittest.TestCase):
                                     progress_probe=lambda request: next(progress))
             self.assertEqual(dispatcher.tick(), 'progress')
             self.assertEqual(dispatcher.tick(), 'progress')
+
+    def test_sealed_expansion_and_fourth_group_advance_verified_checkpoint(self):
+        progress=iter(((3,40,0,1),(3,40,0,2),(3,40,0,2),(4,40,0,2)))
+        with tempfile.TemporaryDirectory() as tmp:
+            dispatcher=Dispatcher(Path(tmp)/'journal',Store(),host_probe=lambda:True,
+                                  runner=lambda *a,**k:subprocess.CompletedProcess(a[0],0),
+                                  progress_probe=lambda _request:next(progress))
+            self.assertEqual(dispatcher.tick(),'progress')
+            self.assertEqual(dispatcher.tick(),'progress')
     def test_receipts_are_not_mistaken_for_collected_cards(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         text = research_prompt({'request_id': 'r', 'action': 'browse_research'})
@@ -177,6 +223,8 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('首次任务会按已绑定的计划初始化', prompt)
         self.assertIn('不得覆盖已有进度', prompt)
         self.assertIn('保留旧采集器弹窗及其进度', prompt)
+        self.assertIn('旧标签或旧会话里遗留的错误页面不能作为新请求的页面阻塞',prompt)
+        self.assertIn('先在同一标签刷新一次',prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]

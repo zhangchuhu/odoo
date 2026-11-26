@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
 from .optimization import PREFIX, ExactJson, bounded, MAX_BINARY
-from ..domain import canonical_hash, validate_gallery, validate_result
+from ..domain import canonical_hash, validate_gallery, validate_result, card_v3_tier_valid
 
 
 def _visible_review_lower_bound(value):
@@ -110,6 +110,46 @@ class LibraryArtifact(models.Model):
 
 class GalleryTaskAutomation(models.Model):
     _inherit = PREFIX + 'task'
+
+    def research_progress(self, token, epoch, request_id, progress):
+        self._authorize('worker'); self._lock(); self._fence(token,epoch)
+        config=(self.snapshot_id.payload or {}).get('collection_config')
+        card_v3=isinstance(config,dict) and config.get('strategy')=='card-visual-v3'
+        visual=isinstance(config,dict) and config.get('strategy') in ('visual-v2','card-visual-v3')
+        base={'stage','queries','reviewed','qualified','target'}
+        card=progress.get('card_v3') if isinstance(progress,dict) else None
+        card_fields={'known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed'}
+        if (self.task_type!='research.bestseller' or not isinstance(request_id,str)
+                or not isinstance(progress,dict) or set(progress)!=(base|{'card_v3'} if card_v3 else base)
+                or progress['stage'] not in (('search','visual','finished') if visual else ('search','repeated','single','expanded','finished'))
+                or any(type(progress[k]) is not int for k in ('queries','reviewed','qualified','target'))
+                or not 0<=progress['queries']<=(9 if visual else 6) or not 0<=progress['reviewed']<=(900 if visual else 60)
+                or not 0<=progress['qualified']<=progress['reviewed'] or progress['target']<1
+                or progress['qualified']>progress['target']):
+            raise ValidationError('无效的采集进度')
+        if card_v3 and (not isinstance(card,dict) or set(card)!=card_fields
+                or any(type(card[k]) is not int or card[k]<0 for k in card_fields-{'completed_pages','selected_per_query'})
+                or not isinstance(card['completed_pages'],list) or not isinstance(card['selected_per_query'],list)
+                or len(card['completed_pages'])!=len(card['selected_per_query']) or not 3<=len(card['completed_pages'])<=9
+                or any(type(n) is not int or not 0<=n<=3 for n in card['completed_pages'])
+                or any(n is not None and (type(n) is not int or not 0<=n<=30) for n in card['selected_per_query'])
+                or card['visual_done']>card['visual_required'] or card['visual_required']>30
+                or card['visual_threshold_passed']>card['threshold_met'] or card['visual_supplemental_passed']>card['supplemental']):
+            raise ValidationError('无效的分页采集进度')
+        if isinstance(config,dict) and config.get('result_limit')!=progress['target']:
+            raise ValidationError('采集目标与任务快照不一致')
+        requests=self.env[PREFIX+'external.request'].search([('task_id','=',self.id),('request_id','=',request_id),('state','=','unknown')])
+        if len(requests)!=1: raise ValidationError('原始采集请求不可用')
+        previous=self.status_detail or {}
+        if previous.get('code')=='research_collection_progress' and previous.get('request_id')==request_id and previous.get('lease_epoch')==epoch:
+            if any(progress[k]<previous.get(k,0) for k in ('queries','reviewed','qualified')) or previous.get('target')!=progress['target']:
+                raise ValidationError('采集进度不能倒退')
+        labels={'search':'搜索候选','visual':'核验商品设计','repeated':'核验重复候选','single':'核验其他候选','expanded':'扩展搜索与核验','finished':'采集结束'}
+        message='%s · 已搜索 %s 组 · 已核验 %s 个 · 符合条件 %s / %s' % (labels[progress['stage']],progress['queries'],progress['reviewed'],progress['qualified'],progress['target'])
+        if card_v3:
+            message+=' · 卡片销量明确 %s / 100 · 补充候选 %s · 视觉已判断 %s / %s' % (card['known_products'],card['supplemental'],card['visual_done'],card['visual_required'])
+        self._set({'status_detail':dict(progress,code='research_collection_progress',request_id=request_id,lease_epoch=epoch,message=message)})
+        return self._envelope()
 
     image_qc_key = fields.Char(readonly=True, index=True)
     _unique_image_qc_key = models.Constraint('UNIQUE(image_qc_key)', 'Image QC already exists')
@@ -671,6 +711,9 @@ class CollectionWorkbench(models.Model):
                     or type(config['min_rating']) not in (int, float) or not math.isfinite(config['min_rating']) or not 0 <= config['min_rating'] <= 5
                     or type(config['result_limit']) is not int or config['result_limit'] < 1):
                 raise ValidationError('请提供商品 ID、原图及有效的平台和筛选条件')
+            if config['platform']=='mercado-libre-mx':
+                config.update(strategy='card-visual-v3',initial_query_count=3,max_expansion_queries=6,
+                              max_pages_per_query=3,sales_known_target=100,top_per_query=30,visual_limit=30)
         source_url = str(values.get('source_url') or '').strip()
         if source_url and urlsplit(source_url).scheme not in ('https', 'http'):
             raise ValidationError('来源链接仅支持 HTTP(S)，不会由服务器抓取')
@@ -916,7 +959,11 @@ class CollectionWorkbench(models.Model):
             verified_image(raw, art.mime_type)
             if hashlib.sha256(raw).hexdigest() != art.digest:
                 raise ValidationError('源图摘要不匹配')
-        candidates = task.result['candidates']
+        supplemental=task.result.get('supplemental_candidates',[])
+        card_v3=config.get('strategy')=='card-visual-v3'
+        if supplemental and not card_v3:
+            raise ValidationError('当前采集策略不支持补充候选')
+        candidates = task.result['candidates'] + supplemental
         expected_keys = {c['platform'] + ':' + c['item_id'] for c in candidates}
         if set(candidate_images) - expected_keys:
             raise ValidationError('未知候选图片')
@@ -935,7 +982,13 @@ class CollectionWorkbench(models.Model):
                 if candidate['platform'] != config['platform'] or not images:
                     raise ValidationError('平台或图片不可用')
                 if config['platform'] == 'mercado-libre-mx':
-                    metrics = [(candidate.get('sold_lower_bound'), config['min_sold'])]
+                    if card_v3:
+                        tier='supplemental' if candidate in supplemental else 'threshold_met'
+                        if not card_v3_tier_valid(candidate,config['min_sold'],tier):
+                            raise ValidationError('候选销量分层不符合任务门槛')
+                        metrics=[]
+                    else:
+                        metrics = [(candidate.get('sold_lower_bound'), config['min_sold'])]
                 else:
                     reviews = candidate.get('review_count')
                     if reviews is None:

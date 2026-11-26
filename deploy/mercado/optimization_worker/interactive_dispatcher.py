@@ -84,6 +84,49 @@ def gallery_prompt(action):
 def research_prompt(action):
     if action.get('action') == 'collect_candidate_images':
         return gallery_prompt(action)
+    supplied=action.get('collector_plan') or {}
+    snapshot=action.get('context',{}).get('snapshot',{})
+    config=snapshot.get('payload',{}).get('collection_config',{}) if isinstance(snapshot,dict) else {}
+    if supplied.get('strategy')=='card-visual-v3' or (isinstance(config,dict) and config.get('strategy')=='card-visual-v3'):
+        bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        return ('使用已授权的原生 Chrome 和运营中心绑定版采集器执行 card-visual-v3，仅记录真实观察。先阅读 '+str(bridge)+'。'
+          '源图及研究计划必须绑定当前任务；plan 使用 strategy=card-visual-v3，visual_profile、design_profile 和快照阈值。'
+          '用 binding_status 确认任务专用窗口、标签和 card_v3.resume_step；按后台页码使用同一任务标签打开相应搜索词与实际下一页，'
+          '恢复步骤页码为 0 时重新搜索并核验该词；页码为负数时打开对应正数页并在采集器确认该历史页；正数表示采集该页。'
+          '在绑定版采集器恢复本任务并点击采集。先完成三组首页，随后按后台顺序轮换各词的前三页；'
+          '只使用卡片明确属于该商品的销量，销售量不明确的卡片不能入选。每词按卡片销量严格大于 100 排序取最多 30 个。'
+          '所有已签封词完成后，跨词去重且销量明确的商品不足 100 时，通过 seal_expansion 增加 1 至 3 个有源图依据且不含颜色尺码的词；'
+          '确无新词时提交空数组。最多 9 词，不使用固定时间预算。'
+          '候选队列冻结后按 next_candidate 核验同一商品详情，明确销量必须严格大于 100；按任务 min_sold 区分达标与 supplemental。'
+          '按后台顺序下载并核验候选原图，提交 candidate_primary、secondary、styles、occasions 和实际视觉证据；'
+          '最多 30 个详情通过的商品进行视觉判断，必须完成整个集合后再按相似度排序，不因达到目标数量提前停止。'
+          '只将销量达标结果计入任务目标，补充候选单独保存。完成图库回执后才能结束；验证码、身份不符或页面不可核验时保留检查点。'
+          '任务数据：\n'+json.dumps(action,ensure_ascii=False))
+    if supplied.get('strategy')=='visual-v2' or (isinstance(config,dict) and config.get('strategy')=='visual-v2'):
+        bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        return ('在已授权的原生 Chrome 中执行 visual-v2 研究，仅使用真实页面和已确认图片，不编造证据。'
+          '先读取 '+str(bridge)+' 与 binding_status。用运营中心绑定版采集器在独立任务窗口和标签执行，'
+          '以当前 request_id、租约和查询回执为准；身份、登录、验证码或页面不可读取时保留检查点并报告。'
+          '未绑定计划时先观察源图并提交 plan，包含 strategy=visual-v2、原有 visual_profile 和 design_profile。'
+          '计划已接受后，关闭并重新打开运营中心绑定版采集器，打开专用窗口控制页并确认当前任务；'
+          '若控制页提示未获取当前任务或 request_unavailable，可能是后台正在启动：至少等待 30 秒，'
+          '每隔数秒刷新当前任务并读取 binding_status，不能仅凭第一次提示判定失败。'
+          '只有实际完成专用窗口登记失败并充分等待后才能调用 window_blocked，code 为 window_registration_failed；'
+          '不得用 page_unreadable 代替窗口绑定失败。成功登记后在专用窗口创建任务标签，'
+          '打开首条搜索并在绑定版采集器点击连接当前任务，必须确认 request_id、窗口、标签和查询回执一致。'
+          'design_profile 包含 primary、secondary、styles、occasions；primary 必须含 category、components、length、shoulders、structure、silhouette、fit、sleeve_length。'
+          'category 与 plan.category 一致；无法看清用 null，确实不适用时用 {"status":"not_applicable","value":null}，不能把未知写成不适用；secondary/styles/occasions 使用有依据的稳定英文标签数组，未知用 null。'
+          '不得凭文字推断图片不能确认的设计。采用任务快照的 min_sold 和 result_limit，不使用固定销量或时间预算。'
+          '按已签封查询顺序逐组采集首页，最多每组 100 条；每批待原生回执确认后保存，首页到底需连续确认，'
+          '零结果需明确无结果提示；搜索词出现次数不能作为候选优先条件。'
+          '按后台 next_candidate 顺序逐个核验商品身份和销量；销量通过后查看已确认原图，'
+          '用 submit_visual_verdict 提交 submission_id、receipts、candidate_primary、secondary、styles、occasions、critical_conflict、features。'
+          'candidate_primary 使用与源 primary 相同的字段与标签，不能确定用 null；features 使用实际可观察特征，不能填写颜色尺码。'
+          '后台依据一级强制项、弹性项及二级设计独立计算结果；只记录实际观察。'
+          '候选处理完且 action=search 时，若 requires_expansion=true 调用 seal_expansion 增加 1 至 3 条不同且有源图依据的搜索词；'
+          '确无可用新词时提交空数组。总查询最多 9 条。不得因为时间或详情数量停止。'
+          '后台 action=finish 时在采集器暂存证据，调用 submit_staged；再依据 binding_status.gallery_step 逐个核验并入库所有合格商品图库。'
+          '确认图库和回执完成后调用 finish。保留已经入库的图片，未知回执先对账。任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if action.get('collector_plan'):
         stage = '已绑定计划，禁止再次提交计划；必须选择扩展名称包含“运营中心绑定版”的对应平台采集器，同名旧版不支持任务绑定；当前阶段按原计划继续浏览、采集和回传证据。'
     else:
@@ -94,6 +137,13 @@ def research_prompt(action):
                '三组查询严格按计划顺序，始终在同一原生目标标签内使用搜索框提交，每组采集前逐字核验当前搜索框与相应查询完全一致；每组回执后必须在同一采集器会话点击 Collect current search query，确认完成 30–50 条可见卡片并保存进度后才能进入下一组。绑定回执不是卡片证据。连接当前任务后首先点击“恢复本任务采集进度”。如果本次采集器确认的组数和当前请求 binding_status.saved_query_groups 一致，这就证明卡片已持久化，即使界面未逐组列出卡片数量也要继续下一组。诊断面板可能保留旧搜索词不匹配，仅尚未解决的当前步骤错误才阻止执行。第 3 组未保存时，先在本任务专属标签搜索第 3 组原词、核对页面，再采集和确认本组。扩展会从后台载入该任务的计划、已保存的卡片和已核验候选，首次任务会按已绑定的计划初始化。在界面核对任务、组次和候选进度，执行第一个未完成步骤。三组核验完毕时，后台会把同一任务旧请求中已经验证、且与当前三组卡片吻合的详情恢复到本次任务。因此详情数可能自动从 0 变为 1 或更多。以 binding_status.details 的 saved、restored、source_request、source_epoch 和 last_identity 核对来源，与采集器一致就从下一候选继续。不得覆盖已有进度，无法确认旧数据或无法恢复核验时停止，不得凭回执编造证据。不能根据网址 slug 推断查询，不能复用旧任务的扩展 session。'
                '前两组 guard_active=false 是正常状态：守护只在第三组回执确认后建立，前两组请继续核对绑定并采集下一组。第三组完成后必须确认 guard_active=true；再次打开采集扩展点击“连接当前任务”，收到窗口确认后依次完成候选详情核验，在采集器使用“在任务标签打开下一候选”，只需按顺序观察并记录真实详情。再暂存完整证据；确认过期或连接断开时必须重新核验，不得提交旧会话证据。')
     research_steps = (
+            '恢复新租约时，先以 binding_status 和专用控制页确认本次请求及任务标签；旧标签或旧会话里遗留的错误页面不能作为新请求的页面阻塞。'
+            '仅在当前请求标签和待核验商品身份已经匹配后，若详情出现普通访问错误，先在同一标签刷新一次并等待页面加载，再重新核验商品身份；仍不可读才回传 page_unreadable。验证码、登录或地区限制仍立即按原阻塞流程处理。'
+            '对于新建的 Mercado Libre 研究计划，plan 增加 "strategy":"staged-v1"；已绑定的历史计划必须原样恢复，不得改变策略。'
+            '三组完成后，先按后台顺序核验重复候选，再核验只出现一次的候选；每次保存后读取 binding_status.collection_stage。'
+            '当 collection_stage.action 为 search 时，依据已观察的来源服装类别、构造和西语同义词产生 1 至 3 条新的不同搜索词，不含颜色、尺码或无依据的款式；通过受控桥 seal_expansion 提交 {"queries":[...]}。'
+            '仅收到 accepted=true 后重读 binding_status，点击采集器“恢复本任务采集进度”，按其 queries 和已保存组数在同一任务标签顺序核验新增查询，完成后恢复并继续详情。'
+            '当 collection_stage.action 为 finish 时立即暂存并提交已有证据；reason=time_budget_exhausted 表示完成当前步骤后达到时间上限，不再开启新搜索或候选。'
             'plan 的 category 必须是 category_code（例如 dress、womens_pants_set），不能填 vestido。'
             'queries 必须与 visual_profile.query_seeds 完全一致：第一条具体子类（如 vestido camisero，不能用泛词 vestido），第二条包含服装构造特征，第三条包含风格或场景；均不得含颜色或尺码。'
             'plan 必须包含 platform、queries、category、result_limit、source_artifact_id、viewed_source_sha256、visual_profile；参考 RESEARCH_BRIDGE.md 中完整示例和枚举映射。'
@@ -271,9 +321,11 @@ class Dispatcher:
         with closing(sqlite3.connect(self.journal)) as db, db:
             db.execute('INSERT OR REPLACE INTO invocation_diagnostics VALUES (?, ?, ?, ?)', (request, checkpoint, category, exit_code))
 
-    def acknowledge_reconciliation(self, request):
+    def acknowledge_reconciliation(self, request, *, gallery_retry=False):
         with closing(sqlite3.connect(self.journal)) as db, db:
             db.execute("UPDATE invocations SET status='reconciled' WHERE request_id=? AND status='unknown'", (request,))
+            if gallery_retry:
+                db.execute("UPDATE invocations SET status='reconciled' WHERE request_id=? AND status='finished'", (request,))
 
     def failure_diagnostic(self, request):
         # Persist only protocol-owned category and exit status, never subprocess text.
@@ -291,9 +343,12 @@ class Dispatcher:
             value = (value, 0)
         if isinstance(value, tuple) and len(value) == 2:
             value = (*value, 0)
-        if (not isinstance(value, tuple) or len(value) != 3
-                or any(type(n) is not int or n < 0 for n in value) or value[0] > 3
-                or (value[1] and value[0] != 3)):
+        if isinstance(value, tuple) and len(value) == 3:
+            value = (*value, 0)
+        if (not isinstance(value, tuple) or len(value) not in (4,5)
+                or any(type(n) is not int or n < 0 for n in value) or value[0] > (9 if value[3]>=8 else 6 if value[3] else 3)
+                or value[3]>14 or (5<=value[3]<8) or (value[3]>=8 and value[0]>value[3]-5)
+                or (value[1] and value[0] < 3)):
             raise ValueError('Invalid verified collection progress')
         return value
 
@@ -319,6 +374,10 @@ class Dispatcher:
             checkpoint_state['verified_details'] = progress[1]
         if progress[2]:
             checkpoint_state['verified_visual_photos'] = progress[2]
+        if progress[3]:
+            checkpoint_state['staged_expansion'] = progress[3]
+        if len(progress)==5:
+            checkpoint_state['card_v3_checkpoints']=progress[4]
         checkpoint = hashlib.sha256(json.dumps(checkpoint_state, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with closing(sqlite3.connect(self.journal)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -458,8 +517,17 @@ class Dispatcher:
                 self._diagnostic(request, checkpoint, failure,
                                  exit_code if type(exit_code) is int and -255 <= exit_code <= 255 else None)
                 child_failed = failure == 'process_nonzero' or (failure == 'timeout' and events['child_timeout'])
+                visual_advanced = False
+                if (failure == 'timeout' and events['child_timeout'] and current.get('state') == 'prepared'
+                        and (current.get('collector_plan') or {}).get('plan',{}).get('strategy') in ('visual-v2','card-visual-v3')
+                        and current.get('collector_plan') == initial_record.get('collector_plan')):
+                    try:
+                        observed = self._verified_progress(request)
+                        visual_advanced = observed != progress and all(end >= start for start,end in zip(progress,observed))
+                    except ValueError:
+                        pass
                 if (not child_failed or getattr(bridge, 'window_blocker_rejected', False)
-                        or not gallery_advanced(request,initial_record,current)):
+                        or not (visual_advanced or gallery_advanced(request,initial_record,current))):
                     return 'unknown'
                 # The subprocess and bridge have stopped. Renew the original
                 # lease and re-read the host record before accepting its handoff.
@@ -470,7 +538,8 @@ class Dispatcher:
                     return 'unknown'
                 if self.store.inspect(request) != current:
                     return 'unknown'
-                self._telemetry(request,checkpoint,'checkpoint','verified_gallery_handoff',time.monotonic())
+                self._telemetry(request,checkpoint,'checkpoint',
+                                'verified_visual_handoff' if visual_advanced else 'verified_gallery_handoff',time.monotonic())
             try:
                 final_progress = self._verified_progress(request)
             except ValueError:

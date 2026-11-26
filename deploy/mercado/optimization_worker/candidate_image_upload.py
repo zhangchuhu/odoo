@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 from .host_session import _raster
 from .domain import canonical_hash
+from .research_result_candidates import all_candidates
 
 
 def _active(record, claim, identity):
@@ -20,7 +21,7 @@ def _active(record, claim, identity):
     if digest != canonical_hash(original) or binding.get('request_id') != record.get('request_id'):
         raise ValueError('Collector plan identity changed')
     result = record['collector_pending']['result']
-    matches = [c for c in result['candidates'] if c['platform'] + ':' + c['item_id'] == identity]
+    matches = [c for c in all_candidates(result) if c['platform'] + ':' + c['item_id'] == identity]
     if len(matches) != 1: raise ValueError('Qualified candidate identity required')
     return binding, matches[0]
 
@@ -246,7 +247,7 @@ def finish(store, request_id, claim, fence_request, *, require_manifest=False, c
             raise ValueError('Collector plan identity changed')
         result=r['collector_pending']['result']; uploads=r['collector_pending'].get('candidate_uploads',{})
         manifests=r['collector_pending'].get('gallery_manifests',{})
-        for c in result['candidates']:
+        for c in all_candidates(result):
             identity=c['platform']+':'+c['item_id']; manifest=manifests.get(identity)
             if require_manifest:
                 if not manifest or manifest.get('detail_url') != c.get('url') or not manifest.get('images'):
@@ -274,4 +275,4 @@ def finish(store, request_id, claim, fence_request, *, require_manifest=False, c
         r.update(state='resolved',result=result,candidate_image_receipts=copy.deepcopy(uploads))
         del r['collector_pending']
         store._put(db,r)
-        return len(result['candidates'])
+        return len(all_candidates(result))

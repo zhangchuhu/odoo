@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from .collector_import import _identity
 from .collector_progress import CollectorProgressError
 from .research_upload import lookup_receipt
+from .research_result_candidates import all_candidates
 
 
 def detail_matches(platform, identity, url):
@@ -27,7 +28,7 @@ def gallery_target_reader(store, client, claim, request, record, outstanding):
     pending = record.get('collector_pending') or {}
     digest = pending.get('digest')
     artifact = record.get('collector_artifact_id')
-    candidates = (pending.get('result') or {}).get('candidates')
+    candidates = all_candidates(pending.get('result') or {'candidates':[]})
     evidence = record.get('collector_evidence')
     raw = json.dumps(evidence,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
     if (not can_rebind(record,outstanding()) or pending.get('ledger_v1') is not True or not candidates
@@ -49,7 +50,7 @@ def gallery_target_reader(store, client, claim, request, record, outstanding):
                 or current.get('collector_artifact_id')!=artifact or saved.get('artifact_id')!=artifact
                 or saved.get('ledger_v1') is not True or saved.get('digest')!=digest
                 or not all(u.get('ledger_v1') is True for u in saved.get('candidate_uploads',{}).values())
-                or [(c['platform']+':'+c['item_id'],c['url']) for c in saved.get('result',{}).get('candidates',[])]!=list(targets.items())):
+                or [(c['platform']+':'+c['item_id'],c['url']) for c in all_candidates(saved.get('result') or {'candidates':[]})]!=list(targets.items())):
             return None
         step = next_gallery_step(current)
         if step and step['stage']=='finish':

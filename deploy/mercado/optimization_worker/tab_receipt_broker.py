@@ -30,7 +30,7 @@ class Broker:
         self.started=time.monotonic();self.settle_seconds=settle_seconds;self.candidates=set();self.conflict=False;self.session=expected_session;self.watch_only=watch_only
         with closing(sqlite3.connect(self.store.path)) as db:
             receipts=[json.loads(row[0]) for row in db.execute('SELECT body FROM accepted_receipts WHERE request_id=?',(challenge['request_id'],))]
-        self.query_verified=any(all(r.get(k)==challenge.get(k) for k in ('lease_epoch','plan_digest','query_index','query')) and r.get('tab_id')==expected_tab_id and r.get('window_id')==expected_window_id and r.get('session_id')==expected_session for r in receipts)
+        self.query_verified=any(all(r.get(k)==challenge.get(k) for k in ('version','platform','lease_epoch','plan_digest','query_index','query')) and r.get('tab_id')==expected_tab_id and r.get('window_id')==expected_window_id and r.get('session_id')==expected_session for r in receipts)
         self._guard_lock=threading.Lock();self._guard=None;self._guard_socket=None;self._guard_last_seen=None;self._lock_fd=None;self._socket_inode=None
         self.progress_plan = progress_plan
         self.gallery_binding = gallery_binding
@@ -246,18 +246,28 @@ class Broker:
                 self.activation_error = 'detail_candidate_unverified'
                 return None
             self._activation = (nonce, time.monotonic(), identity, event['detail_url'])
+            self._activation_started_at=time.time()
             return dict(selected, detail_identity=identity, detail_url=event['detail_url'])
         index=self.challenge['query_index']
         if self.watch_only or (index>0 and not self.query_verified):
             prior_index=2 if self.watch_only else index-1
             with closing(sqlite3.connect(self.store.path)) as db:
-                cards=db.execute('SELECT body FROM query_cards WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?', (self.challenge['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],prior_index)).fetchone()
+                if self.challenge.get('version') == 3:
+                    from .visual_v2_checkpoints import load_query, query_status
+                    key=(self.challenge['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],str(prior_index))
+                    complete=query_status(db,key)
+                    cards=(json.dumps(load_query(db,key)),) if complete else None
+                else:
+                    cards=db.execute('SELECT body FROM query_cards WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?', (self.challenge['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],prior_index)).fetchone()
                 rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM accepted_receipts WHERE request_id=?',(self.challenge['request_id'],))]
             previous=[r for r in rows if r.get('query_index')==prior_index and all(r.get(k)==self.challenge.get(k) for k in ('request_id','lease_epoch','plan_digest','platform')) and r.get('tab_id')==self.tab and r.get('window_id')==self.window and r.get('session_id')==self.session]
             if cards and len(previous)==1:
                 try: saved=json.loads(cards[0])
                 except (ValueError,TypeError): saved=None
-                if isinstance(saved,list) and 30<=len(saved)<=50 and all(isinstance(c,dict) and c.get('query')==previous[0].get('query') for c in saved):
+                short=(self.challenge.get('version')==2 and prior_index>=3 and isinstance(saved,list) and len(saved)<30
+                       and self.store.query_exhausted(self.challenge['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],prior_index))
+                visual=(self.challenge.get('version')==3 and isinstance(saved,list) and len(saved)<=100)
+                if isinstance(saved,list) and (30<=len(saved)<=50 or short or visual) and all(isinstance(c,dict) and c.get('query')==previous[0].get('query') for c in saved):
                     selected['query']=previous[0]['query']; selected['query_index']=prior_index
                 elif self.watch_only:return None
             elif self.watch_only:return None
@@ -276,8 +286,14 @@ class Broker:
             url=urlsplit(event['url'])
             if len(self._activation) == 4:
                 if (not 0 <= age <= 10 or event['url'] != self._activation[3]
-                        or checked_detail_identity(self, event['url']) != event['query']):
+                        or checked_detail_identity(self, event['url'],activation_started=getattr(self,'_activation_started_at',None)) != event['query']):
                     return False
+                if self.progress_plan and self.progress_plan[0].get('strategy')=='staged-v1':
+                    from .collector_progress import reserve_staged_detail
+                    with closing(sqlite3.connect(self.store.path)) as db, db:
+                        db.execute('BEGIN IMMEDIATE')
+                        if self.fence() is not True: return False
+                        reserve_staged_detail(db,tuple(self.challenge[k] for k in ('request_id','plan_digest','lease_epoch')),event['query'],self._activation_started_at)
                 self._activation = None
                 return True
             host='us.shein.com' if self.challenge['platform']=='shein-us' else 'listado.mercadolibre.com.mx'
@@ -294,21 +310,62 @@ class Broker:
                 or event['window_id']!=self.window or event['session_id']!=self.session or self.fence() is not True
                 or not self.guard_alive(self.session) or not isinstance(event['evidence'],dict)
                 or event['evidence'].get('task_record_id')!=collector_id(event['request_id'])): return False
+        if self.progress_plan is not None and self.progress_plan[0].get('strategy') in ('visual-v2','card-visual-v3'):
+            plan,config=self.progress_plan;v3=plan.get('strategy')=='card-visual-v3'
+            if v3:from .visual_v3_finalize import prepare_stage
+            else:from .visual_v2_finalize import prepare_stage
+            scope=getattr(self,'visual_v3_scope' if v3 else 'visual_v2_scope',None)
+            if not scope:return False
+            try:
+                with closing(sqlite3.connect(self.store.path)) as db, db:
+                    db.execute('BEGIN IMMEDIATE')
+                    key=tuple(self.challenge[k] for k in ('request_id','plan_digest','lease_epoch'))
+                    args=(db,key,scope,plan,config,collector_id(event['request_id']),datetime.now(timezone.utc).isoformat())
+                    if v3:
+                        verify=getattr(self,'visual_v3_verify_photo',None)
+                        if not callable(verify):return False
+                        args+=(verify,)
+                    evidence=prepare_stage(*args)
+                    body=json.dumps(evidence,sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':'))
+                    if self.fence() is not True:return False
+                    old=db.execute('SELECT body FROM staged_evidence WHERE request_id=? AND lease_epoch=?',(event['request_id'],self.challenge['lease_epoch'])).fetchone()
+                    if old:return old[0]==body
+                    db.execute('INSERT INTO staged_evidence VALUES (?,?,?)',(event['request_id'],self.challenge['lease_epoch'],body))
+                    return True
+            except (ValueError,TypeError,sqlite3.Error):return False
         body=json.dumps(event['evidence'],sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':'))
         if len(body.encode())>900000: return False
         if self.progress_plan is not None:
-            from .collector_import import convert_evidence
+            from .collector_import import convert_evidence, convert_staged_evidence
             plan, config = self.progress_plan
             try:
-                convert_evidence(event['evidence'], collector_id(event['request_id']), plan['platform'],
-                                 plan['queries'], plan['category'], datetime.now(timezone.utc).isoformat(),
-                                 **{k: config[k] for k in ('result_limit', 'min_sold', 'min_reviews', 'min_rating')})
+                staged=plan.get('strategy')=='staged-v1'
+                sealed=(self.store.sealed_queries(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],self.fence)
+                        if staged and len(event['evidence'].get('queries',[]))>3 else [])
+                extra=sealed[:max(0,len(event['evidence'].get('queries',[]))-3)]
+                args=(event['evidence'],collector_id(event['request_id']),plan['platform'],plan['queries'])
+                if staged: args += (extra,)
+                args += (plan['category'],datetime.now(timezone.utc).isoformat())
+                kwargs={k: config[k] for k in ('result_limit','min_sold','min_reviews','min_rating')}
+                if staged: kwargs['elapsed_seconds']=self.store.budget_elapsed(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],self.fence)
+                (convert_staged_evidence if staged else convert_evidence)(*args,**kwargs)
             except (TypeError, ValueError):
                 return False
         with closing(sqlite3.connect(self.store.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            if self.progress_plan is not None and not verify_checkpoint_evidence(db, self.challenge, event['evidence'], allow_previous_stage=True):
+            staged=self.progress_plan is not None and self.progress_plan[0].get('strategy')=='staged-v1'
+            if self.progress_plan is not None and not verify_checkpoint_evidence(db, self.challenge, event['evidence'], allow_previous_stage=not staged,staged=staged):
                 return False
+            if staged:
+                from .collector_progress import _candidate_order, staged_in_flight
+                from .collector_staged_policy import elapsed_seconds
+                key=tuple(self.challenge[k] for k in ('request_id','plan_digest','lease_epoch'))
+                try:
+                    _,ordered,reviewed,finished=_candidate_order(db,key,*self.progress_plan)
+                    if not finished and reviewed<len(ordered) and staged_in_flight(db,key,plan['platform']+':'+ordered[reviewed],elapsed_seconds(db,key)):
+                        return False
+                except (ValueError,CollectorProgressError,sqlite3.Error):
+                    return False
             old=db.execute('SELECT body FROM staged_evidence WHERE request_id=? AND lease_epoch=?',(event['request_id'],self.challenge['lease_epoch'])).fetchone()
             if old: return old[0]==body
             db.execute('INSERT INTO staged_evidence VALUES (?,?,?)',(event['request_id'],self.challenge['lease_epoch'],body))
@@ -371,18 +428,197 @@ class Broker:
             self.tab=next(iter(self.candidates))[0]
         return self.challenge if tab_id==self.tab else None
 
+    def _card_v3_identity(self,event):
+        return (self.challenge.get('version')==4 and self.anchor_origin and event.get('native_origin')==self.anchor_origin
+                and event.get('request_id')==self.challenge['request_id'] and event.get('tab_id')==self.tab
+                and event.get('window_id')==self.window and event.get('session_id')==self.session
+                and self.query_verified and self.anchor_guard_alive() and self.fence() is True)
+
+    def card_v3_progress(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','native_origin'}
+        if not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_progress' or not self._card_v3_identity(event):return None
+        try:
+            from .card_sales_v3_checkpoints import initialize
+            from .card_sales_v3_pipeline import initialize_pipeline,progress
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                initialize(db);initialize_pipeline(db)
+                result=progress(db,(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch']))
+                if not self.anchor_guard_alive() or self.fence() is not True:return None
+                return result
+        except (ValueError,TypeError,sqlite3.Error):return None
+
+    @staticmethod
+    def _fresh_card_v3_proofs(db, expected):
+        now=datetime.now(timezone.utc);matches=[]
+        for body, issued_at in db.execute('SELECT body,issued_at FROM card_v3_receipt_challenges WHERE used=1'):
+            try:
+                proof=json.loads(body);age=(now-datetime.fromisoformat(issued_at)).total_seconds()
+                if 0<=age<=15 and all(proof.get(k)==v for k,v in expected.items()):matches.append(proof)
+            except (TypeError,ValueError,KeyError):continue
+        return matches
+
+    def issue_card_v3_page(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','page','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_page_challenge'
+                or not self._card_v3_identity(event) or event['query_index']!=self.challenge['query_index']
+                or event['query']!=self.challenge['query'] or type(event['page']) is not int
+                or event['page']!=abs(getattr(self,'requested_page',event['page']))):return None
+        try:
+            from .card_sales_v3_receipts import PageReceiptGuard
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE')
+                rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM accepted_receipts WHERE request_id=?',(event['request_id'],))]
+                keys=('request_id','plan_digest','lease_epoch','query_index','query','tab_id','window_id','session_id')
+                expected=dict(request_id=event['request_id'],plan_digest=self.challenge['plan_digest'],lease_epoch=self.challenge['lease_epoch'],
+                              query_index=event['query_index'],query=event['query'],tab_id=self.tab,window_id=self.window,session_id=self.session)
+                matches=[row for row in rows if row.get('version')==4 and row.get('platform')=='mercado-libre-mx' and all(row.get(k)==expected[k] for k in keys)]
+                if len(matches)!=1:return None
+                return PageReceiptGuard(db).issue_for_page(matches[0],event['page'],fence=self.fence)
+        except (ValueError,TypeError,KeyError,sqlite3.Error):return None
+
+    def confirm_card_v3_page(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','receipt','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_page_confirm'
+                or not self._card_v3_identity(event) or not isinstance(event['receipt'],dict)):return False
+        receipt=event['receipt'];expected=dict(request_id=event['request_id'],plan_digest=self.challenge['plan_digest'],lease_epoch=self.challenge['lease_epoch'],
+            query_index=self.challenge['query_index'],query=self.challenge['query'],tab_id=self.tab,window_id=self.window,session_id=self.session)
+        if type(receipt.get('page')) is not int or receipt['page']!=abs(getattr(self,'requested_page',receipt['page'])):return False
+        if any(receipt.get(k)!=v for k,v in expected.items()):return False
+        try:
+            from .card_sales_v3_receipts import PageReceiptGuard
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE');confirmed=PageReceiptGuard(db).confirm(receipt,fence=self.fence)
+            if confirmed and getattr(self,'requested_page',1)<0:self.done=True
+            return confirmed
+        except (ValueError,TypeError,KeyError,sqlite3.Error):return False
+
+    def save_card_v3_batch(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','page','page_url','batch_index','cards','screenshot','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_batch'
+                or self.challenge.get('version')!=4 or not self.anchor_origin or event['native_origin']!=self.anchor_origin
+                or event['request_id']!=self.challenge['request_id'] or event['tab_id']!=self.tab
+                or event['window_id']!=self.window or event['session_id']!=self.session
+                or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
+                or type(event['page']) is not int or not 1<=event['page']<=3 or event['page']!=getattr(self,'requested_page',event['page']) or not isinstance(event['cards'],list)
+                or not 1<=len(event['cards'])<=100 or not self.query_verified or not self.anchor_guard_alive() or self.fence() is not True):
+            return False
+        try:
+            import base64,hashlib,io
+            from PIL import Image
+            from .card_sales_v3_checkpoints import append_page_batch,initialize
+            if not callable(getattr(self,'card_v3_store_screenshot',None)) or not isinstance(event['screenshot'],str) or not 0<len(event['screenshot'])<850000:return False
+            raw=base64.b64decode(event['screenshot'],validate=True)
+            with Image.open(io.BytesIO(raw)) as shot:
+                width,height=shot.size
+                if shot.format!='JPEG' or min(width,height)<100 or width*height>30000000:return False
+                shot.verify()
+            for card in event['cards']:
+                box=card.get('bbox') if isinstance(card,dict) else None
+                if (not isinstance(box,list) or len(box)!=4 or any(type(v) is not int for v in box)
+                        or box[0]<0 or box[1]<0 or box[2]<=0 or box[3]<=0 or box[0]+box[2]>width or box[1]+box[3]>height):return False
+            screenshot_sha=hashlib.sha256(raw).hexdigest();screenshot_file=self.card_v3_store_screenshot(raw)
+            if not isinstance(screenshot_file,str) or not screenshot_file:return False
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE');initialize(db)
+                expected=dict(request_id=event['request_id'],plan_digest=self.challenge['plan_digest'],lease_epoch=self.challenge['lease_epoch'],
+                              query_index=event['query_index'],query=event['query'],page=event['page'],page_url=event['page_url'],
+                              tab_id=self.tab,window_id=self.window,session_id=self.session)
+                if not self._fresh_card_v3_proofs(db,expected):return False
+                scope=(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'])
+                append_page_batch(db,scope,event['query_index'],event['page'],event['batch_index'],event['cards'],fence=self.fence)
+                key=(*scope,event['query_index'],event['page'],event['batch_index'])
+                old=db.execute('SELECT screenshot_sha,screenshot_file,width,height FROM card_v3_batch_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=? AND batch_index=?',key).fetchone()
+                evidence=(screenshot_sha,screenshot_file,width,height)
+                if old and old!=evidence:raise ValueError('Batch screenshot changed')
+                if not old:db.execute('INSERT INTO card_v3_batch_evidence VALUES (?,?,?,?,?,?,?,?,?,?)',(*key,*evidence))
+                if not self.anchor_guard_alive() or self.fence() is not True:raise ValueError('Lost browser guard')
+            return True
+        except (ValueError,TypeError,sqlite3.Error,OSError):return False
+
+    def finish_card_v3_page(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','page','page_url','status','next_url','end_checks','end_evidence','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_page_finish'
+                or not self._card_v3_identity(event) or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
+                or type(event['page']) is not int or not 1<=event['page']<=3 or event['page']!=getattr(self,'requested_page',event['page']) or type(event['end_checks']) is not int or event['end_checks']<3
+                or event['status'] not in ('has_next','end_of_results','page_limit') or
+                (event['status']=='has_next' and event['end_evidence']!='next_link') or
+                (event['status']=='end_of_results' and event['end_evidence'] not in ('disabled_next','empty_results')) or
+                (event['status']=='page_limit' and event['end_evidence'] not in ('page_limit','empty_results'))):return False
+        try:
+            from .card_sales_v3_checkpoints import finish_page,initialize
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE');initialize(db)
+                scope=(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'])
+                expected=dict(request_id=event['request_id'],plan_digest=scope[1],lease_epoch=scope[2],query_index=event['query_index'],
+                              query=event['query'],page=event['page'],page_url=event['page_url'],tab_id=self.tab,window_id=self.window,session_id=self.session)
+                matches=self._fresh_card_v3_proofs(db,expected)
+                if not matches:return False
+                count=db.execute('SELECT count(*) FROM card_v3_batches WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,event['query_index'],event['page'])).fetchone()[0]
+                if not count and event['end_evidence']!='empty_results':return False
+                if count and event['end_evidence']=='empty_results':return False
+                finish_page(db,scope,event['query_index'],event['page'],event['status'],next_url=event['next_url'],fence=self.fence)
+                key=(*scope,event['query_index'],event['page'])
+                saved=db.execute('SELECT page_url,end_evidence,end_checks FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',key).fetchone()
+                expected_evidence=(event['page_url'],event['end_evidence'],event['end_checks'])
+                if saved and saved!=expected_evidence:raise ValueError('Page evidence changed')
+                if not saved:
+                    db.execute('INSERT INTO card_v3_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',(*key,event['page_url'],matches[-1]['nonce'],event['end_evidence'],event['end_checks']))
+                if not self.anchor_guard_alive() or self.fence() is not True:raise ValueError('Lost browser guard')
+            if getattr(self,'requested_page',None) is not None or event['status'] in ('end_of_results','page_limit'):self.done=True
+            return True
+        except (ValueError,TypeError,sqlite3.Error):return False
+
+    def save_visual_batch(self, event):
+        fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','batch_index','cards','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='visual_v2_batch'
+                or self.challenge.get('version')!=3 or not self.anchor_origin or event['native_origin']!=self.anchor_origin
+                or event['request_id']!=self.challenge['request_id'] or event['tab_id']!=self.tab
+                or event['window_id']!=self.window or event['session_id']!=self.session
+                or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
+                or not self.query_verified or not self.anchor_guard_alive() or self.fence() is not True):
+            return False
+        try:
+            self.store.record_visual_v2_batch(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],
+                event['query_index'],event['query'],event['batch_index'],event['cards'],self.fence)
+        except (ValueError,TypeError,sqlite3.Error):
+            return False
+        return True
+
+    def finish_visual_query(self, event):
+        fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','status','end_checks','no_results','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='visual_v2_finish'
+                or self.challenge.get('version')!=3 or not self.anchor_origin or event['native_origin']!=self.anchor_origin
+                or event['request_id']!=self.challenge['request_id'] or event['tab_id']!=self.tab
+                or event['window_id']!=self.window or event['session_id']!=self.session
+                or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
+                or event['status'] not in ('home_complete','card_limit_reached')
+                or type(event['end_checks']) is not int or type(event['no_results']) is not bool
+                or (event['status']=='home_complete' and event['end_checks'] < 3)
+                or not self.query_verified or not self.anchor_guard_alive() or self.fence() is not True):
+            return False
+        try:
+            self.store.finish_visual_v2_query(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],
+                event['query_index'],event['query'],event['status'],self.fence,no_results=event['no_results'])
+        except (ValueError,TypeError,sqlite3.Error):
+            return False
+        self.done=True
+        return True
+
     def complete_query_cards(self,event):
         fields={'operation','request_id','tab_id','window_id','session_id','query_index','cards'}
-        if (not isinstance(event,dict) or set(event)!=fields or event['request_id']!=self.challenge['request_id']
+        short=isinstance(event,dict) and event.get('exhausted') is True
+        if (not isinstance(event,dict) or set(event)!=(fields|{'query','exhausted','native_origin'} if short else fields) or event['request_id']!=self.challenge['request_id']
             or event['tab_id']!=self.tab or event['window_id']!=self.window or event['session_id']!=self.session
-            or type(event['query_index']) is not int or not 0<=event['query_index']<3
+            or type(event['query_index']) is not int or not 0<=event['query_index']<(6 if self.challenge.get('version')==2 else 3)
             or (self.anchor_origin and not self.anchor_guard_alive())
+            or (short and (self.challenge.get('version')!=2 or event['query_index']<3 or event['native_origin']!=self.anchor_origin))
             or self.fence() is not True): return False
         index=event['query_index']; cards=event['cards']
-        if not isinstance(cards,list) or not cards or not isinstance(cards[0],dict): return False
-        query=cards[0].get('query')
+        if not isinstance(cards,list) or (not cards and not short) or (cards and not isinstance(cards[0],dict)): return False
+        query=event['query'] if short else cards[0].get('query')
+        if not isinstance(query,str) or not query:return False
         if index==self.challenge['query_index'] and not self.watch_only and (not self.query_verified or query!=self.challenge['query']): return False
-        try: self.store.record_cards(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],index,query,cards,self.fence)
+        try: self.store.record_cards(event['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],index,query,cards,self.fence,exhausted=short)
         except (ValueError,TypeError,sqlite3.Error): return False
         if index==self.challenge['query_index']: self.done=True
         return True
@@ -392,7 +628,7 @@ class Broker:
         if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='recover_receipt'
                 or event['request_id']!=self.challenge['request_id'] or event['tab_id']!=self.tab or self.tab is None
                 or event['window_id']!=self.window or event['session_id']!=self.session
-                or type(event['query_index']) is not int or not 0<=event['query_index']<3
+                or type(event['query_index']) is not int or not 0<=event['query_index']<(9 if self.challenge.get('version')==3 else 6 if self.challenge.get('version')==2 else 3)
                 or not isinstance(event['query'],str) or not event['query'] or self.fence() is not True): return None
         with closing(sqlite3.connect(self.store.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -596,10 +832,24 @@ class Broker:
                             raise CollectorProgressError('gallery_phase_invalid','当前任务未进入图库恢复阶段')
                         result=self.gallery_binding.handle(self,message)
                     elif self.gallery_binding and op in ('stage_evidence','submit','poll','watch','observe_tab','recover_receipt',
-                                                        'query_cards_complete','collector_progress','checkpoint_detail','next_candidate'):
+                                                        'query_cards_complete','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','collector_progress','checkpoint_detail','next_candidate','seal_expansion'):
                         result={'ok':False,'error':'gallery_phase_invalid'}
-                    elif op in ('collector_progress', 'checkpoint_detail', 'next_candidate', 'gallery_capture'):
+                    elif op in ('collector_progress', 'checkpoint_detail', 'next_candidate', 'gallery_capture', 'seal_expansion'):
                         result = handle_progress(self, message)
+                    elif op == 'card_v3_page_challenge':
+                        result={'challenge':self.issue_card_v3_page(message)}
+                    elif op == 'card_v3_page_confirm':
+                        result={'ok':self.confirm_card_v3_page(message)}
+                    elif op == 'card_v3_batch':
+                        result={'ok':self.save_card_v3_batch(message)}
+                    elif op == 'card_v3_page_finish':
+                        result={'ok':self.finish_card_v3_page(message)}
+                    elif op == 'card_v3_progress':
+                        data=self.card_v3_progress(message);result={'ok':data is not None,'progress':data}
+                    elif isinstance(message,dict) and message.get('operation')=='visual_v2_batch':
+                        result={'ok':self.save_visual_batch(message)}
+                    elif isinstance(message,dict) and message.get('operation')=='visual_v2_finish':
+                        result={'ok':self.finish_visual_query(message)}
                     elif isinstance(message,dict) and message.get('operation')=='query_cards_complete':
                         result={'ok':self.complete_query_cards(message)}
                     elif isinstance(message,dict) and message.get('operation')=='stage_evidence':
@@ -614,6 +864,7 @@ class Broker:
                     elif isinstance(message,dict) and message.get('operation')=='observe_tab': result={'ok':self.observe(message)}
                     elif isinstance(message,dict) and set(message)=={'operation','receipt'} and message['operation']=='submit' and not self.conflict and message['receipt'].get('tab_id')==self.tab and (self.session is None or message['receipt'].get('session_id')==self.session) and (self.initial_tab is not None or (message['receipt'].get('tab_id'),message['receipt'].get('session_id')) in self.candidates):
                         self.store.accept(message['receipt'],self.fence,reconcile=self.reconcile);self.query_verified=True;result={'ok':True}
+                        if self.challenge.get('version')==4 and getattr(self,'requested_page',1)==0:self.done=True
                     else: result={'ok':False}
                 except CollectorProgressError as error:
                     result = {'ok': False, 'error': error.code, 'message': str(error)}

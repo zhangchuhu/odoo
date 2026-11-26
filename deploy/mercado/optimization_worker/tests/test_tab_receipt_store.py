@@ -26,6 +26,65 @@ class TabReceiptStoreTest(unittest.TestCase):
         self.store.issue(later)
         with self.assertRaises(ValueError): self.store.accept(dict(self.receipt, nonce='d'*32, tab_id=124), lambda: True)
 
+    def test_card_v3_receipts_are_bound_to_sealed_queries(self):
+        import sqlite3
+        from optimization_worker.card_sales_v3_checkpoints import initialize, seal_query
+        scope = ('r1', 'b'*64, 1)
+        req = dict(self.request, version=4)
+        with self.assertRaises(ValueError): self.store.issue(req)
+        with sqlite3.connect(self.store.path) as db:
+            initialize(db)
+            for i, query in enumerate(['vestido', 'otro', 'tercero']):
+                seal_query(db, scope, i, query, fence=lambda: True)
+        with self.assertRaises(ValueError): self.store.issue(dict(req, query='incorrecto'))
+        self.store.issue(req)
+        self.store.accept(dict(self.receipt, **req), lambda: True)
+        self.assertEqual(self.store.resume_index(*scope[:2], ['vestido', 'otro', 'tercero'], 1, card_v3=True), 1)
+        with self.assertRaises(ValueError): self.store.issue(dict(req, nonce='d'*32, platform='shein-us'))
+
+    def test_card_v3_state_seals_initial_queries_and_returns_next_page(self):
+        scope=('r1','b'*64,1);queries=['vestido','otro','tercero']
+        state=self.store.card_v3_state(*scope,queries,lambda:True)
+        self.assertEqual(state['queries'],queries)
+        self.assertEqual(state['next_page'],(0,1))
+        self.assertIsNone(state['next_url'])
+        with self.assertRaises(ValueError):self.store.card_v3_state(*scope,['changed','otro','tercero'],lambda:True)
+        with self.assertRaises(ValueError):self.store.card_v3_state(*scope,queries,lambda:False)
+
+    def test_card_v3_state_freezes_when_all_nine_queries_are_exhausted(self):
+        import sqlite3
+        from optimization_worker.card_sales_v3_checkpoints import seal_query,finish_page
+        scope=('r1','b'*64,1);queries=['vestido','otro','tercero']
+        self.store.card_v3_state(*scope,queries,lambda:True)
+        with sqlite3.connect(self.store.path) as db:
+            for i in range(3,9):seal_query(db,scope,i,'extra '+str(i),fence=lambda:True)
+            for i in range(9):finish_page(db,scope,i,1,'end_of_results',fence=lambda:True)
+        state=self.store.card_v3_state(*scope,queries,lambda:True)
+        self.assertIsNone(state['next_page'])
+        with sqlite3.connect(self.store.path) as db:self.assertEqual(db.execute('SELECT count(*) FROM card_v3_meta').fetchone()[0],1)
+
+    def test_card_v3_resume_reconfirms_old_queries_before_continuing_pages(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import finish_page
+        scope=('r1','b'*64,1);queries=['vestido','otro','tercero']
+        self.store.card_v3_state(*scope,queries,lambda:True)
+        with sqlite3.connect(self.store.path) as db:
+            for i in range(3):finish_page(db,scope,i,1,'has_next',next_url='https://listado.mercadolibre.com.mx/page2',fence=lambda:True)
+        self.assertEqual(self.store.card_v3_resume_step(*scope,queries),(0,0))
+        binding=dict(session_id='c'*32,tab_id=123,window_id=1,plan_digest='b'*64,platform='mercado-libre-mx')
+        with sqlite3.connect(self.store.path) as db:
+            db.execute('INSERT INTO bindings VALUES (?,?)',('r1',json.dumps(binding)))
+            for i,q in enumerate(queries):
+                receipt=dict(binding,version=4,lease_epoch=1,query_index=i,query=q,url='https://listado.mercadolibre.com.mx/'+q)
+                db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',('r1',json.dumps(receipt)))
+        self.assertEqual(self.store.card_v3_resume_step(*scope,queries),(0,-1))
+        self.assertEqual(self.store.card_v3_resume_url(*scope,(0,-1)),'https://listado.mercadolibre.com.mx/vestido')
+        with sqlite3.connect(self.store.path) as db:
+            db.execute('CREATE TABLE card_v3_receipt_challenges (nonce TEXT,body TEXT,issued_at TEXT,used INTEGER)')
+            proof=dict(request_id='r1',plan_digest='b'*64,lease_epoch=1,query_index=0,query='vestido',page=1,session_id='c'*32,tab_id=123,window_id=1)
+            db.execute('INSERT INTO card_v3_receipt_challenges VALUES (?,?,?,1)',('e'*32,json.dumps(proof),'now'))
+        self.assertEqual(self.store.card_v3_resume_step(*scope,queries),(0,2))
+
     def test_session_change_fails_closed_and_lease_rechecked(self):
         self.store.issue(self.request)
         with self.assertRaises(ValueError): self.store.accept(self.receipt, lambda: False)
@@ -67,11 +126,44 @@ class TabReceiptStoreTest(unittest.TestCase):
         self.assertEqual(self.store.resume_index('r1','b'*64,queries,1),3)
         self.assertFalse(self.store.verified_queries('r1','b'*64,queries,2))
         self.assertFalse(self.store.verified_queries('r1','b'*64,['vestido','wrong','tercero'],1))
+        self.assertFalse(self.store.verified_queries('r1','b'*64,queries,1,staged=True))
 
     def test_shein_receipt_requires_shein_host(self):
         req=dict(self.request,platform='shein-us'); self.store.issue(req)
         with self.assertRaises(ValueError): self.store.accept(dict(self.receipt,**req),lambda:True)
         self.store.accept(dict(self.receipt,**req,url='https://us.shein.com/search'),lambda:True)
+
+    def test_staged_receipts_require_sealed_expansion_and_resume_in_order(self):
+        import sqlite3, json, hashlib
+        queries = ['vestido', 'otro', 'tercero', 'conjunto largo']
+        for i, query in enumerate(queries[:3]):
+            req = dict(self.request, version=2, nonce=str(i)*32, query_index=i, query=query)
+            self.store.issue(req)
+            self.store.accept(dict(self.receipt, **req), lambda: True)
+        extension = dict(self.request, version=2, nonce='d'*32, query_index=3, query=queries[3])
+        with self.assertRaises(ValueError): self.store.issue(extension)
+        from optimization_worker.collector_staged_policy import initialize_expansions
+        with sqlite3.connect(self.store.path) as db:
+            initialize_expansions(db)
+            body = json.dumps({'queries': queries[3:]}, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+            db.execute('INSERT INTO staged_expansions VALUES (?,?,?,?,?)',
+                       ('r1', 'b'*64, 1, body, hashlib.sha256(body.encode()).hexdigest()))
+        with self.assertRaises(ValueError): self.store.issue(dict(extension, query='incorrecto'))
+        self.store.issue(extension)
+        self.store.accept(dict(self.receipt, **extension), lambda: True)
+        cards=[dict(query=queries[3],rank=1,is_ad=False,title='Dress',url='https://articulo.mercadolibre.com.mx/MLM-123456-item',product_id='MLM123456')]
+        with self.assertRaises(ValueError):self.store.record_cards('r1','b'*64,1,3,queries[3],cards,lambda:True)
+        # The first three groups must already be durably confirmed.
+        with sqlite3.connect(self.store.path) as db:
+            for index in range(3):db.execute('INSERT INTO query_cards VALUES (?,?,?,?,?)',('r1','b'*64,1,index,'[]'))
+        self.store.record_cards('r1','b'*64,1,3,queries[3],cards,lambda:True,exhausted=True)
+        self.assertTrue(self.store.query_exhausted('r1','b'*64,1,3))
+        self.assertEqual(self.store.resume_index('r1', 'b'*64, queries, 1, staged=True), 4)
+        self.assertTrue(self.store.verified_queries('r1', 'b'*64, queries, 1, staged=True))
+        self.assertEqual(self.store.next_query_index('r1','b'*64,queries,1,staged=True),4)
+        self.assertEqual(self.store.sealed_queries('r1','b'*64,1,lambda:True),['conjunto largo'])
+        with self.assertRaises(ValueError): self.store.sealed_queries('r1','b'*64,1,lambda:False)
+        with self.assertRaises(ValueError): self.store.issue(dict(extension, version=1, nonce='e'*32))
 
     def test_restart_during_rebind_uses_new_tab_receipt_prefix(self):
         queries = ['vestido', 'vestido azul', 'vestido largo']

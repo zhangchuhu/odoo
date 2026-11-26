@@ -16,6 +16,30 @@ from .collector_import import convert_evidence
 from .research_upload import intent_id
 
 
+def _revalidate_visual_v2(db,key,photo_scope,plan,config,collector_id,data,observed):
+    from .visual_v2_finalize import snapshot_evidence,build_result
+    if snapshot_evidence(db,key,photo_scope,plan,collector_id)!=data:
+        raise ValueError('Visual evidence no longer matches its checkpoints')
+    return build_result(db,key,photo_scope,plan,config,observed)
+
+
+def _revalidate_staged_result(ledger, binding, claim, data, result, observed, config):
+    from .collector_import import convert_staged_evidence
+    params = binding['plan']
+    key = (binding['request_id'], binding['digest'], claim['lease_epoch'])
+    sealed = ledger.sealed_queries(*key, lambda: True)
+    extra = sealed[:max(0, len(data['queries']) - 3)]
+    if [item.get('query') for item in data['queries']] != params['queries'] + extra:
+        raise ValueError('Staged recovery query plan mismatch')
+    elapsed = ledger.budget_elapsed(*key, lambda: True) if result.get('reason') == 'time_budget_exhausted' else 0
+    verified = convert_staged_evidence(data, binding['collector_id'], params['platform'], params['queries'],
+        extra, params['category'], observed, result_limit=config['result_limit'], min_sold=config['min_sold'],
+        min_reviews=config['min_reviews'], min_rating=config['min_rating'], elapsed_seconds=elapsed)
+    if verified.get('reason') != result.get('reason'):
+        raise ValueError('Staged recovery completion reason mismatch')
+    return verified
+
+
 def recover_archived(journal, store, client, request_id, *, service_lock):
     path = Path(service_lock)
     if not path.is_absolute() or not getattr(journal, 'lock', None):
@@ -49,7 +73,7 @@ def _recover_archived(journal, store, client, request_id, on_verified=None):
     scoped = pending.get('ledger_v1') is True
     if scoped != (getattr(client, 'research_ledger_enabled', False) is True):
         raise ValueError('Original research ledger mode required')
-    isolated = (scoped and current.get('state') == 'unknown' and current.get('reason') == 'unknown'
+    isolated = (scoped and (current.get('state'), current.get('reason')) in (('unknown','unknown'),('waiting','page_unreadable'))
                 and current.get('retired') and current.get('resume_state') == 'candidate_images_pending')
     if ((current.get('state') != 'candidate_images_pending' and not isolated) or current.get('request_id') != request_id
             or current.get('payload') != claim.get('payload') or plan.get('request_id') != request_id
@@ -65,12 +89,45 @@ def _recover_archived(journal, store, client, request_id, on_verified=None):
         raise ValueError('Original evidence receipt does not match')
     params = plan['plan']; config = plan['collection_config']; result = pending['result']
     observed = result['evidence'][0]['observed_at']
-    verified = convert_evidence(pending['data'], plan['collector_id'], params['platform'], params['queries'],
-        params['category'], observed, result_limit=config['result_limit'], min_sold=config['min_sold'],
-        min_reviews=config['min_reviews'], min_rating=config['min_rating'])
-    if verified['status'] != result['status'] or len(verified['candidates']) != len(result['candidates']):
+    if params.get('strategy') == 'card-visual-v3':
+        from .visual_candidate import VisualCandidate
+        from .visual_v3_finalize import build_result,snapshot_evidence
+        from contextlib import closing
+        import sqlite3
+        journal_path=journal.db.execute('PRAGMA database_list').fetchone()[2]
+        ledger_path=str(Path(journal_path).parent/'collector-bindings.sqlite')
+        key=(request_id,plan['digest'],claim['lease_epoch'])
+        review=VisualCandidate(ledger_path,key,params,config,claim)
+        with closing(sqlite3.connect(ledger_path)) as db:
+            verified=build_result(db,key,review.scope,params,config,observed,lambda filename,sha:review.photo(store.files,filename,sha))
+            if snapshot_evidence(db,key,review.scope,params,verified,plan['collector_id'])!=pending['data']:
+                raise ValueError('Original card evidence changed')
+    elif params.get('strategy') == 'visual-v2':
+        from .visual_candidate import VisualCandidate
+        from contextlib import closing
+        import sqlite3
+        journal_path=journal.db.execute('PRAGMA database_list').fetchone()[2]
+        ledger_path=str(Path(journal_path).parent/'collector-bindings.sqlite')
+        key=(request_id,plan['digest'],claim['lease_epoch'])
+        scope=VisualCandidate(ledger_path,key,params,config,claim).scope
+        with closing(sqlite3.connect(ledger_path)) as db:
+            verified=_revalidate_visual_v2(db,key,scope,params,config,plan['collector_id'],pending['data'],observed)
+    elif params.get('strategy') == 'staged-v1':
+        from .tab_receipt_store import TabReceiptStore
+        journal_path = journal.db.execute('PRAGMA database_list').fetchone()[2]
+        ledger = TabReceiptStore(str(Path(journal_path).parent / 'collector-bindings.sqlite'))
+        verified = _revalidate_staged_result(ledger, plan, claim, pending['data'], result, observed, config)
+    else:
+        verified = convert_evidence(pending['data'], plan['collector_id'], params['platform'], params['queries'],
+            params['category'], observed, result_limit=config['result_limit'], min_sold=config['min_sold'],
+            min_reviews=config['min_reviews'], min_rating=config['min_rating'])
+    from .research_result_candidates import all_candidates
+    verified_items=all_candidates(verified) if params.get('strategy')=='card-visual-v3' else verified['candidates']
+    result_items=all_candidates(result) if params.get('strategy')=='card-visual-v3' else result['candidates']
+    if verified['status'] != result['status'] or len(verified_items) != len(result_items):
         raise ValueError('Candidate results do not match original evidence')
-    for expected, actual in zip(verified['candidates'], result['candidates']):
+    if len(verified['candidates'])!=len(result['candidates']):raise ValueError('Candidate sales tiers changed')
+    for expected, actual in zip(verified_items, result_items):
         for key, value in expected.items():
             if key == 'observation_time_scope' and key not in actual and value == 'batch':
                 continue  # Older persisted records predate this explicit marker.
@@ -131,7 +188,9 @@ def resume_waiting_gallery(journal, store, client, dispatcher, task_id=None):
             WHERE json_extract(record,'$.task_type')='research.bestseller'
               AND json_extract(record,'$.collector_pending.ledger_v1')=1
               AND (json_extract(record,'$.state')='candidate_images_pending'
-                   OR (json_extract(record,'$.state')='unknown' AND json_extract(record,'$.resume_state')='candidate_images_pending'))
+                   OR (json_extract(record,'$.state')='unknown' AND json_extract(record,'$.resume_state')='candidate_images_pending')
+                   OR (json_extract(record,'$.state')='waiting' AND json_extract(record,'$.reason')='page_unreadable'
+                       AND json_extract(record,'$.resume_state')='candidate_images_pending'))
             ORDER BY rowid DESC""")]
     for request in requests:
         row = journal.db.execute("""SELECT record FROM runs WHERE json_extract(record,'$.request_id')=?
@@ -159,7 +218,8 @@ def resume_waiting_gallery(journal, store, client, dispatcher, task_id=None):
         archived.update(gallery_resume_checkpoint=checkpoint,gallery_resume_in_flight=True)
         journal.save(archived)
         try:
-            _recover_archived(journal,store,client,request,on_verified=dispatcher.acknowledge_reconciliation)
+            _recover_archived(journal,store,client,request,
+                on_verified=lambda rid: dispatcher.acknowledge_reconciliation(rid, gallery_retry=True))
         except (APIError,ValueError) as exc:
             # Re-read to retain the idempotency intent journaled before the RPC.
             latest = journal.db.execute("SELECT record FROM runs WHERE json_extract(record,'$.request_id')=?",(request,)).fetchone()
@@ -182,7 +242,8 @@ def _confirmed_images(pending):
     if not isinstance(uploads, dict) or not isinstance(manifests, dict):
         raise ValueError('Malformed gallery checkpoint')
     confirmed = {}
-    for c in pending['result']['candidates']:
+    from .research_result_candidates import all_candidates
+    for c in all_candidates(pending['result']):
         identity = c['platform'] + ':' + c['item_id']
         manifest = manifests.get(identity)
         if manifest and manifest.get('detail_url') != c['url']:

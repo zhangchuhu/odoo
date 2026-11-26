@@ -254,6 +254,16 @@ class LibraryCase(TransactionCase):
         self.assertNotIn('garment', detail['snapshot']['payload'])
         self.start_collection(detail)
 
+    def test_new_mercado_collection_uses_visual_v2_and_selected_sales(self):
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        detail=self.ui.workbench_collection_create({'source_sku':'MLM123','image_data':image,'image_mime':'image/png',
+            'platform':'mercado-libre-mx','min_sold':800,'min_reviews':50,'min_rating':4.1,'result_limit':15})
+        config=detail['snapshot']['payload']['collection_config']
+        self.assertEqual(config['strategy'],'card-visual-v3')
+        self.assertEqual(config['min_sold'],800)
+        self.assertEqual((config['initial_query_count'],config['max_expansion_queries'],config['max_pages_per_query'],config['sales_known_target'],config['top_per_query'],config['visual_limit']),(3,6,3,100,30,30))
+        self.start_collection(detail)
+
     def test_collection_source_search_copy_and_idempotency(self):
         image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
         product=self.ui.workbench_create({'shop':'Test','item_id':'MLM123','title':'Source product'})
@@ -330,7 +340,7 @@ class LibraryCase(TransactionCase):
 
     def test_research_candidates_import_verified_images_and_idempotency(self):
         image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
-        d=self.ui.workbench_collection_create({'garment':'dress','source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'mercado-libre-mx','min_sold':2,'min_reviews':1,'min_rating':4,'result_limit':3})
+        d=self.ui.workbench_collection_create({'garment':'dress','source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'mercado-libre-mx','min_sold':200,'min_reviews':1,'min_rating':4,'result_limit':3})
         self.start_collection(d)
         tasks=self.env['meli.optimization.task']; evidence=[{'id':'e','source':'snapshot','observed_at':'2026-11-15T00:00:00Z'}]
         facts=tasks.search([('case_id','=',d['id']),('task_type','=','product.facts')]); c=facts.claim(['product.facts'])
@@ -338,7 +348,7 @@ class LibraryCase(TransactionCase):
         keywords=tasks.search([('case_id','=',d['id']),('task_type','=','research.keywords')]); c=keywords.claim(['research.keywords'])
         keywords.complete(c['lease_token'],c['lease_epoch'],'keywords',{'schema_version':'1','evidence':evidence,'status':'complete','keywords':[{'text':'dress','evidence_ids':['e']}]})
         task=tasks.search([('case_id','=',d['id']),('task_type','=','research.bestseller')]); aid=self.ui.workbench_upload_garment(d['id'],image,'image/png'); art=self.env['meli.optimization.artifact'].browse(aid)
-        candidate={'platform':'mercado-libre-mx','item_id':'MLM1','url':'https://mercadolibre.com.mx/item','raw_url':'https://mercadolibre.com.mx/item','query':'dress','selection_reason':'similar','observed_at':'2026-11-15T00:00:00Z','sold_lower_bound':2,'sold_upper_bound':None,'review_count':None,'position':1,'sold_display':'2','image_url':'https://example.test/image.png','visual_category':'dress','is_ad':False,'rating':None,'evidence_ids':['e']}
+        candidate={'platform':'mercado-libre-mx','item_id':'MLM1','url':'https://mercadolibre.com.mx/item','raw_url':'https://mercadolibre.com.mx/item','query':'dress','selection_reason':'similar','observed_at':'2026-11-15T00:00:00Z','sold_lower_bound':200,'sold_upper_bound':None,'review_count':None,'position':1,'sold_display':'200','sales_tier':'threshold_met','image_url':'https://example.test/image.png','visual_category':'dress','is_ad':False,'rating':None,'evidence_ids':['e']}
         img={'artifact_id':str(aid),'image_id':'candidate','order':0,'role':'reference','source':'https://example.test/image.png','mime_type':'image/png','sha256':art.digest,'width':1,'height':1,'evidence_ids':['e']}
         candidate['gallery_image_urls']=['https://example.test/image.png','https://example.test/second.png']
         result={'schema_version':'1','evidence':evidence,'status':'complete','candidates':[candidate]}; c=task.claim(['research.bestseller']); task.complete(c['lease_token'],c['lease_epoch'],'research',result)
@@ -377,6 +387,24 @@ class LibraryCase(TransactionCase):
         self.assertNotIn(libs.id,[r['id'] for r in visible])
         self.assertEqual(len(versions[0]['payload']['images']),2)
         self.assertTrue(libs.exists())
+
+    def test_card_v3_supplemental_candidate_is_separately_imported(self):
+        image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        d=self.ui.workbench_collection_create({'garment':'dress','source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'mercado-libre-mx','min_sold':500,'min_reviews':0,'min_rating':0,'result_limit':3})
+        self.start_collection(d)
+        tasks=self.env['meli.optimization.task'];evidence=[{'id':'e','source':'snapshot','observed_at':'2026-11-15T00:00:00Z'}]
+        facts=tasks.search([('case_id','=',d['id']),('task_type','=','product.facts')]);c=facts.claim(['product.facts'])
+        facts.complete(c['lease_token'],c['lease_epoch'],'facts',{'schema_version':'1','evidence':evidence,'facts':[{'name':'garment','value':'dress','evidence_ids':['e']}],'uncertainties':[]})
+        keywords=tasks.search([('case_id','=',d['id']),('task_type','=','research.keywords')]);c=keywords.claim(['research.keywords'])
+        keywords.complete(c['lease_token'],c['lease_epoch'],'keywords',{'schema_version':'1','evidence':evidence,'status':'complete','keywords':[{'text':'dress','evidence_ids':['e']}]})
+        task=tasks.search([('case_id','=',d['id']),('task_type','=','research.bestseller')]);aid=self.ui.workbench_upload_garment(d['id'],image,'image/png');art=self.env['meli.optimization.artifact'].browse(aid)
+        candidate={'platform':'mercado-libre-mx','item_id':'MLM2','url':'https://mercadolibre.com.mx/item','raw_url':'https://mercadolibre.com.mx/item','query':'dress','selection_reason':'similar','observed_at':'2026-11-15T00:00:00Z','sold_lower_bound':150,'sold_upper_bound':None,'review_count':None,'position':1,'sold_display':'+150 vendidos','sales_tier':'supplemental','image_url':'https://example.test/image.png','visual_category':'dress','is_ad':False,'rating':None,'evidence_ids':['e']}
+        img={'artifact_id':str(aid),'image_id':'candidate','order':0,'role':'reference','source':'https://example.test/image.png','mime_type':'image/png','sha256':art.digest,'width':1,'height':1,'evidence_ids':['e']}
+        result={'schema_version':'1','evidence':evidence,'status':'empty','reason':'search_plan_exhausted','candidates':[],'supplemental_candidates':[candidate]}
+        c=task.claim(['research.bestseller']);task.complete(c['lease_token'],c['lease_epoch'],'research',result)
+        imported=self.ui.workbench_library_research_import(d['id'],task.id,{'mercado-libre-mx:MLM2':img})
+        self.assertEqual(imported['pending'],[]);self.assertEqual(len(imported['library_ids']),1)
+        entry=self.env['meli.optimization.library'].browse(imported['library_ids'][0]);self.assertEqual(entry.payload['research_candidate']['sales_tier'],'supplemental')
 
     def test_missing_sales_cannot_pass_zero_threshold(self):
         image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'

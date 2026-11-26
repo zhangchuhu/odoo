@@ -201,15 +201,103 @@
       return reply?.ok===true;
     } catch (_) { return false; }
   };
-  globalThis.confirmCollectorQueryCards=async (queryIndex,cards)=>{
-    if (!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>2 || !Array.isArray(cards)) return false;
+  globalThis.confirmCollectorQueryCards=async (queryIndex,cards,options={})=>{
+    if (!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>5 || !Array.isArray(cards)) return false;
     try {
       await trace('query_cards_submit','started');
       const tab=await chrome.tabs.get(target), session=await sessionId();
-      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'query_cards_complete',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,cards}),'cards_timeout');
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'query_cards_complete',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,cards,...(options.exhausted===true ? {exhausted:true,query:options.query} : {})}),'cards_timeout');
       await trace('query_cards_submit',reply?.ok===true?'ok':'rejected');
       return reply?.ok===true;
     } catch (error) {await trace('query_cards_submit','failed',error);return false;}
+  };
+  globalThis.saveVisualQueryBatch=async (queryIndex,query,batchIndex,cards)=>{
+    if (!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
+        typeof query!=='string' || !query.trim() || !Number.isInteger(batchIndex) || batchIndex<0 || !Array.isArray(cards) || !cards.length) return false;
+    try {
+      const tab=await chrome.tabs.get(target), session=await sessionId();
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'visual_v2_batch',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,batch_index:batchIndex,cards}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.confirmCardV3Page=async(queryIndex,query,page)=>{
+    if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
+       typeof query!=='string' || !query.trim() || !Number.isInteger(page) || page<1 || page>3)return false;
+    try {
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_challenge',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page}),'cards_timeout');
+      const challenge=reply?.challenge;
+      if(!challenge || challenge.request_id!==requestId || challenge.query_index!==queryIndex || challenge.query!==query || challenge.page!==page ||
+         challenge.tab_id!==target || challenge.window_id!==tab.windowId || challenge.session_id!==session || challenge.page_url!==tab.url)return false;
+      const observed=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_BINDING'});
+      const current=await chrome.tabs.get(target);
+      if(observed?.error || observed?.page_url!==challenge.page_url || observed?.search_query!==query || current.url!==challenge.page_url)return false;
+      const result=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_confirm',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,receipt:{...challenge,observed_at:new Date().toISOString()}}),'cards_timeout');
+      return result?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.saveCardV3Batch=async(queryIndex,query,page,batchIndex,cards,prior=[])=>{
+    if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
+       typeof query!=='string' || !query.trim() || !Number.isInteger(page) || page<1 || page>3 ||
+       !Number.isInteger(batchIndex) || batchIndex<0 || !Array.isArray(cards) || !cards.length || !Array.isArray(prior))return false;
+    try {
+      if(await globalThis.confirmCardV3Page(queryIndex,query,page)!==true)return false;
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const verify=async()=>{
+        const active=await chrome.tabs.query({active:true,windowId:tab.windowId});
+        const current=await chrome.tabs.get(target);
+        if(active.length!==1 || active[0].id!==target || current.url!==tab.url)return false;
+        const observed=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_EXTRACT_SEARCH',query,prior,limit:10000,strict_scope:true,with_sales:true});
+        if(observed?.page_url!==tab.url || observed?.verified_scope!==true || observed?.card_sales_version!==3 || !Array.isArray(observed.observations))return false;
+        const keys=['product_id','title','is_ad','sales_text','sales_status','bbox'];
+        return cards.every(card=>observed.observations.some(row=>keys.every(key=>JSON.stringify(row[key])===JSON.stringify(card[key]))));
+      };
+      if(!await verify())return false;
+      const image=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:50});
+      const match=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(image || '');
+      if(!match || match[1].length>=850000 || !await verify())return false;
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_batch',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page,page_url:tab.url,batch_index:batchIndex,cards,screenshot:match[1]}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.finishCardV3Page=async(queryIndex,query,page)=>{
+    if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
+       typeof query!=='string' || !query.trim() || !Number.isInteger(page) || page<1 || page>3)return false;
+    try {
+      if(await globalThis.confirmCardV3Page(queryIndex,query,page)!==true)return false;
+      const tab=await chrome.tabs.get(target),session=await sessionId(),observations=[];
+      for(let i=0;i<3;i++){
+        const info=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_INFO',page});
+        const current=await chrome.tabs.get(target);
+        if(!info || info.error || info.at_end!==true || info.page_url!==tab.url || current.url!==tab.url ||
+           !['has_next','end_of_results','page_limit'].includes(info.status))return false;
+        observations.push(info);
+      }
+      const first=observations[0];
+      if(observations.some(x=>x.status!==first.status || x.url!==first.url || x.end_evidence!==first.end_evidence))return false;
+      const nextUrl=first.status==='has_next'?first.url:null;
+      if(first.status==='has_next' && typeof nextUrl!=='string')return false;
+      const endEvidence=first.end_evidence || (first.status==='has_next'?'next_link':first.status==='end_of_results'?'disabled_next':'page_limit');
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_finish',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page,page_url:tab.url,
+        status:first.status,next_url:nextUrl,end_checks:observations.length,end_evidence:endEvidence}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.finishVisualQuery=async (queryIndex,query,status,endChecks,noResults)=>{
+    if (!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
+        typeof query!=='string' || !query.trim() || !['home_complete','card_limit_reached'].includes(status) ||
+        !Number.isInteger(endChecks) || typeof noResults!=='boolean') return false;
+    try {
+      const tab=await chrome.tabs.get(target), session=await sessionId();
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'visual_v2_finish',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,status,end_checks:endChecks,no_results:noResults}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
   };
   globalThis.recoverCollectorReceipt=async (queryIndex,query)=>{
     if (!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || typeof query!=='string') return false;

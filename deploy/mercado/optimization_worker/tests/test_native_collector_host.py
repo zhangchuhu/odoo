@@ -3,6 +3,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from optimization_worker.native_collector_host import read_message, write_message, validate_origin
 class NativeCollectorHostTests(unittest.TestCase):
+ def test_expansion_seal_requires_native_origin(self):
+  from optimization_worker.native_collector_host import forward
+  with self.assertRaisesRegex(ValueError, 'Native origin required'):
+   forward('/unused',{'operation':'seal_expansion'})
+ def test_card_v3_operations_require_native_origin(self):
+  from optimization_worker.native_collector_host import forward
+  for op in ('card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish'):
+   with self.assertRaisesRegex(ValueError,'Native origin required'):
+    forward('/unused',{'operation':op})
  def test_completion_requires_durable_success_for_the_original_research_request(self):
   from optimization_worker.journal import Journal
   from optimization_worker.native_collector_host import collector_completion

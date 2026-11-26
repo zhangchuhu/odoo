@@ -5,6 +5,75 @@ from optimization_worker.tab_receipt_store import TabReceiptStore
 from optimization_worker.prepared_search_recovery import read_prepared_search
 
 class RecoveryTest(unittest.TestCase):
+ def test_visual_v2_restores_durable_batches_without_transferring_browser_receipts(self):
+  from datetime import datetime, timezone
+  from unittest.mock import Mock, patch
+  from optimization_worker.collector_progress import initialize_details
+  from optimization_worker.visual_v2_checkpoints import initialize,seal_queries,append_batch,finish_query,read_queries,load_query
+  from optimization_worker.visual_v2_outcomes import _initialize
+  from optimization_worker.prepared_search_recovery import restore_search_checkpoint
+  with tempfile.TemporaryDirectory() as tmp:
+   ledger=TabReceiptStore(str(Path(tmp)/'ledger'))
+   old,new='old','new'
+   prior=dict(id=242,company_id=1,snapshot_id=2,input_hash='a'*64,payload={},lease_epoch=1,task_type='research.bestseller')
+   claim=dict(prior,lease_epoch=2,lease_token='new')
+   primary=dict(category='dress',components={'status':'not_applicable','value':None},length='long',shoulders='regular',structure='one_piece',silhouette='a_line',fit='fitted',sleeve_length='short')
+   plan=dict(platform='mercado-libre-mx',queries=['vestido largo','vestido encaje','vestido fiesta'],category='dress',strategy='visual-v2',design_profile=dict(primary=primary,secondary=['lace'],styles=['romantic'],occasions=['party']))
+   binding=dict(request_id=old,company_id=1,snapshot_id=2,input_hash=prior['input_hash'],plan=plan);binding['digest']=canonical_hash(binding)
+   source=dict(request_id=old,state='prepared',task_type=prior['task_type'],payload={},collector_plan=binding)
+   key=(old,binding['digest'],1); now=datetime.now(timezone.utc).isoformat()
+   with sqlite3.connect(ledger.path) as db:
+    initialize(db);initialize_details(db);_initialize(db);seal_queries(db,key,plan['queries'],fence=lambda:True)
+    for i,q in enumerate(plan['queries']):
+     receipt=dict(version=3,request_id=old,plan_digest=key[1],lease_epoch=1,query_index=i,query=q,platform=plan['platform'],tab_id=3,collector_tab_id=3,window_id=4,session_id='a'*32,observed_at=now)
+     db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',(old,json.dumps(receipt)))
+     card=dict(query=q,rank=1,is_ad=False,title='Dress',url=f'https://articulo.mercadolibre.com.mx/MLM-{1000000000+i}-dress',product_id=f'MLM{1000000000+i}')
+     append_batch(db,(*key,str(i)),0,[card],fence=lambda:True);finish_query(db,(*key,str(i)),'home_complete',fence=lambda:True)
+   store=Mock();store.inspect.side_effect={old:source,new:dict(state='prepared')}.__getitem__
+   server=Mock();server.request.return_value=dict(allowed=True,task_id=242,snapshot_id=2,input_hash=prior['input_hash'],request_id=new,lease_epoch=2,source_request_id=old,source_epoch=1)
+   with patch('optimization_worker.collector_cli.bind_plan',return_value='new-digest'):
+    self.assertTrue(restore_search_checkpoint(ledger,store,[dict(request_id=old,claim=prior,done=True)],server,new,claim,lambda:True))
+   with sqlite3.connect(ledger.path) as db:
+    self.assertEqual(read_queries(db,(new,'new-digest',2)),plan['queries'])
+    self.assertEqual(len(load_query(db,(new,'new-digest',2,'0'))),1)
+    self.assertEqual(db.execute('SELECT count(*) FROM accepted_receipts WHERE request_id=?',(new,)).fetchone()[0],0)
+   self.assertEqual(ledger.next_query_index(new,'new-digest',plan['queries'],2,visual_v2=True),0)
+   with sqlite3.connect(ledger.path) as db:
+    row=db.execute('SELECT id,body FROM accepted_receipts WHERE request_id=? ORDER BY id LIMIT 1',(old,)).fetchone()
+    invalid=json.loads(row[1]);invalid['query']='different'
+    db.execute('UPDATE accepted_receipts SET body=? WHERE id=?',(json.dumps(invalid),row[0]))
+   with self.assertRaises(ValueError):read_prepared_search(ledger.path,source,prior)
+
+ def test_staged_expansion_and_details_are_verified_before_recovery(self):
+  from datetime import datetime,timezone
+  from optimization_worker.tests.test_collector_import import fixture
+  from optimization_worker.collector_progress import initialize_details
+  from optimization_worker.collector_staged_policy import initialize_expansions
+  import hashlib
+  data,queries=fixture();extra='dress extra'
+  claim={'id':242,'company_id':1,'snapshot_id':2,'input_hash':'a'*64,'payload':{'x':1},'lease_epoch':3,'task_type':'research.bestseller'}
+  rid='01234567-89ab-4cde-8fab-0123456789ab'
+  plan={'platform':'shein-us','queries':queries,'category':'dress','result_limit':5,'strategy':'staged-v1'}
+  binding={'request_id':rid,'company_id':1,'snapshot_id':2,'input_hash':'a'*64,'plan':plan};binding['digest']=canonical_hash(binding)
+  record={'request_id':rid,'task_type':'research.bestseller','state':'prepared','payload':{'x':1},'collector_plan':binding,'context':{'snapshot':{}}}
+  cards=[dict(c,query=extra,product_id=str(30+c['rank']),url=f"https://us.shein.com/item-p-{30+c['rank']}.html") for c in data['queries'][0]['observations'][:1]]
+  details=data['details'][:20]+[dict(data['details'][1],identity='shein-us:31',product_id='31',detail_url='https://us.shein.com/item-p-31.html')]
+  with tempfile.TemporaryDirectory() as t:
+   path=Path(t)/'ledger';TabReceiptStore(str(path))
+   with sqlite3.connect(path) as db:
+    initialize_details(db);initialize_expansions(db)
+    body=json.dumps({'queries':[extra]},sort_keys=True,separators=(',',':'))
+    db.execute('INSERT INTO staged_expansions VALUES (?,?,?,?,?)',(rid,binding['digest'],3,body,hashlib.sha256(body.encode()).hexdigest()))
+    db.execute('INSERT INTO query_card_meta VALUES (?,?,?,?,?,?)',(rid,binding['digest'],3,3,extra,1))
+    for i,block in enumerate(data['queries']+[{'query':extra,'observations':cards}]):
+     receipt=dict(version=2,request_id=rid,plan_digest=binding['digest'],lease_epoch=3,query_index=i,query=block['query'],platform='shein-us',tab_id=1,collector_tab_id=1,window_id=2,session_id='a'*32,observed_at=datetime.now(timezone.utc).isoformat())
+     db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',(rid,json.dumps(receipt)))
+     db.execute('INSERT INTO query_cards VALUES (?,?,?,?,?)',(rid,binding['digest'],3,i,json.dumps(block['observations'])))
+    for i,detail in enumerate(details):db.execute('INSERT INTO collector_details VALUES (?,?,?,?,?)',(rid,binding['digest'],3,i,json.dumps(detail)))
+   result=read_prepared_search(str(path),record,claim)
+   self.assertEqual(result['expansion_queries'],[extra]);self.assertEqual(len(result['details']),21);self.assertTrue(result['exhausted_groups'][3])
+   with sqlite3.connect(path) as db:db.execute("UPDATE staged_expansions SET body='{}'")
+   with self.assertRaises(ValueError):read_prepared_search(str(path),record,claim)
  def test_three_groups_read_only_and_tamper_rejected(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'ledger'; TabReceiptStore(str(path)); claim={'id':242,'company_id':1,'snapshot_id':2,'input_hash':'a'*64,'payload':{'x':1},'lease_epoch':3,'task_type':'research.bestseller'}

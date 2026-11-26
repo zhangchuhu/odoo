@@ -528,6 +528,18 @@ export class OptimizationWorkbench extends Component {
     rows(result) { return candidateRows(result); }
     value(value) { return displayValue(value); }
     json(value) { return JSON.stringify(value,null,2); }
+    researchReason(value) { return ({target_reached:'达到目标结果数量',candidates_exhausted:'已核验完可用候选',budget_exhausted:'达到候选核验数量上限',time_budget_exhausted:'达到采集时间上限',search_plan_exhausted:'搜索词及候选已处理完',visual_candidate_limit_reached:'已完成最多 30 个候选的视觉筛选'})[value] || value; }
+    similarityLabel(value) { return ({highly_similar:'高度相似',competitor:'类似竞品',broad_competitor:'宽范围竞品'})[value] || value; }
+    designComparison(row) {
+        const labels={category:'商品类别',components:'套装组成',length:'主要长度',shoulders:'肩部形态',structure:'穿着结构',silhouette:'整体廓形',fit:'整体版型',sleeve_length:'袖长'};
+        const states={match:'符合',mismatch:'不符合',unknown:'待核对',not_applicable:'未比较'};
+        const fields=row?.design_comparison?.features;
+        const comparison=row?.design_comparison;
+        if (!fields && comparison && Array.isArray(comparison.matches) && Array.isArray(comparison.differences) && Array.isArray(comparison.unknown)) {
+            return [['符合',comparison.matches],['不符合',comparison.differences],['待核对',comparison.unknown]].filter(([,values])=>values.length).map(([title,values])=>`${title}：${values.map(name=>labels[name] || name).join('、')}`).join('；');
+        }
+        return fields && typeof fields==='object' ? Object.entries(fields).map(([key,value])=>`${labels[key] || key}：${states[value] || '未知'}`).join('；') : '';
+    }
     collectionImportFailed(task) { return !!this.state.detail?.collection && task.task_type === 'research.bestseller' && task.state === 'succeeded' && task.status_detail?.code === 'derived_action_failed'; }
     taskStatusClass(task) { return this.collectionImportFailed(task) ? 'failed' : (imageReviewWaiting(task) || (task.state === 'running' && task.lease_expired) ? 'waiting' : task.state); }
     taskStatusLabel(task) {
@@ -537,7 +549,7 @@ export class OptimizationWorkbench extends Component {
         if (task.task_type === 'image.generate' && task.state === 'succeeded' && task.result?.visual_qc?.status === 'manual_accepted') return '已完成 · 人工确认使用';
         if (task.task_type === 'research.bestseller') {
             if (task.status_detail?.code === 'research_images_pending') return '结果待入库';
-            if (task.state === 'succeeded' && Array.isArray(task.result?.candidates) && !task.result.candidates.length) return '未找到候选商品';
+            if (task.state === 'succeeded' && Array.isArray(task.result?.candidates) && !task.result.candidates.length) return task.result?.supplemental_candidates?.length ? '未达销量门槛 · 有补充候选' : '未找到候选商品';
         }
         return this.label(task.state);
     }
