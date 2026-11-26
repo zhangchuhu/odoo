@@ -3,6 +3,44 @@ from optimization_worker.research_return_bridge import ReturnBridge
 
 ID='8b4f7606-7811-4070-925d-d21cc78f13f0'
 class Tests(unittest.TestCase):
+    def test_supplemental_candidate_also_requires_gallery(self):
+        from optimization_worker.research_return_bridge import next_gallery_step
+        candidate={'platform':'mercado-libre-mx','item_id':'MLM2','url':'https://articulo.mercadolibre.com.mx/MLM2'}
+        record={'state':'candidate_images_pending','collector_pending':{'result':{'candidates':[],'supplemental_candidates':[candidate]}}}
+        step=next_gallery_step(record)
+        self.assertEqual((step['stage'],step['identity']),('manifest','mercado-libre-mx:MLM2'))
+    def test_card_v3_binding_reports_page_progress(self):
+        from unittest.mock import patch
+        from optimization_worker.research_return_bridge import build_bridge
+        claim={'task_type':'research.bestseller','lease_epoch':2}
+        plan={'strategy':'card-visual-v3','queries':['a','b','c'],'result_limit':5}
+        store=type('Store',(),{'inspect':lambda self,request:{'collector_plan':{'digest':'d','plan':plan}}})()
+        card_state={'queries':['a','b','c'],'next_page':(1,1),'known_products':4,
+                    'progress':{'known_products':4,'completed_pages':[1,0,0],'selected_per_query':[None,None,None],'detail_count':0,'threshold_met':0,'supplemental':0,'excluded':0,'visual_required':0,'visual_done':0,'visual_threshold_passed':0,'visual_supplemental_passed':0}}
+        with patch('optimization_worker.host_session.worker_records',return_value=[{'request_id':ID,'claim':claim}]),patch('optimization_worker.host_session.fence'),patch('optimization_worker.tab_receipt_store.TabReceiptStore') as ledger,patch('optimization_worker.tab_receipt_supervisor.CardPageSupervisor'):
+            ledger.return_value.current_binding.return_value={'tab_id':123,'window_id':4,'plan_digest':'d'}
+            ledger.return_value.card_v3_state.return_value=card_state
+            ledger.return_value.resume_index.return_value=1
+            bridge=build_bridge(ID,object(),store,'journal')
+            status=bridge.call(ID,'binding_status',{})['binding']
+            self.assertEqual(status['card_v3']['next_page'],(1,1))
+            self.assertEqual(status['card_v3']['known_products'],4)
+            bridge.close()
+    def test_card_v3_verdict_schema_reaches_fenced_handler(self):
+        calls=[]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),{'submit_visual_verdict':lambda c,d:{'classification':'competitor'}})
+        data={'submission_id':'card-v3-0001','receipts':['a'*32],'candidate_primary':{},'secondary':[], 'styles':[],'occasions':[],'features':['lace']}
+        self.assertEqual(bridge.call(ID,'submit_visual_verdict',data)['visual']['classification'],'competitor')
+        self.assertEqual(calls,['fence'])
+    def test_visual_v2_verdict_schema_reaches_fenced_handler(self):
+        from optimization_worker.research_return_bridge import ReturnBridge
+        calls=[]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),
+                            {'submit_visual_verdict':lambda c,d:{'status':'qualified'}})
+        data={'submission_id':'visual-v2-0001','receipts':['a'*32],'candidate_primary':{},'secondary':[],
+              'styles':[],'occasions':[],'critical_conflict':False,'features':['lace']}
+        self.assertEqual(bridge.call(ID,'submit_visual_verdict',data)['visual']['status'],'qualified')
+        self.assertEqual(calls,['fence'])
     def test_original_slot_is_source_bound_and_refuses_redirected_files(self):
         import os
         import tempfile
@@ -186,6 +224,26 @@ class FinishSafetyTests(unittest.TestCase):
             finish.assert_called_once()
             self.assertIs(finish.call_args.kwargs['client'],client)
             bridge.close()
+    def test_visual_v2_binding_status_uses_sealed_queries_and_v3_receipts(self):
+        from unittest.mock import patch
+        from optimization_worker.research_return_bridge import build_bridge
+        claim={'task_type':'research.bestseller','lease_epoch':2}
+        plan={'strategy':'visual-v2','queries':['a','b','c'],'result_limit':5}
+        store=type('Store',(),{'inspect':lambda self,request:{'collector_plan':{'digest':'d','plan':plan}}})()
+        with patch('optimization_worker.host_session.worker_records',return_value=[{'request_id':ID,'claim':claim}]), patch('optimization_worker.host_session.fence'), patch('optimization_worker.tab_receipt_store.TabReceiptStore') as ledger, patch('optimization_worker.tab_receipt_supervisor.NativeSupervisor'):
+            ledger.return_value.current_binding.return_value={'tab_id':123,'window_id':4,'plan_digest':'d'}
+            ledger.return_value.visual_v2_queries.return_value=['a','b','c','d']
+            ledger.return_value.resume_index.return_value=3
+            ledger.return_value.next_query_index.return_value=3
+            ledger.return_value.detail_status.return_value={'saved':0,'qualified':0}
+            bridge=build_bridge(ID,object(),store,'journal')
+            status=bridge.call(ID,'binding_status',{})['binding']
+            self.assertEqual(status['queries'],['a','b','c','d'])
+            self.assertEqual(status['completed_queries'],3)
+            self.assertEqual(status['saved_query_groups'],3)
+            self.assertEqual(ledger.return_value.resume_index.call_args.kwargs,{'visual_v2':True})
+            bridge.close()
+
     def test_old_lease_binding_not_returned_as_current(self):
         from unittest.mock import patch
         from optimization_worker.research_return_bridge import build_bridge

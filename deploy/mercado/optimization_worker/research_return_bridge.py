@@ -4,6 +4,7 @@ The embedding process owns the Odoo credential. This class does not isolate a
 same-user Codex process from that credential; use a separate OS security boundary.
 """
 import hashlib
+from .research_result_candidates import all_candidates
 import json
 import os
 import re
@@ -14,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-_FIELDS = {'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
+_FIELDS = {'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'seal_expansion': {'queries'}, 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
            'image_saved': {'identity','order'}, 'image': {'identity','file','screenshot','source','order'}, 'finish': set(),
            'reconcile_image': {'identity','artifact_id','order'}, 'reconcile_evidence': {'artifact_id'}}
 
@@ -61,7 +62,8 @@ def next_gallery_step(record):
     pending = record['collector_pending']
     uploads = pending.get('candidate_uploads', {})
     manifests = pending.get('gallery_manifests', {})
-    for candidate in pending['result']['candidates']:
+    from .research_result_candidates import all_candidates
+    for candidate in all_candidates(pending['result']):
         identity = candidate['platform'] + ':' + candidate['item_id']
         target = {'identity': identity, 'detail_url': candidate['url']}
         manifest = manifests.get(identity)
@@ -112,7 +114,10 @@ class ReturnBridge:
         if request_id != self.request_id or operation not in _FIELDS or operation not in self.handlers or not isinstance(data,dict):
             raise ValueError('Unauthorized operation')
         fields=_FIELDS[operation]
-        if fields is not None and set(data)!=fields: raise ValueError('Invalid fields')
+        visual_v2_fields={'submission_id','receipts','candidate_primary','secondary','styles','occasions','critical_conflict','features'}
+        visual_v3_fields=visual_v2_fields-{'critical_conflict'}
+        if fields is not None and set(data)!=fields and not (operation=='submit_visual_verdict' and set(data) in (visual_v2_fields,visual_v3_fields)):
+            raise ValueError('Invalid fields')
         if operation == 'window_blocked' and data.get('code') != 'window_registration_failed': raise ValueError('Invalid blocker')
         if operation == 'page_blocked' and data['code'] not in ('captcha_required', 'login_required', 'page_unreadable'):
             raise ValueError('Invalid page blocker')
@@ -157,12 +162,13 @@ def build_bridge(request_id, client, store, journal):
     from .candidate_image_upload import bind_gallery, send, finish, reconcile
     from .tab_receipt_store import TabReceiptStore
     from .tab_receipt_factory import build_native_broker
-    from .tab_receipt_supervisor import NativeSupervisor
+    from .tab_receipt_supervisor import NativeSupervisor,CardPageSupervisor
     from .native_collector_host import trace_supervisor
     private = Path(__file__).resolve().parents[3] / '.local/optimization-codex-worker'
     ledger_path = private / 'collector-bindings.sqlite'
     socket_path = private / 'collector-native.sock'
     supervisor = None
+    last_progress = None
     def renew(): fence(client,journal,request_id)
     def claim():
         rows=[r for r in worker_records(journal) if r.get('request_id')==request_id and not r.get('done')]
@@ -176,10 +182,46 @@ def build_bridge(request_id, client, store, journal):
         record=store.inspect(request_id)
         binding=record.get('collector_plan') or {}
         plan=binding.get('plan') or {}
+        from .research_result_candidates import all_candidates
         direct_gallery = (record.get('state')=='candidate_images_pending' and getattr(client,'research_ledger_enabled',False) is True
-                          and record.get('collector_pending',{}).get('result',{}).get('candidates'))
-        index=3 if direct_gallery else TabReceiptStore(str(ledger_path)).next_query_index(request_id,binding.get('digest'),plan['queries'],current.get('lease_epoch'))
-        supervisor=NativeSupervisor(lambda number, rebind=False, watch_only=False: build_native_broker(socket_path,ledger_path,request_id,number,store,client,journal,rebind=rebind,watch_only=watch_only,dedicated_required=True),start_index=index,diagnostic=lambda phase,code,exception: trace_supervisor(private/'collector-window-trace.jsonl',request_id,phase,code,exception))
+                          and all_candidates(record.get('collector_pending',{}).get('result') or {'candidates':[]}))
+        ledger=TabReceiptStore(str(ledger_path))
+        staged=plan.get('strategy')=='staged-v1'
+        visual=plan.get('strategy')=='visual-v2'
+        card_v3=plan.get('strategy')=='card-visual-v3'
+        if card_v3 and not direct_gallery:
+            ledger.card_v3_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+            def page_state():
+                return ledger.card_v3_resume_step(request_id,binding['digest'],current['lease_epoch'],plan['queries'])
+            supervisor=CardPageSupervisor(lambda number,rebind=False,watch_only=False:build_native_broker(socket_path,ledger_path,request_id,number,store,client,journal,rebind=rebind,watch_only=watch_only,dedicated_required=True),page_state,
+                diagnostic=lambda phase,code,exception:trace_supervisor(private/'collector-window-trace.jsonl',request_id,phase,code,exception))
+            supervisor.start()
+            return
+        def expansion_state():
+            extra=ledger.sealed_queries(request_id,binding['digest'],current['lease_epoch'],lambda: (renew() or True))
+            if not extra:return None
+            queries=plan['queries']+extra
+            index=ledger.next_query_index(request_id,binding['digest'],queries,current['lease_epoch'],staged=True)
+            if index>=3 and ledger.budget_elapsed(request_id,binding['digest'],current['lease_epoch'],lambda: (renew() or True))>=3600:
+                return index,index
+            return len(queries),index
+        def visual_state():
+            queries=ledger.visual_v2_queries(request_id,binding['digest'],current['lease_epoch'],lambda: (renew() or True))
+            if not queries:
+                queries=ledger.seal_visual_v2_queries(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda: (renew() or True))
+            index=ledger.next_query_index(request_id,binding['digest'],queries,current['lease_epoch'],visual_v2=True)
+            return len(queries),index
+        if direct_gallery:
+            index=3
+        elif visual:
+            index=visual_state()[1]
+        elif staged:
+            state=expansion_state()
+            index=state[1] if state else ledger.next_query_index(request_id,binding.get('digest'),plan['queries'],current.get('lease_epoch'),staged=True)
+        else:
+            index=ledger.next_query_index(request_id,binding.get('digest'),plan['queries'],current.get('lease_epoch'))
+        options={'max_queries':9} if visual else {}
+        supervisor=NativeSupervisor(lambda number, rebind=False, watch_only=False: build_native_broker(socket_path,ledger_path,request_id,number,store,client,journal,rebind=rebind,watch_only=watch_only,dedicated_required=True),start_index=index,diagnostic=lambda phase,code,exception: trace_supervisor(private/'collector-window-trace.jsonl',request_id,phase,code,exception),expansion_state=(visual_state if visual else expansion_state if staged else None) if not direct_gallery else None,**options)
         supervisor.start()
     def submit(c,data):
         # Caller must supply its actual observation timestamp in the evidence.
@@ -191,7 +233,9 @@ def build_bridge(request_id, client, store, journal):
         if observed.utcoffset()!=timedelta(0) or not now-timedelta(hours=24)<=observed<=now: raise ValueError('Invalid observation time')
         receipts = TabReceiptStore(str(ledger_path))
         binding = store.inspect(request_id).get('collector_plan') or {}
-        receipts.require_checkpoint_evidence(request_id, binding.get('digest'), c['lease_epoch'], data['evidence'])
+        strategy=(binding.get('plan') or {}).get('strategy')
+        if strategy not in ('visual-v2','card-visual-v3'):
+            receipts.require_checkpoint_evidence(request_id, binding.get('digest'), c['lease_epoch'], data['evidence'],staged=strategy=='staged-v1')
         if store.inspect(request_id).get('state')=='candidate_images_pending':
             raise ValueError('Research evidence is already archived for this request')
         count=import_evidence(store,request_id,c,data['evidence'],observed.isoformat(),client,renew,tab_receipts=receipts)
@@ -212,31 +256,94 @@ def build_bridge(request_id, client, store, journal):
             row=db.execute('SELECT body FROM staged_evidence WHERE request_id=? AND lease_epoch=?',(request_id,c['lease_epoch'])).fetchone()
         if not row: raise ValueError('No evidence staged for current lease')
         return submit(c,{'evidence':json.loads(row[0]),'observed_at':data['observed_at']})
+    def seal_expansion(c,data):
+        from .collector_progress import handle_progress
+        broker=supervisor.active_broker if supervisor else None
+        if not broker or not broker.watch_only or not supervisor.fresh_confirmation():
+            raise ValueError('Current browser session requires fresh verification')
+        event=dict(operation='seal_expansion',request_id=request_id,window_id=broker.window,
+                   session_id=broker.session,tab_id=broker.tab,native_origin=broker.anchor_origin,queries=data['queries'])
+        return handle_progress(broker,event)
     def binding_status(c,data):
+        nonlocal last_progress
         current_record = store.inspect(request_id)
         item=current_record.get('collector_plan') or {}
         plan=item.get('plan') or {};queries=plan.get('queries')
         ledger=TabReceiptStore(str(ledger_path));binding=ledger.current_binding(request_id)
-        completed=ledger.resume_index(request_id,item.get('digest'),queries,c.get('lease_epoch')) if isinstance(queries,list) and len(queries)==3 else 0
+        staged=plan.get('strategy')=='staged-v1'
+        visual=plan.get('strategy')=='visual-v2'
+        card_v3=plan.get('strategy')=='card-visual-v3'
+        card_state=None
+        if card_v3 and isinstance(queries,list) and len(queries)==3:
+            card_state=ledger.card_v3_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
+            queries=card_state['queries']
+            completed=ledger.resume_index(request_id,item['digest'],queries,c['lease_epoch'],card_v3=True)
+            card_state['resume_step']=ledger.card_v3_resume_step(request_id,item['digest'],c['lease_epoch'],plan['queries'])
+            card_state['resume_url']=ledger.card_v3_resume_url(request_id,item['digest'],c['lease_epoch'],card_state['resume_step'])
+        elif visual and isinstance(queries,list) and len(queries)==3:
+            queries=ledger.visual_v2_queries(request_id,item['digest'],c['lease_epoch'],lambda: (renew() or True)) or queries
+            completed=ledger.resume_index(request_id,item.get('digest'),queries,c.get('lease_epoch'),visual_v2=True)
+        elif staged and isinstance(queries,list) and len(queries)==3:
+            queries=queries+ledger.sealed_queries(request_id,item['digest'],c['lease_epoch'],lambda: (renew() or True))
+            completed=ledger.resume_index(request_id,item.get('digest'),queries,c.get('lease_epoch'),staged=True)
+        else:
+            completed=ledger.resume_index(request_id,item.get('digest'),queries,c.get('lease_epoch')) if isinstance(queries,list) and len(queries)==3 else 0
         matches=bool(binding and completed>0 and binding.get('plan_digest')==item.get('digest'))
         selection=supervisor.window_selection_status() if supervisor else {'registered':False,'window_id':None,'observation_seconds_remaining':0}
         gallery_step = next_gallery_step(current_record)
         if (current_record.get('state')=='candidate_images_pending' and getattr(client,'research_ledger_enabled',False) is True
-                and current_record.get('collector_pending',{}).get('result',{}).get('candidates')):
+                and all_candidates(current_record.get('collector_pending',{}).get('result') or {'candidates':[]})):
             active = supervisor.active_broker if supervisor else None
             gallery = getattr(active,'gallery_binding',None)
             matches = bool(gallery and gallery.tab_matches(active) is True)
             binding = dict(tab_id=active.tab,window_id=active.window) if matches else None
         if gallery_step and gallery_step['stage'] == 'image' and bridge.save_directory:
             gallery_step['save_path'] = str(gallery_save_path(bridge.save_directory, gallery_step))
+        collection_stage=None
+        active=supervisor.active_broker if supervisor else None
+        if (staged or visual or card_v3) and active and active.watch_only and supervisor.fresh_confirmation():
+            from .collector_progress import handle_progress, CollectorProgressError
+            try:
+                progress=handle_progress(active,dict(operation='next_candidate',request_id=request_id,
+                    window_id=active.window,session_id=active.session,tab_id=active.tab,native_origin=active.anchor_origin))
+                collection_stage={k:progress[k] for k in ('stage','action','reason','requires_expansion') if k in progress}
+            except (CollectorProgressError, ValueError):
+                pass
+        if card_state:
+            cp=card_state['progress']
+            details={'saved':cp['detail_count'],'qualified':cp['threshold_met'],'supplemental':cp['supplemental']}
+            saved_groups=sum(value is not None for value in cp['selected_per_query'])
+        else:
+            details=ledger.detail_status(request_id,item.get('digest'),c.get('lease_epoch'))
+            saved_groups=(ledger.next_query_index(request_id,item.get('digest'),queries,c.get('lease_epoch'),visual_v2=True)
+                      if visual else ledger.completed_card_index(request_id,item.get('digest'),c.get('lease_epoch'),**({'staged':True} if staged else {})))
+        if staged or visual:
+            stage=(collection_stage or {}).get('stage') or ('expanded' if staged and len(queries)>3 and saved_groups>=3 else 'search')
+            progress=dict(stage=stage,queries=saved_groups,reviewed=details['saved'],qualified=details['qualified'],target=plan['result_limit'])
+            if progress != last_progress:
+                try:
+                    client.research_progress(c,request_id,progress)
+                    last_progress=progress
+                except Exception:
+                    pass # Display-only progress must not interrupt authenticated collection.
+        elif card_state:
+            cp=card_state['progress'];stage=(collection_stage or {}).get('stage')
+            stage='finished' if stage=='finished' else 'visual' if stage in ('visual','detail') else 'search'
+            keys=('known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed')
+            progress=dict(stage=stage,queries=saved_groups,reviewed=cp['detail_count'],qualified=min(cp['visual_threshold_passed'],plan['result_limit']),target=plan['result_limit'],card_v3={k:cp[k] for k in keys})
+            if progress!=last_progress:
+                try:
+                    client.research_progress(c,request_id,progress);last_progress=progress
+                except Exception:
+                    pass
         return {'tab_id':binding.get('tab_id') if matches else None,'window_id':binding.get('window_id') if matches else None,
                 'binding_matches_plan':matches,'completed_queries':completed,'queries':queries if isinstance(queries,list) else [],
                 'window_selection':selection,
                 'anchor_required':True,'anchor_active':bool(supervisor and supervisor.anchor_active() is True),
                 'gallery_step': gallery_step,
-                'details': ledger.detail_status(request_id, item.get('digest'), c.get('lease_epoch')),
-                'saved_query_groups': ledger.completed_card_index(request_id,item.get('digest'),c.get('lease_epoch')),
-                'guard_active':bool(supervisor and supervisor.fresh_confirmation())}
+                'details': details,
+                'saved_query_groups': saved_groups,'card_v3':card_state,
+                'guard_active':bool(supervisor and supervisor.fresh_confirmation()),'collection_stage':collection_stage}
     def after_reconcile():
         nonlocal supervisor
         if not callable(getattr(store,'inspect',None)): return
@@ -342,6 +449,7 @@ def build_bridge(request_id, client, store, journal):
     handlers={
         'window_blocked':window_blocked, 'page_blocked': page_blocked,
         'binding_status':binding_status,
+        'seal_expansion':seal_expansion,
         'visual_candidate_status':visual,
         'submit_visual_verdict':visual,
         'prior_lease_status':lambda c,d: client.request('POST','/internal/meli-optimization/prior-research-lease',{'task_id':c['id'],'lease_token':c['lease_token'],'lease_epoch':c['lease_epoch'],'old_request_id':d['request_id']}),

@@ -4,13 +4,14 @@
 function makeReceipt(challenge, session, tab, page, collectorTabId, observedAt) {
   const requireField=(condition,code)=>{if(!condition){const error=new Error('Invalid observed binding');error.code=code;throw error;}};
   requireField(!!challenge,'receipt_challenge_missing');
-  requireField(challenge.version===1,'receipt_version_invalid');
+  requireField([1,2,3,4].includes(challenge.version),'receipt_version_invalid');
   requireField(typeof challenge.request_id==='string' && !!challenge.request_id,'receipt_request_invalid');
   requireField(typeof challenge.nonce==='string' && /^[A-Za-z0-9_-]{32,128}$/.test(challenge.nonce),'receipt_nonce_invalid');
   requireField(Number.isSafeInteger(challenge.lease_epoch) && challenge.lease_epoch>=1,'receipt_lease_invalid');
   requireField(typeof challenge.plan_digest==='string' && /^[a-f0-9]{64}$/.test(challenge.plan_digest),'receipt_plan_invalid');
   requireField(['mercado-libre-mx','shein-us'].includes(challenge.platform),'receipt_platform_invalid');
-  requireField(Number.isSafeInteger(challenge.query_index) && challenge.query_index>=0 && challenge.query_index<=2,'receipt_query_index_invalid');
+  requireField(![3,4].includes(challenge.version) || challenge.platform==='mercado-libre-mx','receipt_platform_invalid');
+  requireField(Number.isSafeInteger(challenge.query_index) && challenge.query_index>=0 && challenge.query_index<=([3,4].includes(challenge.version) ? 8 : challenge.version===2 ? 5 : 2),'receipt_query_index_invalid');
   requireField(typeof challenge.query==='string' && !!challenge.query.trim(),'receipt_query_invalid');
   requireField(typeof session==='string' && /^[a-f0-9]{32}$/.test(session),'receipt_session_invalid');
   requireField(!!tab && Number.isSafeInteger(tab.id) && tab.id>0,'receipt_tab_invalid');

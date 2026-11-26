@@ -22,6 +22,32 @@ class ProfileTests(unittest.TestCase):
 
 
 class ProfileBindingTests(unittest.TestCase):
+    def test_protocol_matches_only_its_bound_strategy(self):
+        from optimization_worker.collector_cli import protocol_matches
+        self.assertTrue(protocol_matches(5,{'strategy':'card-visual-v3'}))
+        self.assertFalse(protocol_matches(4,{'strategy':'card-visual-v3'}))
+        self.assertTrue(protocol_matches(4,{'strategy':'visual-v2'}))
+        self.assertFalse(protocol_matches(5,{'strategy':'visual-v2'}))
+    def test_card_v3_plan_is_bound_to_immutable_config_and_design(self):
+        import base64,hashlib,io,tempfile
+        from pathlib import Path
+        from PIL import Image
+        from optimization_worker.host_session import SessionStore
+        from optimization_worker.collector_cli import bind_plan
+        p={'category_code':'dress','category':'vestido','subtype':'vestido','silhouette':'vuelo fluido','fit':'holgado','color':'rojo','style_codes':['elegant'],'style':['elegante'],'selling_point_codes':['round_neck','sleeveless'],'selling_points':['cuello redondo','sin mangas'],'construction':['vuelo fluido'],'defining_features':['cuello redondo','sin mangas'],'exclusions':['manga larga'],'scene_codes':['wedding'],'use_scene':['boda'],'query_language':'es-MX','query_seeds':['vestido','vestido vuelo fluido','vestido elegante']}
+        primary={'category':'dress','components':'one_piece','length':'long','shoulders':'regular','structure':'one_piece','silhouette':'a_line','fit':'loose','sleeve_length':'short'}
+        config={'platform':'mercado-libre-mx','result_limit':5,'min_sold':500,'min_reviews':50,'min_rating':4.1,'strategy':'card-visual-v3','initial_query_count':3,'max_expansion_queries':6,'max_pages_per_query':3,'sales_known_target':100,'top_per_query':30,'visual_limit':30}
+        with tempfile.TemporaryDirectory() as root:
+            out=io.BytesIO();Image.new('RGB',(2,2),'red').save(out,format='PNG');raw=out.getvalue();sha=hashlib.sha256(raw).hexdigest()
+            request='01234567-89ab-4cde-8fab-0123456789ab';store=SessionStore(Path(root)/'db','test');payload={'site_id':'MLM'}
+            claim={'company_id':6,'snapshot_id':5,'task_type':'research.bestseller','payload':payload,'input_hash':'hash'}
+            snap={'case_id':4,'snapshot_id':5,'payload':{'source_image_artifact_ids':['1'],'collection_config':config}}
+            store.enqueue(request,'research.bestseller',payload,{'snapshot':snap,'artifacts':{'1':{'case_id':4,'company_id':6,'data':base64.b64encode(raw).decode(),'digest':sha}}})
+            plan={'platform':'mercado-libre-mx','queries':p['query_seeds'],'category':'dress','result_limit':5,'source_artifact_id':'1','viewed_source_sha256':sha,'visual_profile':p,'strategy':'card-visual-v3','design_profile':{'primary':primary,'secondary':[],'styles':[],'occasions':[]}}
+            digest=bind_plan(store,request,claim,plan)
+            self.assertEqual(store.inspect(request)['collector_plan']['protocol_version'],5)
+            self.assertEqual(bind_plan(store,request,claim,plan),digest)
+            with self.assertRaises(ValueError):bind_plan(store,request,claim,dict(plan,result_limit=6))
     def test_new_task_needs_bound_profile_and_exact_plan(self):
         import base64, hashlib, io, tempfile
         from pathlib import Path

@@ -212,12 +212,21 @@ def _research_status(result, items):
         _require(_text(result.get('reason')), 'invalid_result', 'Partial/empty reason required')
 
 
+def card_v3_tier_valid(candidate, threshold, tier):
+    if not isinstance(candidate,dict) or type(threshold) is not int or threshold<0 or tier not in ('threshold_met','supplemental'):
+        return False
+    sold=candidate.get('sold_lower_bound')
+    return (candidate.get('sales_tier')==tier and type(sold) is int and sold>100
+            and (sold>=threshold if tier=='threshold_met' else sold<threshold))
+
+
 def validate_research_candidates(result):
     ids = _evidence(result)
     candidates = _items(result.get('candidates'), 'research candidates', nonempty=False)
     _research_status(result, candidates)
+    supplemental = _items(result.get('supplemental_candidates', []), 'supplemental candidates', nonempty=False)
     identities = set()
-    for item in candidates:
+    for item in candidates + supplemental:
         _refs(item, ids)
         for field in ('platform', 'item_id', 'url', 'raw_url', 'query', 'selection_reason'):
             _require(_text(item.get(field)), 'invalid_result', 'Invalid ' + field)

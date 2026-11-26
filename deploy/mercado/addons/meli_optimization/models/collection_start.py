@@ -35,7 +35,17 @@ class CollectionStart(models.Model):
             missing.append('collection_config')
         else:
             expected = {'platform', 'result_limit', 'min_sold', 'min_reviews', 'min_rating'}
-            if set(config) != expected:
+            visual = expected | {'strategy','initial_query_count','max_expansion_queries','max_cards_per_query'}
+            valid_visual=(set(config)==visual and config.get('platform')=='mercado-libre-mx'
+                          and config.get('strategy')=='visual-v2'
+                          and type(config.get('initial_query_count')) is int and config['initial_query_count']==3
+                          and type(config.get('max_expansion_queries')) is int and config['max_expansion_queries']==6
+                          and type(config.get('max_cards_per_query')) is int and config['max_cards_per_query']==100)
+            card_fields=expected|{'strategy','initial_query_count','max_expansion_queries','max_pages_per_query','sales_known_target','top_per_query','visual_limit'}
+            limits={'initial_query_count':3,'max_expansion_queries':6,'max_pages_per_query':3,'sales_known_target':100,'top_per_query':30,'visual_limit':30}
+            valid_card=(set(config)==card_fields and config.get('platform')=='mercado-libre-mx' and config.get('strategy')=='card-visual-v3'
+                        and all(type(config.get(k)) is int and config[k]==v for k,v in limits.items()))
+            if set(config) != expected and not valid_visual and not valid_card:
                 missing.append('collection_config')
             platform = config.get('platform')
             if platform not in ('mercado-libre-mx', 'shein-us'):

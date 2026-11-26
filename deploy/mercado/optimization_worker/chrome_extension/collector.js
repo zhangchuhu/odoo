@@ -34,13 +34,13 @@
     return result.page_url;
   }
 
-  function createSession({taskRecordId, platform, queries, cardLimit, resultLimit}) {
+  function createSession({taskRecordId, platform, queries, cardLimit, resultLimit, strategy}) {
     if (typeof taskRecordId !== "string" || !RECORD_ID.test(taskRecordId)) throw new Error("invalid task record ID");
     if (platform !== "mercado-libre-mx") throw new Error("platform must be mercado-libre-mx");
-    if (!Array.isArray(queries) || queries.length !== 3 || queries.some((query) => typeof query !== "string" || !query.trim()) || new Set(queries).size !== 3) {
+    if (!Array.isArray(queries) || (strategy === 'visual-v2' ? queries.length < 3 || queries.length > 9 : strategy === 'staged-v1' ? queries.length < 3 || queries.length > 6 : queries.length !== 3) || queries.some((query) => typeof query !== "string" || !query.trim()) || new Set(queries).size !== queries.length) {
       throw new Error("exactly three distinct Codex queries are required");
     }
-    if (!Number.isInteger(cardLimit) || cardLimit < 30 || cardLimit > 50) throw new Error("card limit must be 30-50");
+    if (!Number.isInteger(cardLimit) || cardLimit < 30 || cardLimit > (strategy === 'visual-v2' ? 100 : 50)) throw new Error("invalid card limit");
     if (!Number.isInteger(resultLimit) || resultLimit < 1) throw new Error("task result limit must be a positive integer");
     return {
       taskRecordId,
@@ -51,6 +51,7 @@
       queryBlocks: queries.map((query) => ({query, observations: []})),
       details: [],
       stopped: false,
+      ...(['staged-v1','visual-v2'].includes(strategy) ? {strategy} : {}),
     };
   }
 
@@ -85,9 +86,26 @@
     return block.observations.length;
   }
 
-  function recurringPool(session) {
+  function sameCards(left, right, strategy) {
+    if (strategy !== 'visual-v2') return equal(left, right);
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    const fields = ['query','rank','is_ad','title','url','product_id','thumbnail_url'];
+    const project = rows => rows.map(card => Object.fromEntries(fields.map(field => [field, card?.[field]])));
+    return equal(project(left), project(right));
+  }
+
+  async function persistVisualCards(session, index, batchIndex, cards, save) {
+    const query=session.queries[index];
+    if (session.strategy!=='visual-v2' || !query || typeof save!=='function') throw Error('invalid visual query batch');
+    const probe={...session,queryBlocks:session.queryBlocks.map(block=>({...block,observations:[...block.observations]}))};
+    addSearchObservations(probe,{query,cards});
+    if (await save(index,query,batchIndex,cards)!==true) throw Error('checkpoint_cards_unconfirmed');
+    return addSearchObservations(session,{query,cards});
+  }
+
+  function rankedCards(blocks) {
     const hits = new Map();
-    for (const block of session.queryBlocks) {
+    for (const block of blocks) {
       for (const card of block.observations) {
         const identity = `mercado-libre-mx:${card.product_id}`;
         if (!hits.has(identity)) hits.set(identity, {queries: new Set(), organic: [], sponsored: []});
@@ -97,7 +115,6 @@
       }
     }
     return [...hits]
-      .filter(([, value]) => value.queries.size >= 2)
       .sort(([leftIdentity, left], [rightIdentity, right]) => {
         const leftOrganic = left.organic.length ? Math.min(...left.organic) : null;
         const rightOrganic = right.organic.length ? Math.min(...right.organic) : null;
@@ -108,11 +125,30 @@
           || leftRank - rightRank
           || (leftIdentity < rightIdentity ? -1 : leftIdentity > rightIdentity ? 1 : 0);
       })
-      .map(([identity]) => identity);
+      ;
+  }
+
+  function recurringPool(session) {
+    if (session.strategy==='visual-v2') {
+      const seen=new Set(), result=[];
+      for(const block of session.queryBlocks) for(const card of block.observations) {
+        const identity=`mercado-libre-mx:${card.product_id}`;
+        if(!seen.has(identity)){seen.add(identity);result.push(identity);}
+      }
+      return result;
+    }
+    const ranked=rankedCards(session.queryBlocks.slice(0,3));
+    const repeated=ranked.filter(([,v])=>v.queries.size>=2).map(([id])=>id);
+    if(session.strategy!=='staged-v1') return repeated;
+    const first=repeated.slice(0,20);
+    const single=ranked.filter(([,v])=>v.queries.size===1).map(([id])=>id).slice(0,40-first.length);
+    const initial=first.concat(single), seen=new Set(initial);
+    const extra=rankedCards(session.queryBlocks.slice(3)).map(([id])=>id).filter(id=>!seen.has(id));
+    return initial.concat(extra.slice(0,60-initial.length));
   }
 
   function searchesComplete(session) {
-    return session.queryBlocks.every((block) => block.observations.length === session.cardLimit);
+    return session.queryBlocks.every((block,index) => block.observations.length === session.cardLimit || ((session.strategy==='visual-v2' || (session.strategy==='staged-v1' && index>=3)) && session.exhaustedQueries?.includes(index)));
   }
 
   function qualifyingCount(session) {
@@ -136,7 +172,8 @@
     const expectedId = expectedIdentity.slice("mercado-libre-mx:".length);
     const detailUrlId = canonicalProductId(detail.detail_url);
     const qualified = detail.status === "qualified" && detail.reason === null;
-    const rejected = detail.status === "rejected" && REJECTION_REASONS.has(detail.reason);
+    const rejected = detail.status === "rejected" && (REJECTION_REASONS.has(detail.reason) ||
+      (session.strategy==='visual-v2' && ['visual_review_required','visual_mismatch'].includes(detail.reason)));
     if (!qualified && !rejected) throw new Error("detail status or reason is invalid");
     if (detail.visual_category_code !== null && !CATEGORY_CODES.has(detail.visual_category_code)) throw new Error("visual category is invalid");
     if (detail.reason === "imagery_ambiguous_or_inaccessible" && detail.visual_category_code !== null) throw new Error("ambiguous imagery cannot claim category");
@@ -166,12 +203,16 @@
     return output;
   }
 
-  function buildEvidence(session) {
-    for (const block of session.queryBlocks) {
-      if (block.observations.length < 30 || block.observations.length > 50 || block.observations.length !== session.cardLimit) throw new Error("each query must contain the chosen 30-50 observations");
+  function buildEvidence(session, {timeBudgetReached=false}={}) {
+    const blocks=timeBudgetReached && session.strategy==='staged-v1'
+      ? session.queryBlocks.slice(0,session.acknowledgedQueries?.length || 0) : session.queryBlocks;
+    if(blocks.length<3) throw new Error('initial searches are incomplete');
+    for (const [index,block] of blocks.entries()) {
+      const exhausted=session.strategy==='staged-v1' && index>=3 && session.exhaustedQueries?.includes(index);
+      if (block.observations.length > 50 || (!exhausted && (block.observations.length < 30 || block.observations.length !== session.cardLimit))) throw new Error("each query must be complete or confirmed exhausted");
       if (block.observations.some((card, index) => card.rank !== index + 1)) throw new Error("query ranks must be contiguous");
     }
-    const pool = recurringPool(session);
+    const pool = recurringPool({...session,queryBlocks:blocks});
     const identities = session.details.map((detail) => detail.identity);
     if (identities.some((identity, index) => identity !== pool[index])) throw new Error("detail outcomes must be an exact recurring-pool prefix in order");
     const qualified = qualifyingCount(session);
@@ -179,13 +220,13 @@
     if (qualified === session.resultLimit) {
       const reachedAt = session.details.findIndex((_detail, index) => qualifyingCount({details: session.details.slice(0, index + 1)}) === session.resultLimit);
       if (reachedAt !== session.details.length - 1) throw new Error("detail outcomes continue after the result limit");
-    } else if (session.details.length !== pool.length) {
+    } else if (!timeBudgetReached && (session.details.length !== pool.length || (session.strategy === 'staged-v1' && session.queries.length === 3))) {
       throw new Error("detail outcomes stopped before the recurring pool was exhausted");
     }
     return {
       task_record_id: session.taskRecordId,
       platform: session.platform,
-      queries: session.queryBlocks,
+      queries: blocks,
       details: session.details,
     };
   }
@@ -234,7 +275,7 @@
     Object.assign(testExports, {
       createSession, addSearchObservations, addDetailOutcome, buildEvidence,
       serializeEvidence, requireSafeResponse, detailOutcomePlan, nextExpectedIdentity,
-      checkSearchContext,
+      checkSearchContext, persistVisualCards, sameCards,
     });
   }
 
@@ -307,14 +348,14 @@
 
   async function finishSearchGroup(index, priorProgress) {
     const next = {...session, acknowledgedQueries: [...session.acknowledgedQueries, index]};
-    if (index === 2) {
+    if (index === session.queries.length-1) {
       const progress = await readConfirmedDetails(index, priorProgress.binding);
-      if (!equal(progress.cards, session.queryBlocks[index].observations)) throw Error('checkpoint_cards_conflict');
+      if (!sameCards(progress.cards, session.queryBlocks[index].observations, session.strategy)) throw Error('checkpoint_cards_conflict');
       await restoreDetails(next, progress.details, session.details);
     }
     await persistence.save(tabId, await browserSession(), next);
     session = next;
-    if (index === 2) showNextProduct();
+    if (index === session.queries.length-1) showNextProduct();
   }
 
 
@@ -334,7 +375,7 @@
   function showNextProduct() {
     element("open-next-candidate").hidden = qualifyingCount(session) >= session.resultLimit || session.details.length === recurringPool(session).length;
     if (element("open-next-candidate").hidden) {
-      element("next-product").textContent = "候选核验已完成，可回传证据。";
+      element("next-product").textContent = session.strategy==='staged-v1' && session.queries.length===3 && qualifyingCount(session)<session.resultLimit ? "当前候选已核验，等待自动扩展搜索。" : "候选核验已完成，可回传证据。";
       return;
     }
     const identity = nextExpectedIdentity(session);
@@ -397,8 +438,18 @@
     element("recover-session").addEventListener("click", collectOnce(async () => {
       try {
         clearError();
-        const groups = [];
-        for (let i = 0; i < 3; i++) {
+        const groups = [await globalThis.collectorCheckpoint('collector_progress', {query_index: 0})];
+        if(groups[0].strategy==='card-visual-v3'){
+          const plan=groups[0],requested=element('record-id').value.trim();
+          if(requested && requested!==plan.task)throw Error('checkpoint_task_mismatch：任务已变化，请核对任务绑定');
+          session={taskRecordId:plan.task,platform:plan.platform,queries:plan.queries,resultLimit:plan.result_limit,
+                   strategy:'card-visual-v3',stopped:false,nextPage:plan.next_page,details:[]};
+          element('setup').hidden=true;element('controls').hidden=false;
+          element('open-next-candidate').hidden=!!plan.next_page;
+          setStatus(plan.next_page ? (plan.next_page[1]===0 ? `请重新核验搜索词 ${plan.next_page[0]+1}。` : `已恢复采集：搜索词 ${plan.next_page[0]+1}，第 ${Math.abs(plan.next_page[1])} 页。`) : '已完成当前搜索词，等待后台安排下一步。');
+          return;
+        }
+        for (let i = 1; i < groups[0].queries.length; i++) {
           groups.push(await globalThis.collectorCheckpoint('collector_progress', {query_index: i}));
         }
         const plan = groups[0];
@@ -408,31 +459,41 @@
         }
         const saved = await persistence.load(tabId, await browserSession(), plan.task);
         const firstGroup = groups.find(group => group.cards?.length);
-        const cardLimit = firstGroup?.cards.length || saved?.cardLimit || Number(element("card-limit").value);
+        const cardLimit = plan.strategy==='visual-v2' ? 100 : firstGroup?.cards.length || saved?.cardLimit || Number(element("card-limit").value);
         const next = createSession({taskRecordId: plan.task, platform: plan.platform, queries: plan.queries,
-                                    cardLimit, resultLimit: plan.result_limit});
-        if (saved && (!equal(saved.queries, next.queries) || saved.platform !== next.platform || saved.cardLimit !== next.cardLimit || saved.resultLimit !== next.resultLimit)) {
+                                    cardLimit, resultLimit: plan.result_limit, strategy: plan.strategy});
+        const sameQueries=!saved || equal(saved.queries,next.queries) || (['staged-v1','visual-v2'].includes(next.strategy) && saved.strategy===next.strategy && equal(saved.queries,next.queries.slice(0,saved.queries.length)));
+        if (saved && (!sameQueries || saved.platform !== next.platform || saved.cardLimit !== next.cardLimit || saved.resultLimit !== next.resultLimit)) {
           throw Error("checkpoint_plan_mismatch：本地进度与后台计划不一致");
         }
         next.acknowledgedQueries = [];
+        next.exhaustedQueries = [];
         for (const group of groups) {
           const index = group.query_index;
           const local = saved?.queryBlocks[index]?.observations || [];
-          if (group.cards && !equal(local, group.cards.slice(0, local.length))) {
+          if (group.cards && !sameCards(local, group.cards.slice(0, local.length), next.strategy)) {
             throw Error("checkpoint_cards_conflict：本地与后台卡片不一致");
           }
           addSearchObservations(next, {query: next.queries[index], cards: group.cards || local});
+          if(group.exhausted && group.cards)next.exhaustedQueries.push(index);
           if (group.acknowledged) next.acknowledgedQueries.push(index);
         }
-        if (next.acknowledgedQueries.length === 3) {
-          await restoreDetails(next, groups[2].details, saved?.details || []);
+        if (next.acknowledgedQueries.length === next.queries.length) {
+          await restoreDetails(next, groups[next.queries.length-1].details, saved?.details || []);
+        } else if (['staged-v1','visual-v2'].includes(next.strategy) && next.acknowledgedQueries.length>=3 && groups[next.acknowledgedQueries.length-1].details?.length) {
+          const last=groups[next.acknowledgedQueries.length-1];
+          const prefix={...next,queries:next.queries.slice(0,next.acknowledgedQueries.length),queryBlocks:next.queryBlocks.slice(0,next.acknowledgedQueries.length)};
+          await restoreDetails(prefix,last.details,saved?.details || []);
+          next.details=prefix.details;
+        } else if (['staged-v1','visual-v2'].includes(next.strategy) && saved?.details) {
+          next.details=[...saved.details];
         }
         session = next;
         await persist();
         element("setup").hidden = true;
         element("controls").hidden = false;
-        if (session.acknowledgedQueries.length === 3) showNextProduct();
-        setStatus(`已载入当前任务：已确认 ${session.acknowledgedQueries.length}/3 组搜索，已核验 ${session.details.length} 个候选。`);
+        if (session.acknowledgedQueries.length === session.queries.length) showNextProduct();
+        setStatus(`已载入当前任务：已确认 ${session.acknowledgedQueries.length}/${session.queries.length} 组搜索，已核验 ${session.details.length} 个候选。`);
       } catch(error) { element("error").textContent=String(error.message || error); }
     }));
 
@@ -440,6 +501,25 @@
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
+        if(session.strategy==='card-visual-v3'){
+          const state=await globalThis.collectorCheckpoint('collector_progress',{query_index:0});
+          const step=state.next_page;
+          if(!Array.isArray(step)||step.length!==2){setStatus('当前搜索词已采集完成，等待后台安排下一步。');return;}
+          const [index,page]=step,query=state.queries[index];
+          if(page===0){setStatus(`请在任务标签搜索并核验第 ${index+1} 组原搜索词。`);return;}
+          if(page<0){
+            if(await globalThis.confirmCardV3Page(index,query,-page)!==true)throw Error('历史页面重新核验未完成，请打开原搜索词的对应页');
+            setStatus(`已重新核验搜索词 ${index+1} 的第 ${-page} 页，请等待后台安排下一步。`);return;
+          }
+          const progress=index===0?state:await globalThis.collectorCheckpoint('collector_progress',{query_index:index});
+          if(progress.task!==session.taskRecordId || progress.page!==page || progress.queries[index]!==query || !Array.isArray(progress.cards))
+            throw Error('page_checkpoint_unavailable：请在当前任务标签核验对应搜索词和页码');
+          await CardV3Collector.collectPage({queryIndex:index,query,page,prior:progress.cards,nextBatch:progress.next_batch_index,
+            send:sendToPage,save:globalThis.saveCardV3Batch,finish:globalThis.finishCardV3Page,delay,
+            onProgress:count=>setStatus(`搜索词 ${index+1} · 第 ${page} 页：已保存 ${count} 条卡片。`)});
+          setStatus(`搜索词 ${index+1} · 第 ${page} 页已确认，请等待后台安排下一页。`);
+          return;
+        }
         session.acknowledgedQueries ||= [];
         const blockIndex = session.acknowledgedQueries.length;
         const block = session.queryBlocks[blockIndex];
@@ -449,11 +529,17 @@
           throw Error('checkpoint_plan_mismatch：任务与采集器设置不一致');
         }
         if (progress.cards) {
-          if (!equal(block.observations, progress.cards.slice(0, block.observations.length))) throw Error('checkpoint_cards_conflict');
+          if (!sameCards(block.observations, progress.cards.slice(0, block.observations.length), session.strategy)) throw Error('checkpoint_cards_conflict');
           addSearchObservations(session, {query: block.query, cards: progress.cards.slice(block.observations.length)});
         }
-        if (block.observations.length === session.cardLimit) {
-          if (!progress.acknowledged && !await globalThis.confirmCollectorQueryCards(blockIndex, block.observations)) throw Error('checkpoint_cards_unconfirmed');
+        if(progress.exhausted) {session.exhaustedQueries ||= [];if(!session.exhaustedQueries.includes(blockIndex))session.exhaustedQueries.push(blockIndex);}
+        if (block.observations.length === session.cardLimit || progress.exhausted) {
+          if (!progress.acknowledged) {
+            const confirmed=session.strategy==='visual-v2'
+              ? await globalThis.finishVisualQuery(blockIndex,block.query,'card_limit_reached',0,false)
+              : await globalThis.confirmCollectorQueryCards(blockIndex, block.observations,progress.exhausted?{exhausted:true,query:block.query}:{});
+            if (!confirmed) throw Error('checkpoint_cards_unconfirmed');
+          }
           await finishSearchGroup(blockIndex, progress);
           setStatus(`Completed query ${blockIndex + 1}.`);
           return;
@@ -468,21 +554,40 @@
           return;
         }
         let boundUrl = null;
+        let exhausted=false, endChecks=0, noResults=false, batchIndex=progress.next_batch_index||0;
         while (block.observations.length < session.cardLimit) {
-          const result = await sendToPage({type: "MERCADO_COLLECTOR_EXTRACT_SEARCH", query: block.query, prior: block.observations, limit: session.cardLimit});
+          const request = {type: "MERCADO_COLLECTOR_EXTRACT_SEARCH", query: block.query, prior: block.observations, limit: session.cardLimit};
+          if (session.strategy === 'visual-v2') request.strict_scope = true;
+          const result = await sendToPage(request);
+          if (session.strategy === 'visual-v2' && result.verified_scope !== true && !result.error)
+            throw new Error('采集器内容脚本尚未更新，请重新加载运营中心绑定版扩展并刷新搜索页面');
           boundUrl = checkSearchContext(result, block.query, boundUrl);
           const newCards = result.observations.slice(block.observations.length);
           if (newCards.length) {
-            addSearchObservations(session, {query: block.query, cards: newCards, pageUrl: result.page_url});
+            if(session.strategy==='visual-v2') {
+              await persistVisualCards(session,blockIndex,batchIndex,newCards,globalThis.saveVisualQueryBatch);
+              batchIndex++;
+            } else addSearchObservations(session, {query: block.query, cards: newCards, pageUrl: result.page_url});
             await persist();
             setStatus(`${block.query}: ${block.observations.length}/${session.cardLimit} first-visible cards.`);
           }
           if (block.observations.length >= session.cardLimit) break;
           const scroll = await sendToPage({type: "MERCADO_COLLECTOR_SCROLL"});
-          if (scroll.at_end && !newCards.length) throw new Error("page ended before 30 visible unique cards were collected");
-          await delay(350);
+          if (scroll.at_end && !newCards.length) {
+            if(session.strategy==='visual-v2' || (session.strategy==='staged-v1' && blockIndex>=3)) {
+              if(++endChecks>=3){
+                if(!block.observations.length && result.no_results!==true) throw new Error('未找到明确的无结果提示，请等待页面加载并重试');
+                noResults=result.no_results===true;exhausted=true;break;
+              }
+            } else throw new Error("page ended before 30 visible unique cards were collected");
+          } else endChecks=0;
+          await delay(endChecks ? 1000 : 350);
         }
-        if (typeof globalThis.confirmCollectorQueryCards!=='function' || !await globalThis.confirmCollectorQueryCards(blockIndex,block.observations)) {element('error').textContent='本组卡片已保存，但后台尚未确认；请检查连接后再次点击采集。';return;}
+        const confirmed=session.strategy==='visual-v2'
+          ? await globalThis.finishVisualQuery(blockIndex,block.query,exhausted?'home_complete':'card_limit_reached',endChecks,noResults)
+          : typeof globalThis.confirmCollectorQueryCards==='function' && await globalThis.confirmCollectorQueryCards(blockIndex,block.observations,exhausted?{exhausted:true,query:block.query}:{});
+        if(!confirmed) {element('error').textContent='本组卡片已保存，但后台尚未确认；请检查连接后再次点击采集。';return;}
+        if(exhausted){session.exhaustedQueries ||= [];session.exhaustedQueries.push(blockIndex);}
         await finishSearchGroup(blockIndex, progress);
         setStatus(`Completed query ${session.queryBlocks.indexOf(block) + 1}. Navigate the Mercado tab to the next exact query or the displayed detail.`);
       } catch (error) { stopWithError(error); }
@@ -494,7 +599,12 @@
       button.disabled = true;
       try {
         clearError();
-        if (session?.acknowledgedQueries?.length !== 3) throw Error("checkpoint_search_incomplete");
+        if(session?.strategy==='card-visual-v3'){
+          const next=await globalThis.collectorCheckpoint('next_candidate',{});
+          if(!next.candidate)throw Error('当前没有待核验商品，请先完成搜索或扩展');
+          await globalThis.openCollectorCandidate(next.candidate.identity,session.taskRecordId);return;
+        }
+        if (session?.acknowledgedQueries?.length !== session?.queries?.length) throw Error("checkpoint_search_incomplete");
         await globalThis.openCollectorCandidate(nextExpectedIdentity(session), session.taskRecordId);
       } catch (error) { stopWithError(error); }
       finally { button.disabled = false; }
@@ -502,7 +612,22 @@
     element("capture-review-photo").addEventListener("click",collectOnce(async()=>{
       try {
         clearError();
-        if (!session || session.acknowledgedQueries?.length !== 3) throw Error('请先恢复已核验的三组卡片');
+        if(session?.strategy==='card-visual-v3'){
+          const next=await globalThis.collectorCheckpoint('next_candidate',{});
+          if(next.stage!=='visual' || !next.candidate || !next.detail)throw Error('当前没有待核验原图的商品');
+          const identity=next.candidate.identity,binding=await globalThis.currentGalleryBinding();
+          const photo=Number(element('review-photo-position').value);
+          if(!Number.isInteger(photo)||photo<1||photo>100)throw Error('图片位置无效');
+          const observed=await globalThis.readCandidatePhoto(chrome,binding,identity,photo);
+          const page=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
+          if(page.blocked || page.identity_matches!==true || page.identity!==identity || page.sold_display!==next.detail.sold_display || page.page_url!==next.detail.detail_url)
+            throw Error('下载时商品身份或销量已变化');
+          await observed.recheck();
+          const result=await globalThis.downloadVisualCandidatePhoto({api:chrome,requestId:binding.request_id,checkpoint:globalThis.collectorCheckpoint,
+            observation:{detail:next.detail,photo,source:observed.source,variant:observed.variant},recheck:observed.recheck});
+          setStatus('候选原图凭证已保存。请读取原图并提交款式判定。'+result.receipt);return;
+        }
+        if (!session || session.acknowledgedQueries?.length !== session.queries.length) throw Error('请先恢复已核验的搜索卡片');
         const identity = nextExpectedIdentity(session);
         const binding = await globalThis.currentGalleryBinding();
         const photo = Number(element('review-photo-position').value);
@@ -526,7 +651,18 @@
         try {
           clearError();
           if (!session || session.stopped) throw new Error("start a new collector session");
-          if (session.acknowledgedQueries?.length !== 3) throw Error("checkpoint_search_incomplete：请先确认三组卡片");
+          if(session.strategy==='card-visual-v3'){
+            if(!salesOnly)throw Error('请通过原图回传通道提交视觉判断');
+            const next=await globalThis.collectorCheckpoint('next_candidate',{});
+            if(next.stage!=='detail' || !next.candidate || !Number.isInteger(next.detail_index))throw Error('当前没有待核验销量的商品');
+            const identity=next.candidate.identity,visible=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
+            if(visible.blocked || visible.identity_matches!==true || visible.identity!==identity)throw Error('商品详情身份无法核验');
+            const detail=detailOutcomePlan(identity,visible,{status:'rejected',reason:'threshold_failure'});
+            const receipt=await globalThis.collectorCheckpoint('checkpoint_detail',{detail_index:next.detail_index,detail,sales_only:true});
+            if(!['threshold_met','supplemental','exclude'].includes(receipt.sales_screen))throw Error('销量筛选回执未确认');
+            setStatus(receipt.sales_screen==='exclude'?'销量不足或不明确，已排除该商品。':receipt.sales_screen==='supplemental'?'已记录补充候选，请核验原图。':'销量达标，请核验原图。');return;
+          }
+          if (session.acknowledgedQueries?.length !== session.queries.length) throw Error("checkpoint_search_incomplete：请先确认搜索卡片");
           const identity = nextExpectedIdentity(session);
           const visible = await sendToPage({type: "MERCADO_COLLECTOR_EXTRACT_DETAIL", identity});
           if (visible.blocked) throw Error(visible.blocking_error || "detail_access_blocked");
@@ -578,7 +714,13 @@
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
-        if (!await globalThis.stageCollectorEvidence(JSON.parse(serializeEvidence(session)))) throw new Error("任务证据未暂存，请核验任务绑定和守护连接");
+        let timedOut=false;
+        if(session.strategy==='staged-v1') {
+          const progress=await globalThis.collectorCheckpoint('next_candidate',{});
+          timedOut=progress.action==='finish' && progress.reason==='time_budget_exhausted';
+        }
+        const evidence=['visual-v2','card-visual-v3'].includes(session.strategy) ? {task_record_id:session.taskRecordId} : buildEvidence(session,{timeBudgetReached:timedOut});
+        if (!await globalThis.stageCollectorEvidence(evidence)) throw new Error("任务证据未暂存，请核验任务绑定和守护连接");
         setStatus("任务证据已安全暂存，可通过 submit_staged 提交。");
       } catch(error) { element("error").textContent=String(error.message || error); }
     }));

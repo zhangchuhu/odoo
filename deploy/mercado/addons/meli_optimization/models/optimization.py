@@ -400,7 +400,7 @@ class Task(models.Model):
         if waiting:
             wait = events.search(domain + [('kind', '=', 'wait')], order='id desc', limit=1)
             if (self.lease_token or self.worker_uid or self.lease_expires_at or unresolved.state != 'unknown'
-                    or (self.status_detail or {}).get('code') != 'external_result_unknown'
+                    or (self.status_detail or {}).get('code') not in ('external_result_unknown', 'page_unreadable')
                     or not wait or wait.payload != self.status_detail or
                     wait.digest != bounded({'body': wait.payload, 'token': token, 'epoch': epoch, 'kind': 'wait'})):
                 raise ValidationError('Original waiting research lease required')

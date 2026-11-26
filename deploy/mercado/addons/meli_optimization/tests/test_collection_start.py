@@ -85,7 +85,7 @@ class CollectionStartCase(TransactionCase):
             return {'artifact_id':str(receipt['artifact_id']), 'digest':receipt['digest']}
         evidence = upload(evidence_key, b'{"candidates":[]}', 'application/json')
         image = upload(image_key, base64.b64decode(IMAGE), 'image/png')
-        task.wait(token, epoch, 'lost-browser', {'code':'external_result_unknown','message':'interrupted'})
+        task.wait(token, epoch, 'lost-browser', {'code':'page_unreadable','message':'interrupted'})
         self.assertEqual(task._retry_unknown_research(automatic=True)['state'], 'waiting')
         self.assertFalse(task.request_ids.retry_superseded)
         proof = dict(evidence_artifact_id=evidence['artifact_id'], evidence_digest=evidence['digest'], confirmed_images={image_key:image})

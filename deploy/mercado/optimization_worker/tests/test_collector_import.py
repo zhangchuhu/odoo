@@ -12,6 +12,16 @@ def fixture():
     return {'task_record_id':'rec0123456789ab4cde8fab0123456789ab','platform':'shein-us','queries':blocks,'details':details},queries
 
 class CollectorConfigTest(unittest.TestCase):
+    def test_visual_v2_preserves_user_threshold_and_fixed_query_bounds(self):
+        from optimization_worker.collector_cli import task_config
+        plan = {'platform':'mercado-libre-mx','result_limit':3,'strategy':'visual-v2'}
+        config = {'platform':'mercado-libre-mx','result_limit':3,'min_sold':800,'min_reviews':50,'min_rating':4.1,
+                  'strategy':'visual-v2','initial_query_count':3,'max_expansion_queries':6,'max_cards_per_query':100}
+        self.assertEqual(task_config({'payload':{'collection_config':config}}, plan),config)
+        for changed in ({'min_sold':True}, {'max_expansion_queries':7}, {'strategy':'staged-v1'}):
+            with self.assertRaises(ValueError):
+                task_config({'payload':{'collection_config':dict(config,**changed)}},plan)
+
     def test_task_snapshot_thresholds_and_platform_cannot_be_overridden(self):
         from optimization_worker.collector_cli import task_config
         plan = {'platform':'shein-us','result_limit':3}
@@ -119,6 +129,82 @@ class CollectorImportTest(unittest.TestCase):
             with self.subTest(mutation=mutation),self.assertRaises(ValueError):convert_evidence(d,'rec0123456789ab4cde8fab0123456789ab','shein-us',queries,'dress','2026-11-16T00:00:00Z')
 
 class CollectorBindingTest(unittest.TestCase):
+    def test_visual_v2_plan_binds_source_profile_and_immutable_threshold(self):
+        import tempfile,base64,hashlib,io,json,re
+        from PIL import Image
+        from optimization_worker.host_session import SessionStore
+        from optimization_worker.collector_cli import bind_plan
+        doc=(Path(__file__).resolve().parents[1]/'RESEARCH_BRIDGE.md').read_text()
+        plan=json.loads(re.findall(r'```json\n(.*?)\n```',doc,re.S)[-1])
+        plan.update(strategy='visual-v2',result_limit=3)
+        plan['design_profile']={'primary':{'category':plan['category'],'components':None,'length':'long','shoulders':'regular',
+                                'structure':'two_piece','silhouette':'a_line','fit':None,'sleeve_length':None},
+                                'secondary':['lace'],'styles':['boho'],'occasions':[]}
+        rid='01234567-89ab-4cde-8fab-0123456789ab'
+        b=io.BytesIO();Image.new('RGB',(2,2),'red').save(b,format='PNG');raw=b.getvalue();digest=hashlib.sha256(raw).hexdigest()
+        plan.update(source_artifact_id='1',viewed_source_sha256=digest)
+        payload={'site_id':'MLM','facts_artifact_id':'1','keywords_artifact_id':'2'}
+        config=dict(platform='mercado-libre-mx',result_limit=3,min_sold=800,min_reviews=50,min_rating=4.1,
+                    strategy='visual-v2',initial_query_count=3,max_expansion_queries=6,max_cards_per_query=100)
+        context={'snapshot':{'case_id':4,'snapshot_id':5,'payload':{'source_image_artifact_ids':['1'],'collection_config':config}},
+                 'artifacts':{'1':{'case_id':4,'company_id':6,'data':base64.b64encode(raw).decode(),'digest':digest}}}
+        claim=dict(company_id=6,snapshot_id=5,task_type='research.bestseller',payload=payload,input_hash='digest',lease_epoch=1)
+        with tempfile.TemporaryDirectory() as d:
+            store=SessionStore(Path(d)/'host.sqlite','identity');store.enqueue(rid,'research.bestseller',payload,context)
+            bind_plan(store,rid,claim,plan)
+            self.assertEqual(store.inspect(rid)['collector_plan']['protocol_version'],4)
+            self.assertEqual(store.inspect(rid)['collector_plan']['collection_config']['min_sold'],800)
+            changed=copy.deepcopy(plan);changed['design_profile']['primary']['length']='short'
+            with self.assertRaises(ValueError):bind_plan(store,rid,claim,changed)
+            from unittest.mock import patch
+            from optimization_worker.collector_cli import import_evidence
+            claim['id']=55
+            evidence={'queries':[{}, {}, {}], 'task_record_id':'rec'+rid.replace('-','')}
+            class Receipts:
+                path=str(Path(d)/'ledger.sqlite')
+                def visual_v2_queries(self,*args):return plan['queries']
+                def next_query_index(self,*args,**kwargs):return 3
+            class Client:research_ledger_enabled=True
+            with patch('optimization_worker.visual_v2_finalize.snapshot_evidence',return_value=evidence), \
+                 patch('optimization_worker.visual_v2_finalize.build_result',return_value={'candidates':[]}) as build, \
+                 patch('optimization_worker.research_upload.upload',side_effect=lambda *a,**k:{'artifact_id':9,'digest':hashlib.sha256(a[6]).hexdigest()}), \
+                 patch('optimization_worker.collector_cli.reconcile_evidence',return_value=0):
+                self.assertEqual(import_evidence(store,rid,claim,evidence,'2026-11-26T00:00:00+00:00',Client(),lambda:None,tab_receipts=Receipts()),0)
+                self.assertEqual(build.call_args.args[4]['min_sold'],800)
+
+    def test_staged_binding_and_import_keep_original_sales_threshold(self):
+        import tempfile,base64,hashlib,io,json,re
+        from PIL import Image
+        from optimization_worker.host_session import SessionStore
+        from optimization_worker.collector_cli import bind_plan,import_evidence
+        doc=(Path(__file__).resolve().parents[1]/'RESEARCH_BRIDGE.md').read_text()
+        plan=json.loads(re.findall(r'```json\n(.*?)\n```',doc,re.S)[-1]);plan['strategy']='staged-v1';plan['result_limit']=1
+        rid='01234567-89ab-4cde-8fab-0123456789ab'
+        b=io.BytesIO();Image.new('RGB',(2,2),'red').save(b,format='PNG');raw=b.getvalue();digest=hashlib.sha256(raw).hexdigest()
+        plan.update(source_artifact_id='1',viewed_source_sha256=digest)
+        payload={'site_id':'MLM','facts_artifact_id':'1','keywords_artifact_id':'2'}
+        config=dict(platform='mercado-libre-mx',result_limit=1,min_sold=500,min_reviews=50,min_rating=4.1)
+        context={'snapshot':{'case_id':4,'snapshot_id':5,'payload':{'source_image_artifact_ids':['1'],'collection_config':config}},
+                 'artifacts':{'1':{'case_id':4,'company_id':6,'data':base64.b64encode(raw).decode(),'digest':digest}}}
+        claim=dict(company_id=6,snapshot_id=5,task_type='research.bestseller',payload=payload,input_hash='digest',lease_epoch=1)
+        with tempfile.TemporaryDirectory() as d:
+            store=SessionStore(Path(d)/'host.sqlite','identity');store.enqueue(rid,'research.bestseller',payload,context)
+            bind_plan(store,rid,claim,plan)
+            self.assertEqual(store.inspect(rid)['collector_plan']['protocol_version'],3)
+            data,old=fixture(); data.update(platform='mercado-libre-mx',details=data['details'][:1])
+            for block,q in zip(data['queries'],plan['queries']):
+                block['query']=q
+                for card in block['observations']:
+                    card.update(query=q,product_id='MLM'+card['product_id'],url='https://articulo.mercadolibre.com.mx/MLM'+card['product_id'])
+            data['details'][0].update(identity='mercado-libre-mx:MLM1',product_id='MLM1',detail_url='https://articulo.mercadolibre.com.mx/MLM1',sold_display='+500 vendidos')
+            class Receipts:
+                def verified_queries(self,*args,**kw): return kw=={'staged':True}
+                def budget_elapsed(self,*args):return 0
+            class Client:
+                def create_artifact(self,case_id,**kwargs):self.raw=kwargs['data'];return {'artifact_id':9,'digest':hashlib.sha256(self.raw).hexdigest()}
+                def artifact(self,artifact_id):return {'case_id':4,'company_id':6,'mime_type':'application/json','digest':hashlib.sha256(self.raw).hexdigest(),'data':base64.b64encode(self.raw).decode()}
+            client=Client()
+            self.assertEqual(import_evidence(store,rid,claim,data,'2026-11-16T00:00:00Z',client,lambda:None,tab_receipts=Receipts()),1)
     def test_plan_and_result_are_bound_to_original_request_and_snapshot(self):
         import tempfile, base64, hashlib, io
         from PIL import Image

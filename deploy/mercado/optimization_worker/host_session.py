@@ -303,8 +303,9 @@ class SessionStore:
             pending = r.get('collector_pending') or {}
             uploads = pending.get('candidate_uploads', {})
             snap = r.get('context', {}).get('snapshot', {})
-            isolated_gallery = (verified_gallery and r.get('retired') and r.get('state') == 'unknown'
-                                and r.get('reason') == 'unknown' and r.get('resume_state') == 'candidate_images_pending')
+            isolated_gallery = (verified_gallery and r.get('retired')
+                                and (r.get('state'), r.get('reason')) in (('unknown', 'unknown'), ('waiting', 'page_unreadable'))
+                                and r.get('resume_state') == 'candidate_images_pending')
             if (r.get('task_type') != 'research.bestseller' or not (r.get('state') == 'candidate_images_pending' or isolated_gallery)
                     or r.get('payload') != claim.get('payload') or plan.get('request_id') != request_id
                     or digest != canonical_hash(signed) or plan.get('case_id') != snap.get('case_id')

@@ -97,13 +97,13 @@
     return null;
   }
 
-  function candidateCards() {
+  function candidateCards(root = document) {
     const selectors = [
       ".ui-search-layout__item", ".poly-card", '[class*="ui-search-result__wrapper" i]',
     ];
     const result = [];
     const seen = new Set();
-    for (const element of document.querySelectorAll(selectors.join(","))) {
+    for (const element of root.querySelectorAll(selectors.join(","))) {
       if (!seen.has(element) && isVisible(element)) {
         seen.add(element);
         result.push(element);
@@ -142,13 +142,52 @@
     return classifyVisibleAd({visibleLabels: ambiguousMarker ? [...labels, "ambiguous"] : labels, visiblyOrganic: labels.length === 0 && !ambiguousMarker});
   }
 
-  function extractSearch(query, prior, limit) {
+  function cardSales(card) {
+    const found=[];
+    for (const element of card.querySelectorAll('span, p, div')) {
+      if (!isVisible(element) || element.children?.length || element.closest('[class*="seller" i], [class*="vendedor" i]')) continue;
+      const text=visibleText(element).replace(/\s+/g,' ').trim();
+      if (/^\+?\s*(?:\d{1,3}(?:\.\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(?:mil\s+)?vendidos?$/i.test(text)) found.push(text);
+    }
+    const unique=[...new Set(found)];
+    return unique.length===1 ? {status:'known',text:unique[0]} : {status:unique.length?'ambiguous':'missing',text:null};
+  }
+
+  function observedNextPage(root, page) {
+    if (!Number.isSafeInteger(page) || page<1 || page>3) return {status:'unverified'};
+    if (page===3) return {status:'page_limit'};
+    const matches=[...root.querySelectorAll('a[rel="next"], [aria-label="Siguiente"]')].filter(isVisible);
+    if (matches.length!==1) return {status:'unverified'};
+    const next=matches[0];
+    if (next.getAttribute('aria-disabled')==='true') return {status:'end_of_results'};
+    try {
+      const url=new URL(next.href);
+      if (url.protocol!=='https:' || url.hostname!=='listado.mercadolibre.com.mx' || url.port || url.username || url.password)
+        return {status:'unverified'};
+      return {status:'has_next',url:url.href};
+    } catch (_) { return {status:'unverified'}; }
+  }
+
+  function cardPageInfo(root,page) {
+    const empty=/no (?:hay|encontramos) (?:publicaciones|resultados|productos)(?: que coincidan)?|no encontramos resultados/i.test(String(root.body?.innerText || ''));
+    if(empty && root.querySelectorAll('.ui-search-layout').length===0) return {status:'end_of_results',end_evidence:'empty_results'};
+    if(empty) return {status:'unverified'};
+    const result=observedNextPage(root,page);
+    return {...result,end_evidence:result.status==='has_next'?'next_link':result.status==='end_of_results'?'disabled_next':result.status==='page_limit'?'page_limit':null};
+  }
+
+  function extractSearch(query, prior, limit, strictScope = false, withSales = false) {
     const blockingError = detectBlockingWall();
     if (blockingError) return {error: blockingError};
+    const noResults=/no (?:hay|encontramos) (?:publicaciones|resultados|productos)(?: que coincidan)?|no encontramos resultados/i.test(String(document.body?.innerText || ''));
+    const scopes = strictScope ? [...document.querySelectorAll('.ui-search-layout')] : [];
+    if (strictScope && scopes.length !== 1 && !(scopes.length === 0 && noResults)) {
+      return {error: '无法确认搜索结果区域，请等待页面加载后重试'};
+    }
     const viewport = {width: innerWidth, height: innerHeight, scale: devicePixelRatio || 1};
     const visible = [];
     const observedIds = new Set(prior.map((item) => item.product_id));
-    for (const card of candidateCards()) {
+    for (const card of strictScope && !scopes.length ? [] : candidateCards(strictScope ? scopes[0] : document)) {
       const encodedLinks = [...card.querySelectorAll('a[href*="MLM"]')];
       const cardIds = new Set(encodedLinks.map((element) => canonicalProductId(element.href)).filter(Boolean));
       if (cardIds.size === 1 && observedIds.has([...cardIds][0])) continue;
@@ -180,6 +219,7 @@
         return {error: `Collection stopped: incomplete card title=${Boolean(title)}; id=${Boolean(productId)}; bbox=${Boolean(bbox)}; titleY=${tr ? Math.round(tr.top) : 'none'}; viewport=${innerHeight}; link=${path}`};
       }
       try {
+        const sales = withSales ? cardSales(card) : null;
         visible.push({
           query,
           is_ad: adState(card),
@@ -188,6 +228,7 @@
           product_id: explicit,
           thumbnail_url: image.currentSrc || image.src || null,
           bbox,
+          ...(withSales ? {sales_text:sales.text,sales_status:sales.status} : {}),
         });
       } catch (error) {
         return {error: `Collection stopped: ${error.message}.`};
@@ -197,7 +238,8 @@
       const observations = mergeFirstVisible(visible, prior).slice(0, limit);
       const input = document.querySelector('input[name="as_word"], input[name="q"], input.nav-search-input');
       const searchQuery = input && isVisible(input) ? input.value : null;
-      return {page_url: location.href, search_query: searchQuery, observations};
+      return {page_url: location.href, search_query: searchQuery, observations, no_results:noResults,
+              ...(strictScope ? {verified_scope:true} : {}), ...(withSales ? {card_sales_version:3} : {})};
     } catch (error) {
       return {error: `Collection stopped: ${error.message}.`};
     }
@@ -208,6 +250,15 @@
     if(blockingError) return {error:blockingError};
     const input=document.querySelector('input[name="as_word"], input[name="q"], input.nav-search-input');
     return {page_url:location.href,search_query:input && isVisible(input)?input.value:null};
+  }
+
+  function extractBoundSearchIdentity() {
+    const blockingError=detectBlockingWall();
+    if(blockingError)return {error:blockingError};
+    const input=document.querySelector('input[name="as_word"], input[name="q"], input.nav-search-input');
+    const rect=input?.getBoundingClientRect(),style=input && getComputedStyle(input);
+    const rendered=!!rect && rect.width>0 && rect.height>0 && style.visibility!=='hidden' && style.display!=='none' && Number(style.opacity || 1)!==0;
+    return {page_url:location.href,search_query:rendered?input.value:null};
   }
 
   function firstVisible(selectors) {
@@ -344,6 +395,10 @@
       mergeFirstVisible,
       extractVisibleMetrics,
       extractSearch,
+      cardSales,
+      observedNextPage,
+      cardPageInfo,
+      extractBoundSearchIdentity,
       galleryManifest,
     });
   }
@@ -354,12 +409,18 @@
         sendResponse({error: detectBlockingWall(), page_url: location.href});
       } else if (message?.type === "MERCADO_COLLECTOR_SEARCH_IDENTITY") {
         sendResponse(extractSearchIdentity());
+      } else if (message?.type === "MERCADO_COLLECTOR_PAGE_BINDING") {
+        sendResponse(extractBoundSearchIdentity());
       } else if (message?.type === "MERCADO_COLLECTOR_SCROLL_TOP") {
         const blockingError=detectBlockingWall();
         if(blockingError) sendResponse({ok:false});
         else {window.scrollTo({top:0,left:0,behavior:'instant'});sendResponse({ok:true});}
       } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_SEARCH") {
-        sendResponse(extractSearch(message.query, message.prior || [], message.limit));
+        sendResponse(extractSearch(message.query, message.prior || [], message.limit, message.strict_scope === true, message.with_sales === true));
+      } else if (message?.type === "MERCADO_COLLECTOR_PAGE_INFO") {
+        const blockingError=detectBlockingWall();
+        sendResponse(blockingError ? {error:blockingError} : {...cardPageInfo(document,message.page),page_url:location.href,
+          at_end:Math.ceil(scrollY+innerHeight)>=document.documentElement.scrollHeight});
       } else if (message?.type === "MERCADO_COLLECTOR_SCROLL") {
         sendResponse(scrollPage());
       } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_GALLERY") {

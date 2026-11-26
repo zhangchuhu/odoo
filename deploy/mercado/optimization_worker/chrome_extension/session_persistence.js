@@ -21,7 +21,8 @@ class SessionPersistence {
     const key=this.key(tab,chromeSession,session?.taskRecordId);
     if (!Array.isArray(session.queryBlocks) || !session.queryBlocks.length) throw new Error('Invalid collector state');
     const old=await this.load(tab,chromeSession,session.taskRecordId);
-    if (old && (!equal(old.queries,session.queries) || old.platform!==session.platform || old.queryBlocks.some((b,i)=>!session.queryBlocks[i] || (b.observations.length>session.queryBlocks[i].observations.length || !equal(b.observations,session.queryBlocks[i].observations.slice(0,b.observations.length)))) || ((old.details?.length||0)>(session.details?.length||0) || !equal(old.details||[],(session.details||[]).slice(0,(old.details||[]).length))))) throw new Error('Existing collector progress cannot be overwritten');
+    const queryCompatible=old && (equal(old.queries,session.queries) || (['staged-v1','visual-v2'].includes(old.strategy) && session.strategy===old.strategy && equal(old.queries,session.queries.slice(0,old.queries.length))));
+    if (old && (!queryCompatible || old.platform!==session.platform || old.queryBlocks.some((b,i)=>!session.queryBlocks[i] || (b.observations.length>session.queryBlocks[i].observations.length || !equal(b.observations,session.queryBlocks[i].observations.slice(0,b.observations.length)))) || ((old.details?.length||0)>(session.details?.length||0) || !equal(old.details||[],(session.details||[]).slice(0,(old.details||[]).length))))) throw new Error('Existing collector progress cannot be overwritten');
     await this.storage.set({[key]:{version:1,tab,chromeSession,task:session.taskRecordId,session}});
   }
 }

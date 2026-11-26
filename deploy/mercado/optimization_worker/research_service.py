@@ -362,10 +362,35 @@ def main():
             ledger=Path(journal).parent/'collector-bindings.sqlite'
             c = records[0]['claim']
             key = (request,bound.get('digest'),c['lease_epoch'])
-            groups, details = TabReceiptStore(str(ledger)).collection_progress(*key)
+            receipts=TabReceiptStore(str(ledger));staged=plan.get('strategy')=='staged-v1'
+            if plan.get('strategy')=='card-visual-v3':
+                import sqlite3
+                from contextlib import closing
+                from .visual_candidate import VisualCandidate
+                state=receipts.card_v3_state(*key,queries,lambda:(fence(client,journal,request) or True))
+                groups=receipts.resume_index(*key[:2],state['queries'],key[2],card_v3=True)
+                with closing(sqlite3.connect(str(ledger))) as db:
+                    steps=sum(db.execute('SELECT count(*) FROM '+table+' WHERE request_id=? AND plan_digest=? AND lease_epoch=?',key).fetchone()[0]
+                              for table in ('card_v3_batches','card_v3_pages','card_v3_details','card_v3_visual_evidence'))
+                details=state['progress']['detail_count'] if groups>=3 else 0
+                photos=VisualCandidate(ledger,key,plan,None,c).durable_photo_count()
+                return groups,details,photos,5+len(state['queries']),steps
+            if plan.get('strategy')=='visual-v2':
+                from .visual_candidate import VisualCandidate
+                declared=receipts.visual_v2_queries(*key,lambda: (fence(client,journal,request) or True))
+                if not declared:return (0,0,0,8)
+                groups=receipts.next_query_index(*key[:2],declared,key[2],visual_v2=True)
+                details=receipts.detail_status(*key)['saved']
+                photos=VisualCandidate(ledger,key,plan,None,c).durable_photo_count()
+                return groups,details,photos,5+len(declared)
+            groups, details = receipts.collection_progress(*key, **({'staged':True} if staged else {}))
             if plan.get('platform') == 'mercado-libre-mx':
                 from .visual_candidate import VisualCandidate
-                return groups, details, VisualCandidate(ledger,key,plan,None,c).durable_photo_count()
+                photos=VisualCandidate(ledger,key,plan,None,c).durable_photo_count()
+                if staged:
+                    extra=receipts.sealed_queries(*key,lambda: (fence(client,journal,request) or True))
+                    return groups,details,photos,1+len(extra)
+                return groups, details, photos
             return groups, details
         dispatcher=Dispatcher(dispatch_journal,store,before=lambda request:fence(client,journal,request), progress_probe=receipt_progress,
                               bridge_factory=lambda request:build_bridge(request,client,store,journal),config=config,host_probe=ready)

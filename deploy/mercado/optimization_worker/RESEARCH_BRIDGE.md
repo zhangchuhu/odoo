@@ -4,6 +4,27 @@
 
 ## Mercado Libre candidate photos and visual decisions
 
+For `visual-v2`, the plan contains the fields in the plan example below plus
+`strategy: "visual-v2"` and `design_profile`. `design_profile` has exactly
+`primary`, `secondary`, `styles`, and `occasions`. `primary` has exactly
+`category`, `components`, `length`, `shoulders`, `structure`, `silhouette`,
+`fit`, and `sleeve_length`. Use the same stable English labels for source and
+candidate observations, and the internal category code for `category`. Use
+`null` for unknown; use `{ "status": "not_applicable", "value": null }`
+only where a field really does not apply. For example, components can be
+not applicable to a single dress, while an obscured length is unknown.
+`secondary`, `styles`, and `occasions` are arrays of visible, specific labels,
+or `null` if unknown. Do not infer evidence from the title or use color/size.
+For `visual-v2`, submit the confirmed photo receipts using exactly
+`submission_id`, `receipts`, `candidate_primary`, `secondary`, `styles`,
+`occasions`, `critical_conflict`, and `features`; the host computes the outcome.
+The same `candidate_primary` fields and label vocabulary are required. Record
+`critical_conflict` only when conflicting construction is visibly supported.
+The task's configured sales threshold applies. Finish only after reaching its
+target or exhausting the initial and available expansion searches, with no
+detail-count or elapsed-time stopping rule. Existing v1 instructions below
+apply only to historical tasks.
+
 Once the collector confirms a candidate's sales threshold, open the first item in that candidate's visible magnified gallery and choose **下载候选首图供款式核验**. The extension reads the first photo, skipping any leading video, and gives the host a Chrome download receipt. The host validates the assigned file, saves the image digest, and issues a persistent photo receipt tied to the task, candidate and selected variant. For an additional angle, display that gallery position and enter its position before downloading.
 
 Call `visual_candidate_status` with empty data to obtain the pending candidate and the staged paths, sources and receipts for its verified images. Read the candidate image file and the source garment image. To save the verdict, call `submit_visual_verdict` with `submission_id`, `receipts` (first photo first), `status`, `reason`, `category`, `match_level` and `features`. A qualified result uses `qualified` with a null reason. A visual rejection uses `rejected` with `visual_category_mismatch` or `imagery_ambiguous_or_inaccessible`, and null match level and features. Use the same submission ID and data if the response is lost. After a confirmed verdict, restore progress in the collector before requesting the next candidate.
@@ -75,6 +96,8 @@ Each Dispatcher invocation configures a fresh, randomly named Codex permission p
 ```
 
 `queries` 必须与 `visual_profile.query_seeds` 完全相同且顺序一致：第 1 条为具体服装子类，避免 `vestido` 等泛词；第 2 条体现廓形、构造或卖点；第 3 条体现风格或使用场景。三条均不能包含颜色或尺码。`style_codes`/`style`、`selling_point_codes`/`selling_points`、`scene_codes`/`use_scene` 按平台语言严格对应，完整枚举和映射见 `visual_profile.py`。墨西哥站为 `es-MX`，SHEIN US 为 `en-US`。
+
+新建 Mercado Libre 任务可在上述 plan 额外增加 `"strategy":"staged-v1"`；已绑定的历史计划保持原样。`binding_status.collection_stage` 返回当前阶段及 `review`、`search` 或 `finish`。需要扩展时，根据已观察到的商品生成 1–3 条不同且不含颜色、尺码的西语搜索词，以 `{"operation":"seal_expansion","data":{"queries":[...]}}` 提交；只有当前任务、租约与浏览器守护有效且前两个候选阶段已完成时才会接受。确认后按 `binding_status.queries` 的顺序在原标签采集，重新打开采集器并恢复检查点。达到目标、候选或时间预算后提交真实证据，不能编造销量或候选。搜索与详情请求在途时先完成当前步骤；已确认搜索、详情和扩展词可在授权的新租约中重新核验并恢复。
 
 Plan 格式或验证失败会返回固定的 `invalid_plan` 指引，不包含服务内部错误或凭证。若原计划尚未绑定，可以根据该提示修正后重新提交；已绑定的计划不可更改。其他类型的回传失败仍仅返回 `accepted: false`，提交结果不确定时必须对账，不能重传。
 

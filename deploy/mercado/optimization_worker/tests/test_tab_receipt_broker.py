@@ -12,6 +12,118 @@ from optimization_worker.native_collector_host import forward, write_message
 from optimization_worker.tab_receipt_broker import Broker
 
 class BrokerTest(unittest.TestCase):
+    def test_card_v3_stage_uses_only_backend_rebuilt_evidence(self):
+        import sqlite3,json
+        rid='12345678-1234-4234-8234-123456789abc'
+        challenge=dict(version=4,request_id=rid,nonce='a'*32,lease_epoch=1,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'db',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,watch_only=True,progress_plan=({'strategy':'card-visual-v3'},{'result_limit':5}))
+            b.guard_alive=lambda *args:True;b.visual_v3_scope='scope';b.visual_v3_verify_photo=lambda *_:True
+            event=dict(operation='stage_evidence',request_id=rid,tab_id=123,window_id=4,session_id='c'*32,evidence={'task_record_id':'rec'+rid.replace('-','')})
+            evidence={'task_record_id':event['evidence']['task_record_id'],'backend':True}
+            with patch('optimization_worker.visual_v3_finalize.prepare_stage',return_value=evidence):self.assertTrue(b.stage_evidence(event))
+            with sqlite3.connect(b.store.path) as db:self.assertEqual(json.loads(db.execute('SELECT body FROM staged_evidence').fetchone()[0]),evidence)
+    def test_card_v3_progress_requires_current_origin_and_lease(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        import sqlite3
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=4,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor);b.query_verified=True
+            with sqlite3.connect(b.store.path) as db:
+                initialize(db)
+                for i in range(3):seal_query(db,('r','b'*64,3),i,'word '+str(i),fence=lambda:True)
+            event=dict(operation='card_v3_progress',request_id='r',tab_id=123,window_id=4,session_id='c'*32,native_origin=anchor)
+            with patch.object(b,'anchor_guard_alive',return_value=True):
+                self.assertIsNone(b.card_v3_progress(dict(event,native_origin='other')))
+                self.assertEqual(b.card_v3_progress(event)['known_products'],0)
+                b.fence=lambda:False
+                self.assertIsNone(b.card_v3_progress(event))
+    def test_card_v3_page_challenge_and_finish_require_current_browser_proof(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=4,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor)
+            b.query_verified=True
+            binding=dict(version=4,platform='mercado-libre-mx',request_id='r',plan_digest='b'*64,lease_epoch=3,query_index=0,query='dress',tab_id=123,window_id=4,session_id='c'*32,url='https://listado.mercadolibre.com.mx/dress')
+            with sqlite3.connect(b.store.path) as db:
+                initialize(db);seal_query(db,('r','b'*64,3),0,'dress',fence=lambda:True)
+                db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',('r',json.dumps(binding)))
+            event=dict(operation='card_v3_page_challenge',request_id='r',tab_id=123,window_id=4,session_id='c'*32,query_index=0,query='dress',page=1,native_origin=anchor)
+            with patch.object(b,'anchor_guard_alive',return_value=True):
+                self.assertIsNone(b.issue_card_v3_page(dict(event,native_origin='other')))
+                b.requested_page=2
+                self.assertIsNone(b.issue_card_v3_page(event))
+                b.requested_page=-1
+                token=b.issue_card_v3_page(event);self.assertEqual(token['page_url'],binding['url'])
+                confirm=dict(operation='card_v3_page_confirm',request_id='r',tab_id=123,window_id=4,session_id='c'*32,receipt=dict(token,observed_at=datetime.now(timezone.utc).isoformat()),native_origin=anchor)
+                self.assertTrue(b.confirm_card_v3_page(confirm))
+                self.assertTrue(b.done);b.done=False;b.requested_page=1
+                self.assertFalse(b.confirm_card_v3_page(confirm))
+                finish=dict(operation='card_v3_page_finish',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                    query_index=0,query='dress',page=1,page_url=binding['url'],status='end_of_results',next_url=None,
+                    end_checks=3,end_evidence='empty_results',native_origin=anchor)
+                self.assertFalse(b.finish_card_v3_page(dict(finish,end_evidence='unknown')))
+                self.assertTrue(b.finish_card_v3_page(finish))
+                with sqlite3.connect(b.store.path) as db:
+                    stored=db.execute('SELECT page_url,receipt_nonce,end_evidence,end_checks FROM card_v3_page_evidence').fetchone()
+                self.assertEqual(stored,(binding['url'],token['nonce'],'empty_results',3))
+    def test_card_v3_batch_requires_confirmed_page_and_live_anchor(self):
+        import sqlite3,io,base64
+        from PIL import Image
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        from optimization_worker.card_sales_v3_receipts import PageReceiptGuard
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=4,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,
+                       platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor)
+            b.query_verified=True
+            url='https://listado.mercadolibre.com.mx/dress'
+            image=io.BytesIO();Image.new('RGB',(120,120),'white').save(image,format='JPEG');raw=image.getvalue()
+            b.card_v3_store_screenshot=lambda content:'screenshot.jpg'
+            event=dict(operation='card_v3_batch',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                       query_index=0,query='dress',page=1,page_url=url,batch_index=0,
+                       cards=[dict(query='dress',product_id='MLM1',url='https://articulo.mercadolibre.com.mx/MLM1',rank=1,bbox=[1,1,30,40],first_seen=1,sales_text='+500 vendidos')],screenshot=base64.b64encode(raw).decode(),native_origin=anchor)
+            with sqlite3.connect(b.store.path) as db:
+                initialize(db);seal_query(db,('r','b'*64,3),0,'dress',fence=lambda:True)
+                guard=PageReceiptGuard(db)
+                request=dict(request_id='r',plan_digest='b'*64,lease_epoch=3,query_index=0,page=1,query='dress',tab_id=123,window_id=4,session_id='c'*32,page_url=url)
+                token=guard.issue(request,fence=lambda:True)
+            with patch.object(b,'anchor_guard_alive',return_value=True):
+                self.assertFalse(b.save_card_v3_batch(event))
+                with sqlite3.connect(b.store.path) as db:PageReceiptGuard(db).confirm(dict(token,observed_at=datetime.now(timezone.utc).isoformat()),fence=lambda:True)
+                self.assertFalse(b.save_card_v3_batch(dict(event,native_origin='other')))
+                self.assertFalse(b.save_card_v3_batch(dict(event,page_url='https://listado.mercadolibre.com.mx/other')))
+                with sqlite3.connect(b.store.path) as db:db.execute("UPDATE card_v3_receipt_challenges SET issued_at='2000-01-01T00:00:00+00:00'")
+                self.assertFalse(b.save_card_v3_batch(event))
+                with sqlite3.connect(b.store.path) as db:db.execute('UPDATE card_v3_receipt_challenges SET issued_at=?',(datetime.now(timezone.utc).isoformat(),))
+                self.assertTrue(b.save_card_v3_batch(event))
+                with sqlite3.connect(b.store.path) as db:self.assertEqual(db.execute('SELECT screenshot_file FROM card_v3_batch_evidence').fetchone()[0],'screenshot.jpg')
+    def test_visual_batch_requires_current_version_identity_and_anchor(self):
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=3,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,
+                       platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,
+                     expected_window_id=4,expected_session='c'*32,anchor_origin=anchor)
+            b.query_verified=True
+            event=dict(operation='visual_v2_batch',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                       query_index=0,query='dress',batch_index=0,cards=[{'product_id':'MLM1'}],native_origin=anchor)
+            with patch.object(b,'anchor_guard_alive',return_value=True), patch.object(b.store,'record_visual_v2_batch') as write:
+                self.assertFalse(b.save_visual_batch(dict(event,native_origin='other')))
+                self.assertTrue(b.save_visual_batch(event))
+                write.assert_called_once()
+            completion=dict(operation='visual_v2_finish',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                            query_index=0,query='dress',status='home_complete',end_checks=3,no_results=False,native_origin=anchor)
+            with patch.object(b,'anchor_guard_alive',return_value=True), patch.object(b.store,'finish_visual_v2_query') as finish:
+                self.assertFalse(b.finish_visual_query(dict(completion,query='other')))
+                self.assertFalse(b.finish_visual_query(dict(completion,end_checks=1)))
+                self.assertTrue(b.finish_visual_query(completion))
+                finish.assert_called_once()
+
     def test_client_disconnect_during_status_does_not_stop_broker(self):
         challenge = dict(version=1, request_id='r', nonce='a'*32, lease_epoch=3,
                          plan_digest='b'*64, platform='mercado-libre-mx', query_index=0, query='dress')
@@ -497,6 +609,22 @@ with Broker(p/'s',p/'l',r,123,lambda:True):
                 finally: stop.set();thread.join()
 
 class ActivationSafetyTest(unittest.TestCase):
+    def test_short_expansion_requires_bound_anchor_and_verified_query(self):
+        import json,sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp);challenge=dict(version=2,request_id='r',nonce='a'*32,lease_epoch=1,plan_digest='b'*64,platform='mercado-libre-mx',query_index=3,query='extra')
+            broker=Broker(p/'s',p/'l',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin='anchor')
+            broker.anchor_guard_alive=lambda:True;broker.query_verified=True
+            with sqlite3.connect(broker.store.path) as db:
+                for i in range(3):db.execute('INSERT INTO query_cards VALUES (?,?,?,?,?)',('r','b'*64,1,i,'[]'))
+                receipt=dict(challenge,tab_id=123,window_id=4,session_id='c'*32)
+                db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',('r',json.dumps(receipt)))
+            event=dict(operation='query_cards_complete',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                       query_index=3,query='extra',cards=[],exhausted=True,native_origin='anchor')
+            self.assertFalse(broker.complete_query_cards(dict(event,native_origin='other')))
+            self.assertFalse(broker.complete_query_cards(dict(event,query='unrelated')))
+            self.assertTrue(broker.complete_query_cards(event))
+            self.assertTrue(broker.store.query_exhausted('r','b'*64,1,3))
     def test_activation_nonce_is_bound_fresh_and_single_use(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp); challenge=dict(version=1,request_id='r',nonce='a'*32,lease_epoch=1,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')

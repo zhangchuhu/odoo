@@ -156,6 +156,54 @@ class OptimizationQueueCase(TransactionCase):
         task._set({'state': 'queued', 'lease_token': False, 'lease_expires_at': False, 'worker_uid': False})
         self.assertFalse(worker.claim(['research.bestseller']))
 
+    def test_research_progress_requires_current_lease_and_is_monotonic(self):
+        batch=self.env['meli.optimization.batch'].create({'name':'Progress'})
+        case=self.env['meli.optimization.case'].create({'name':'Progress','batch_id':batch.id})
+        snap=self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{}})
+        task=self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts','payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        task._set({'task_type':'research.bestseller'}); task.prepare_scoped_research()
+        user=self.env['res.users'].create({'name':'Progress worker','login':'progress-worker','company_id':self.env.company.id,'company_ids':[(6,0,self.env.company.ids)],'group_ids':[(6,0,[self.env.ref('meli_optimization.group_research_worker').id])]})
+        worker=task.with_user(user)
+        claim=worker.claim(['research.bestseller']); token,epoch=claim['lease_token'],claim['lease_epoch']
+        worker.checkpoint(token,epoch,'initial',{'request_id':'progress-request','state':'unknown'})
+        p={'stage':'single','queries':3,'reviewed':4,'qualified':1,'target':15}
+        worker.research_progress(token,epoch,'progress-request',p)
+        self.assertIn('4',task.status_detail['message'])
+        with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'progress-request',dict(p,reviewed=3))
+        with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'other',p)
+        with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'progress-request',dict(p,qualified=5))
+
+    def test_visual_v2_progress_accepts_nine_queries_and_over_sixty_candidates(self):
+        batch=self.env['meli.optimization.batch'].create({'name':'Visual progress'})
+        case=self.env['meli.optimization.case'].create({'name':'Visual progress','batch_id':batch.id})
+        snap=self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{'collection_config':{'strategy':'visual-v2','result_limit':15}}})
+        task=self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts','payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        task._set({'task_type':'research.bestseller'}); task.prepare_scoped_research()
+        user=self.env['res.users'].create({'name':'Visual progress worker','login':'visual-progress-worker','company_id':self.env.company.id,'company_ids':[(6,0,self.env.company.ids)],'group_ids':[(6,0,[self.env.ref('meli_optimization.group_research_worker').id])]})
+        worker=task.with_user(user);claim=worker.claim(['research.bestseller']);token,epoch=claim['lease_token'],claim['lease_epoch']
+        worker.checkpoint(token,epoch,'initial',{'request_id':'visual-progress-request','state':'unknown'})
+        p={'stage':'visual','queries':9,'reviewed':100,'qualified':1,'target':15}
+        worker.research_progress(token,epoch,'visual-progress-request',p)
+        self.assertIn('100',task.status_detail['message'])
+        with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'visual-progress-request',dict(p,queries=10))
+
+    def test_card_v3_progress_keeps_supplemental_separate(self):
+        batch=self.env['meli.optimization.batch'].create({'name':'Card progress'})
+        case=self.env['meli.optimization.case'].create({'name':'Card progress','batch_id':batch.id})
+        snap=self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{'collection_config':{'strategy':'card-visual-v3','result_limit':5}}})
+        task=self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts','payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
+        task._set({'task_type':'research.bestseller'});task.prepare_scoped_research()
+        user=self.env['res.users'].create({'name':'Card progress worker','login':'card-progress-worker','company_id':self.env.company.id,'company_ids':[(6,0,self.env.company.ids)],'group_ids':[(6,0,[self.env.ref('meli_optimization.group_research_worker').id])]})
+        worker=task.with_user(user);claim=worker.claim(['research.bestseller']);token,epoch=claim['lease_token'],claim['lease_epoch']
+        worker.checkpoint(token,epoch,'initial',{'request_id':'card-progress-request','state':'unknown'})
+        detail={'known_products':110,'completed_pages':[3,2,1],'selected_per_query':[30,None,None],
+                'threshold_met':4,'supplemental':2,'excluded':1,'visual_required':6,'visual_done':3,
+                'visual_threshold_passed':2,'visual_supplemental_passed':1}
+        p={'stage':'visual','queries':1,'reviewed':7,'qualified':2,'target':5,'card_v3':detail}
+        worker.research_progress(token,epoch,'card-progress-request',p)
+        self.assertEqual(task.status_detail['card_v3']['supplemental'],2)
+        with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'card-progress-request',dict(p,card_v3=dict(detail,completed_pages=[4])))
+
     def test_window_resume_requires_original_failed_scoped_request(self):
         groups = [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]
         user = self.env['res.users'].create({'name': 'Window negative worker', 'login': 'window-negative-worker', 'company_id': self.env.company.id, 'company_ids': [(6, 0, self.env.company.ids)], 'group_ids': groups})

@@ -124,3 +124,56 @@ test('opening a newly confirmed tab waits for its browser navigation and selects
  btn.click();await new Promise(r=>setImmediate(r));assert.equal(selected,0);assert.match(status.textContent,/等待目标平台/);
  url='https://www.mercadolibre.com.mx/';await tick();assert.equal(selected,1);
 });
+test('visual-v2 batch and completion use scoped native messages',async()=>{
+ let btn={addEventListener:(_,fn)=>btn.click=fn};let calls=[];
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,v)=>{calls.push(v);return v.operation==='binding_status'?{ok:true,request_id:'req'}:{ok:true}}},tabs:{get:async()=>({id:15,windowId:4,url:'https://listado.mercadolibre.com.mx/dress'})}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?btn:{textContent:''}},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ btn.click();await new Promise(r=>setImmediate(r));
+ assert.equal(await c.saveVisualQueryBatch(8,'dress',0,[{rank:1}]),true);
+ assert.equal(await c.finishVisualQuery(8,'dress','home_complete',3,false),true);
+ assert.equal(calls.find(x=>x.operation==='visual_v2_batch').request_id,'req');
+ assert.equal(calls.find(x=>x.operation==='visual_v2_finish').end_checks,3);
+});
+
+test('card-v3 page proof verifies current tab URL and query before confirmation',async()=>{
+ let btn={addEventListener:(_,fn)=>btn.click=fn};const calls=[];let pageQuery='dress';
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,v)=>{
+  calls.push(v);if(v.operation==='binding_status')return {ok:true,request_id:'req'};
+  if(v.operation==='card_v3_page_challenge')return {challenge:{request_id:'req',plan_digest:'a'.repeat(64),lease_epoch:1,query_index:0,page:1,query:'dress',nonce:'c'.repeat(32),tab_id:15,window_id:4,session_id:'b'.repeat(32),page_url:'https://listado.mercadolibre.com.mx/dress'}};
+  return {ok:true};}},tabs:{get:async()=>({id:15,windowId:4,url:'https://listado.mercadolibre.com.mx/dress'}),sendMessage:async()=>({page_url:'https://listado.mercadolibre.com.mx/dress',search_query:pageQuery})}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?btn:{textContent:''}},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ btn.click();await new Promise(r=>setImmediate(r));
+ assert.equal(await c.confirmCardV3Page(0,'dress',1),true);
+ assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,1);
+ pageQuery='different';assert.equal(await c.confirmCardV3Page(0,'dress',1),false);
+ assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,1);
+});
+
+test('card-v3 page completion requires three consistent current page observations',async()=>{
+ let btn={addEventListener:(_,fn)=>btn.click=fn};const calls=[];let checks=0,unverified=false;
+ const url='https://listado.mercadolibre.com.mx/dress',next=url+'_Desde_51';
+ let atEnd=true;
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,v)=>{calls.push(v);if(v.operation==='binding_status')return {ok:true,request_id:'req'};if(v.operation==='card_v3_page_challenge')return {challenge:{request_id:'req',query_index:0,query:'dress',page:1,tab_id:15,window_id:4,session_id:'b'.repeat(32),page_url:url}};return {ok:true}}},tabs:{get:async()=>({id:15,windowId:4,url}),sendMessage:async(_tab,v)=>{if(v.type==='MERCADO_COLLECTOR_PAGE_BINDING')return {page_url:url,search_query:'dress'};checks++;return {page_url:url,status:unverified?'unverified':'has_next',url:next,at_end:atEnd};}}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?btn:{textContent:''}},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ btn.click();await new Promise(r=>setImmediate(r));
+ assert.equal(await c.finishCardV3Page(0,'dress',1),true);assert.equal(checks,3);
+ assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,1);
+ const sent=calls.find(x=>x.operation==='card_v3_page_finish');assert.equal(sent.status,'has_next');assert.equal(sent.next_url,next);assert.equal(sent.end_checks,3);
+ unverified=true;assert.equal(await c.finishCardV3Page(0,'dress',1),false);
+ unverified=false;atEnd=false;assert.equal(await c.finishCardV3Page(0,'dress',1),false);
+ assert.equal(calls.filter(x=>x.operation==='card_v3_page_finish').length,1);
+});
+
+test('card-v3 batch requires current visible card evidence and screenshot',async()=>{
+ let btn={addEventListener:(_,fn)=>btn.click=fn};const calls=[];const url='https://listado.mercadolibre.com.mx/dress';
+ const card={product_id:'MLM1',title:'Dress',is_ad:false,bbox:[1,2,30,40],sales_text:'+150 vendidos',sales_status:'known'};
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,v)=>{calls.push(v);if(v.operation==='binding_status')return {ok:true,request_id:'req'};if(v.operation==='card_v3_page_challenge')return {challenge:{request_id:'req',query_index:0,query:'dress',page:1,tab_id:15,window_id:4,session_id:'b'.repeat(32),page_url:url}};return {ok:true}}},tabs:{get:async()=>({id:15,windowId:4,url}),query:async()=>[{id:15}],captureVisibleTab:async()=> 'data:image/jpeg;base64,YWJj',sendMessage:async(_tab,v)=>v.type==='MERCADO_COLLECTOR_PAGE_BINDING'?{page_url:url,search_query:'dress'}:{page_url:url,verified_scope:true,card_sales_version:3,observations:[card]}}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?btn:{textContent:''}},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ btn.click();await new Promise(r=>setImmediate(r));
+ assert.equal(await c.saveCardV3Batch(0,'dress',1,0,[card]),true);
+ assert.equal(calls.find(x=>x.operation==='card_v3_batch').screenshot,'YWJj');
+});

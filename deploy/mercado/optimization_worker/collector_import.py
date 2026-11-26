@@ -54,11 +54,13 @@ def _observation_time(value):
         raise ValueError('Observation time must be an aware ISO timestamp') from None
 
 
-def ranked_pool(blocks, queries, platform):
+def ranked_pool(blocks, queries, platform, *, allow_variable=False, allow_short=False):
     pool={}
-    if not isinstance(blocks,list) or len(blocks)!=3: raise ValueError('Invalid blocks')
+    if (not isinstance(blocks,list) or not isinstance(queries,list) or len(blocks)!=len(queries)
+            or (not 1<=len(blocks)<=3 if allow_variable else len(blocks)!=3)):
+        raise ValueError('Invalid blocks')
     for j,block in enumerate(blocks):
-        if not isinstance(block,dict) or set(block)!={'query','observations'} or block['query']!=queries[j] or not isinstance(block['observations'],list) or not 30<=len(block['observations'])<=50: raise ValueError('Invalid block')
+        if not isinstance(block,dict) or set(block)!={'query','observations'} or block['query']!=queries[j] or not isinstance(block['observations'],list) or not (0<=len(block['observations'])<=50 if allow_short else 30<=len(block['observations'])<=50): raise ValueError('Invalid block')
         for rank,card in enumerate(block['observations'],1):
             if not isinstance(card,dict) or set(card)!=_CARD or card['query']!=queries[j] or type(card['rank'])!=int or card['rank']!=rank or type(card['is_ad'])!=bool or not isinstance(card['title'],str) or not card['title'].strip(): raise ValueError('Invalid card')
             pid,canonical=_identity(card['url'],platform)
@@ -80,15 +82,73 @@ def validate_evidence_prefix(data, request_id, platform, queries, category, obse
                         min_sold, min_reviews, min_rating, require_complete=False)
 
 
+def convert_staged_evidence(data, request_id, platform, queries, extra_queries, category, observed_at,
+                            *, result_limit=15, min_sold=500, min_reviews=50, min_rating=4.1, elapsed_seconds=0):
+    """Validate a completed staged run; browser receipts must be checked by caller."""
+    return _staged_evidence(data,request_id,platform,queries,extra_queries,category,observed_at,
+                            result_limit,min_sold,min_reviews,min_rating,require_complete=True,elapsed_seconds=elapsed_seconds)
+
+
+def validate_staged_evidence_prefix(data, request_id, platform, queries, extra_queries, category, observed_at,
+                                    *, result_limit=15, min_sold=500, min_reviews=50, min_rating=4.1):
+    return _staged_evidence(data,request_id,platform,queries,extra_queries,category,observed_at,
+                            result_limit,min_sold,min_reviews,min_rating,require_complete=False)
+
+
+def _staged_evidence(data, request_id, platform, queries, extra_queries, category, observed_at,
+                     result_limit, min_sold, min_reviews, min_rating, *, require_complete, elapsed_seconds=0):
+    from .collector_staged_policy import next_action
+    if (not isinstance(queries, list) or len(queries) != 3 or not isinstance(extra_queries, list)
+            or len(extra_queries) > 3
+            or any(not isinstance(q, str) or not q.strip() or len(q) > 200 or disallowed_term(q) for q in queries + extra_queries)
+            or len(set(queries + extra_queries)) != len(queries + extra_queries)):
+        raise ValueError('Invalid staged queries')
+    if not isinstance(data, dict) or not isinstance(data.get('queries'), list) or len(data['queries']) != 3 + len(extra_queries):
+        raise ValueError('Invalid staged search observations')
+    initial, _ = ranked_pool(data['queries'][:3], queries, platform)
+    extra = None
+    if extra_queries:
+        extra, _ = ranked_pool(data['queries'][3:], extra_queries, platform, allow_variable=True,allow_short=True)
+    details = data.get('details')
+    if not isinstance(details, list):
+        raise ValueError('Invalid staged details')
+    reviewed, count, expansion_started = [], 0, False
+    for detail in details:
+        action = next_action(initial, reviewed, count, result_limit, extra)
+        if extra is not None and action.get('stage') == 'expanded' and not expansion_started:
+            if next_action(initial, reviewed, count, result_limit, None)['action'] != 'search':
+                raise ValueError('Unexpected staged expansion')
+            expansion_started = True
+        if action['action'] != 'review' or not isinstance(detail, dict) or detail.get('identity') != platform + ':' + action['identity']:
+            raise ValueError('Invalid staged detail order')
+        reviewed.append((action['stage'], action['identity']))
+        count += detail.get('status') == 'qualified'
+    action = next_action(initial, reviewed, count, result_limit, extra, elapsed_seconds=elapsed_seconds if require_complete else 0)
+    if extra is not None and not expansion_started and next_action(initial, reviewed, count, result_limit, None)['action'] != 'search':
+        raise ValueError('Unexpected staged expansion')
+    if require_complete and action['action'] == 'search':
+        raise ValueError('Staged expansion required before completion')
+    if require_complete and action['action'] != 'finish':
+        raise ValueError('Staged detail review incomplete')
+    pool = dict(initial)
+    for key, value in (extra or {}).items():
+        if key not in pool:
+            pool[key] = dict(value, hits={i + 3 for i in value['hits']})
+    return _validated_evidence(data, request_id, platform, queries + extra_queries, category, observed_at,
+                               result_limit, min_sold, min_reviews, min_rating, require_complete=require_complete,
+                               ranked_override=(pool, [identity for _, identity in reviewed]),
+                               staged_reason=action.get('reason'))
+
+
 def _validated_evidence(data, request_id, platform, queries, category, observed_at, result_limit,
-                        min_sold, min_reviews, min_rating, *, require_complete):
+                        min_sold, min_reviews, min_rating, *, require_complete, ranked_override=None, staged_reason=None):
     batch_time=_observation_time(observed_at)
     observed_at=batch_time.isoformat()
     if platform not in ('shein-us','mercado-libre-mx') or not isinstance(request_id,str) or not request_id: raise ValueError('Invalid request')
     if not isinstance(data,dict) or set(data)!={'task_record_id','platform','queries','details'} or data['task_record_id']!=request_id or data['platform']!=platform: raise ValueError('Request mismatch')
-    if not isinstance(queries,list) or len(queries)!=3 or any(not isinstance(q,str) or not q.strip() for q in queries) or len(set(queries))!=3: raise ValueError('Invalid query plan')
+    if not isinstance(queries,list) or len(queries) not in ((3, 4, 5, 6) if ranked_override is not None else (3,)) or any(not isinstance(q,str) or not q.strip() for q in queries) or len(set(queries))!=len(queries): raise ValueError('Invalid query plan')
     if not isinstance(category,str) or category not in _CATEGORIES or type(result_limit)!=int or result_limit<1: raise ValueError('Invalid plan')
-    pool, recurrent = ranked_pool(data['queries'], queries, platform)
+    pool, recurrent = ranked_override if ranked_override is not None else ranked_pool(data['queries'], queries, platform)
     details=data['details']; candidates=[]
     if not isinstance(details,list) or len(details)>len(recurrent): raise ValueError('Invalid recurring pool')
     for index,d in enumerate(details):
@@ -138,7 +198,9 @@ def _validated_evidence(data, request_id, platform, queries, category, observed_
         return
     if len(candidates)<result_limit and len(details)!=len(recurrent):raise ValueError('Incomplete detail review')
     digest=hashlib.sha256(json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-    result={'schema_version':'1','status':'complete' if candidates else 'empty','candidates':candidates,'evidence':[{'id':'collector','source':'collector:sha256:'+digest,'observed_at':observed_at}]}
-    if not candidates:result['reason']='No qualifying candidates in observed pool.'
+    status = ('complete' if len(candidates) >= result_limit else 'partial' if candidates else 'empty') if staged_reason is not None else ('complete' if candidates else 'empty')
+    result={'schema_version':'1','status':status,'candidates':candidates,'evidence':[{'id':'collector','source':'collector:sha256:'+digest,'observed_at':observed_at}]}
+    if status == 'partial':result['reason']=staged_reason
+    if not candidates:result['reason']=staged_reason or 'No qualifying candidates in observed pool.'
     validate_result('research.bestseller',result)
     return result
