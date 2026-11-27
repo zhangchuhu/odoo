@@ -7,6 +7,7 @@ from contextlib import closing
 import fcntl
 import hashlib
 import json
+import re
 import os
 from pathlib import Path
 import sqlite3
@@ -311,6 +312,35 @@ class Dispatcher:
             db.execute('CREATE TABLE IF NOT EXISTS invocations (request_id TEXT, checkpoint TEXT, status TEXT, PRIMARY KEY(request_id, checkpoint))')
             db.execute('CREATE TABLE IF NOT EXISTS invocation_diagnostics (request_id TEXT, checkpoint TEXT, category TEXT, exit_code INTEGER, PRIMARY KEY(request_id, checkpoint))')
             db.execute('CREATE TABLE IF NOT EXISTS invocation_telemetry (id INTEGER PRIMARY KEY, request_id TEXT, checkpoint TEXT, timestamp TEXT, stage TEXT, code TEXT, elapsed_ms INTEGER, stderr_present INTEGER)')
+            db.execute('CREATE TABLE IF NOT EXISTS invocation_tool_failures (id INTEGER PRIMARY KEY, request_id TEXT, checkpoint TEXT, timestamp TEXT, elapsed_ms INTEGER, server TEXT, tool TEXT, error_class TEXT, http_status INTEGER)')
+
+    def _tool_failure(self, request, checkpoint, item, started):
+        # Record an allowlisted identity and classified error, never tool input/output.
+        from datetime import datetime, timezone
+        allowed={'node_repl': {'js', 'js_reset', 'js_add_node_module_dir'},
+                 'computer': {'screenshot', 'click', 'scroll', 'type', 'get_state'},
+                 'web': {'run'}, 'functions': {'exec'}}
+        server=item.get('server'); tool=item.get('tool')
+        if not isinstance(server,str) or server not in allowed: server,tool='other','other'
+        elif not isinstance(tool,str) or tool not in allowed[server]: tool='other'
+        error=item.get('error'); message=error.get('message','') if isinstance(error,dict) else error
+        message=message[:4096].lower() if isinstance(message,str) else ''
+        match=re.search(r'\b(?:http\s*)?(403|429|500|502|503|504)\b',message)
+        status=int(match.group(1)) if match else None
+        if status==403: category='http_forbidden'
+        elif status==429: category='http_rate_limited'
+        elif status: category='http_server_error'
+        elif 'timeout' in message or 'timed out' in message: category='timeout'
+        elif 'permission denied' in message or 'access denied' in message: category='permission_denied'
+        elif 'connection' in message or 'econn' in message: category='connection_error'
+        elif 'not found' in message or 'unavailable' in message: category='unavailable'
+        elif 'invalid' in message: category='invalid_input'
+        else: category='unknown'
+        with closing(sqlite3.connect(self.journal,timeout=5)) as db, db:
+            count=db.execute('SELECT count(*) FROM invocation_tool_failures WHERE request_id=? AND checkpoint=?',(request,checkpoint)).fetchone()[0]
+            if count < 32:
+                db.execute('INSERT INTO invocation_tool_failures(request_id,checkpoint,timestamp,elapsed_ms,server,tool,error_class,http_status) VALUES (?,?,?,?,?,?,?,?)',
+                           (request,checkpoint,datetime.now(timezone.utc).isoformat(),int((time.monotonic()-started)*1000),server,tool,category,status))
 
     def _telemetry(self, request, checkpoint, stage, code, started, stderr_present=0):
         from datetime import datetime, timezone
@@ -437,7 +467,10 @@ class Dispatcher:
                             message = item.get('text')
                             if isinstance(message,str) and '连接当前任务' in message and any(word in message for word in ('缺少','没有','不可用','无法')):
                                 events['binding_unavailable'] = True
-                        if isinstance(item,dict) and item.get('type') in ('mcp_tool_call','tool_call') and (item.get('status') in ('failed','error') or item.get('error') is not None): events['tool_failure']=True
+                        if isinstance(item,dict) and item.get('type') in ('mcp_tool_call','tool_call') and (item.get('status') in ('failed','error') or item.get('error') is not None):
+                            events['tool_failure']=True
+                            try: self._tool_failure(request,checkpoint,item,started)
+                            except sqlite3.Error: pass
             thread=threading.Thread(target=drain,daemon=True);thread.start()
             try:
                 with os.fdopen(write_fd,'wb') as output, os.fdopen(err_write,'wb') as errors:

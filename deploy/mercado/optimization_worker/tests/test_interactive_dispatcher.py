@@ -258,6 +258,35 @@ class DispatcherTests(unittest.TestCase):
                 rows=db.execute('SELECT category FROM invocation_diagnostics').fetchall()
                 self.assertEqual(rows,[('no_progress_tool_failure',)])
                 self.assertNotIn('PRIVATE-SECRET',str(rows))
+    def test_failed_tool_records_safe_structured_cause(self):
+        import json, sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal'
+            def runner(*a,**k):
+                event={'type':'item.completed','item':{'type':'mcp_tool_call','status':'failed',
+                       'server':'node_repl','tool':'js','error':{'message':'HTTP 403 forbidden token=PRIVATE-SECRET'}}}
+                k['stdout'].write((json.dumps(event)+'\n').encode())
+                return subprocess.CompletedProcess(a[0],0)
+            self.assertEqual(Dispatcher(path,Store(),runner=runner,host_probe=lambda:True).tick(),'unknown')
+            with sqlite3.connect(path) as db:
+                rows=db.execute('SELECT server,tool,error_class,http_status FROM invocation_tool_failures').fetchall()
+                self.assertEqual(rows,[('node_repl','js','http_forbidden',403)])
+                self.assertNotIn('PRIVATE-SECRET',str(db.execute('SELECT * FROM invocation_tool_failures').fetchall()))
+
+    def test_failed_tool_does_not_persist_untrusted_names_or_messages(self):
+        import json, sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal'
+            def runner(*a,**k):
+                event={'type':'item.completed','item':{'type':'mcp_tool_call','status':'failed',
+                       'server':'secret-token','tool':'private-prompt','error':{'message':'sensitive information'}}}
+                k['stdout'].write((json.dumps(event)+'\n').encode())
+                return subprocess.CompletedProcess(a[0],0)
+            self.assertEqual(Dispatcher(path,Store(),runner=runner,host_probe=lambda:True).tick(),'unknown')
+            with sqlite3.connect(path) as db:
+                rows=db.execute('SELECT server,tool,error_class FROM invocation_tool_failures').fetchall()
+                self.assertEqual(rows,[('other','other','unknown')])
+                self.assertNotIn('sensitive information',str(db.execute('SELECT * FROM invocation_tool_failures').fetchall()))
     def test_unknown_diagnostic_categories(self):
         import sqlite3
         from contextlib import closing
