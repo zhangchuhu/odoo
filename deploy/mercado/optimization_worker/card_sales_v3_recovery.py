@@ -8,9 +8,14 @@ TABLES=('card_v3_queries','card_v3_batches','card_v3_batch_evidence','card_v3_pa
         'card_v3_visual','card_v3_meta','card_v3_visual_source','card_v3_visual_evidence','home_collection_end')
 
 
-def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False):
+def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False,_lineage=None,_verified=None):
     """Require recent historical query and page proofs before copying business data."""
     if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
+    lineage=set() if _lineage is None else set(_lineage)
+    verified=set() if _verified is None else _verified
+    if scope in lineage or len(lineage)>=32:raise ValueError('Invalid recovery lineage')
+    if scope in verified:return True
+    lineage.add(scope)
     now=datetime.now(timezone.utc)
     queries=dict(db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope))
     try:
@@ -44,11 +49,31 @@ def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False):
                     and proof.get('lease_epoch')==scope[2] and proof.get('query_index')==index and proof.get('page')==page
                     and proof.get('query')==query and any(all(proof.get(k)==r.get(k) for k in ('tab_id','window_id','session_id')) for r in accepted))
         current=[(nonce,proof) for nonce,proof,stamp in proofs if valid(proof,stamp)]
+        if not current and homepage_only:
+            # Restored checkpoints deliberately have no reusable browser receipts.
+            # Follow their authorized lineage and require the copied page to be
+            # byte-for-byte identical to the independently verified source.
+            try:
+                source=db.execute('SELECT source_request,source_digest,source_epoch FROM card_v3_lineage WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
+            except sqlite3.Error:source=None
+            if not source or type(source[2]) is not int or not 0<source[2]<scope[2]:
+                raise ValueError('Historical page proof missing or stale')
+            original_query=db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?',(*source,index)).fetchone()
+            if not original_query or original_query[0]!=query:raise ValueError('Recovered page query changed')
+            for table in ('card_v3_batches','card_v3_batch_evidence','card_v3_pages','card_v3_page_evidence'):
+                columns=[row[1] for row in db.execute('PRAGMA table_info('+table+')')][3:]
+                fields=','.join(columns)
+                where=' WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=? ORDER BY rowid'
+                if db.execute('SELECT '+fields+' FROM '+table+where,(*scope,index,page)).fetchall()!=db.execute('SELECT '+fields+' FROM '+table+where,(*source,index,page)).fetchall():
+                    raise ValueError('Recovered page evidence changed')
+            validate_source_receipts(db,tuple(source),verify_photo=verify_photo,homepage_only=True,_lineage=lineage,_verified=verified)
+            continue
         if not current:raise ValueError('Historical page proof missing or stale')
         evidence=db.execute('SELECT page_url,receipt_nonce FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,index,page)).fetchone()
         ended=db.execute('SELECT 1 FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,index,page)).fetchone()
         if ended and (not evidence or not any(nonce==evidence[1] and proof.get('page_url')==evidence[0] for nonce,proof in current)):
             raise ValueError('Historical page end proof missing')
+    verified.add(scope)
     return True
 
 

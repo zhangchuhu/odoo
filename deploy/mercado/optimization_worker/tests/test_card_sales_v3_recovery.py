@@ -64,6 +64,28 @@ class RecoveryTest(unittest.TestCase):
         self.db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.old,0,2,'end_of_results'))
         with self.assertRaises(ValueError):validate_source_receipts(self.db,self.old,verify_photo=lambda *_:True,homepage_only=True)
 
+    def test_home_recovery_preserves_verified_pages_across_multiple_leases(self):
+        from optimization_worker.card_sales_v3_recovery import validate_source_receipts
+        from datetime import datetime,timezone
+        import json
+        self.db.execute('CREATE TABLE accepted_receipts (request_id TEXT,body TEXT)')
+        self.db.execute('CREATE TABLE card_v3_receipt_challenges (nonce TEXT,body TEXT,issued_at TEXT,used INTEGER)')
+        stamp=datetime.now(timezone.utc).isoformat()
+        receipt=dict(version=5,request_id='old',plan_digest='a'*64,lease_epoch=1,query_index=0,query='vestido',platform='mercado-libre-mx',session_id='d'*32,tab_id=1,window_id=2,observed_at=stamp)
+        proof=dict(request_id='old',plan_digest='a'*64,lease_epoch=1,query_index=0,query='vestido',page=1,page_url='https://listado.mercadolibre.com.mx/vestido',session_id='d'*32,tab_id=1,window_id=2,nonce='c'*32)
+        self.db.execute('INSERT INTO accepted_receipts VALUES (?,?)',('old',json.dumps(receipt)))
+        self.db.execute('INSERT INTO card_v3_receipt_challenges VALUES (?,?,?,1)',('c'*32,json.dumps(proof),stamp))
+        self.db.execute('INSERT INTO card_v3_batch_evidence VALUES (?,?,?,?,?,?,?,?,?,?)',(*self.old,0,1,0,'d'*64,'shot.jpg',120,120))
+        self.db.execute("UPDATE card_v3_pages SET status='home_complete' WHERE request_id='old'")
+        restore_scope(self.db,self.old,self.new,'hash','hash',authorize=lambda:True,fence=lambda:True)
+        self.assertTrue(validate_source_receipts(self.db,self.new,verify_photo=lambda *_:True,homepage_only=True))
+        third=('third','c'*64,3)
+        restore_scope(self.db,self.new,third,'hash','hash',authorize=lambda:True,fence=lambda:True)
+        self.assertTrue(validate_source_receipts(self.db,third,verify_photo=lambda *_:True,homepage_only=True))
+        self.db.execute("UPDATE card_v3_batches SET body='[]' WHERE request_id='new'")
+        with self.assertRaises(ValueError):validate_source_receipts(self.db,self.new,verify_photo=lambda *_:True,homepage_only=True)
+        with self.assertRaises(ValueError):validate_source_receipts(self.db,third,verify_photo=lambda *_:True,homepage_only=True)
+
     def test_original_scoped_authorization_is_required_for_task_restore(self, strategy='card-visual-v3'):
         import tempfile,json
         from pathlib import Path
