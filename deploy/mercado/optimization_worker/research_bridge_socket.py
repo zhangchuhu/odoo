@@ -76,7 +76,11 @@ def send(path,message):
     visual = (message.get('operation') in ('visual_candidate_status','submit_visual_verdict')
               and isinstance(response,dict) and set(response)=={'accepted','visual'}
               and response['accepted'] is True and isinstance(response['visual'],dict))
-    if response not in allowed and not binding and not prior and not visual: raise ValueError('Invalid response')
+    home_key = {'seal_suggestions':'selection', 'home_expansion_options':'expansion',
+                'reserve_captcha_attempt':'captcha', 'arm_home_verification':'watch'}.get(message.get('operation'))
+    home = (home_key is not None and isinstance(response,dict) and set(response)=={'accepted',home_key}
+            and response['accepted'] is True and isinstance(response[home_key],dict))
+    if response not in allowed and not binding and not prior and not visual and not home: raise ValueError('Invalid response')
     return response
 
 
