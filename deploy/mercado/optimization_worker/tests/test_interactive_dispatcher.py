@@ -647,6 +647,12 @@ class ResearchSearchSessionPromptTests(unittest.TestCase):
         self.assertIn('checkpoint_disconnected 不是页面不可读',prompt)
         self.assertIn('连接当前任务',prompt)
 
+    def test_gallery_page_failure_requires_observed_diagnostic(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','action':'collect_candidate_images','collector_plan':{'queries':['a','b','c']}})
+        self.assertIn('stage、symptom、page_type、tab_match',prompt)
+        self.assertIn('extension_error',prompt)
+
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})

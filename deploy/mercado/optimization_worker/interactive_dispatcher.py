@@ -78,6 +78,10 @@ def gallery_prompt(action):
         '每个操作确认后重读 gallery_step，继续到下一张或下一候选。结果已对账且步骤为 finish 时，'
         '确认当前标签守护可用，调用 finish（data 为空）并确认完成。candidates 为空且已显示完成时直接结束。'
         '若看到验证码、登录失效或页面无法读取，用 page_blocked 返回 captcha_required、login_required 或 page_unreadable，'
+        '并附 diagnostic 的 stage、symptom、page_type、tab_match：stage 为 gallery、binding 或 unknown；'
+        'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
+        'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+        '只记录实际观察，不写入网址、页面内容或猜测。扩展尚未连接时先连接当前任务，不能当作平台页面不可读。'
         '保留原请求及已确认进度。禁止编造原图、截图和回执。不得扫描 Downloads 或直接请求平台、图片网址。任务数据：\n'
         + json.dumps(action, ensure_ascii=False))
 
