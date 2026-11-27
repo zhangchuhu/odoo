@@ -109,6 +109,8 @@ def research_prompt(action):
                 '只选择卡片明确销量大于 100 的商品，每词最多 30 个；按任务设置的门槛区分达标和补充。'
                 '恢复后先读取 visual_candidate_status；已有视觉待办时不要再次核验销量，'
                 '打开该候选详情与图库、下载候选首图并提交视觉判断；只有后台指示 detail 阶段时才点击核验销量。'
+                '若 visual_candidate_status 返回 state=no_pending_visual，表示当前没有视觉待办，'
+                '应连接任务采集器并根据 next_candidate 继续下一件详情或完成任务，不能作为页面不可读。'
                 '最多 30 个详情合格商品完成视觉判断后排序；图库回传完成后结束。'
                 '任务标签关闭时重新打开并核对任务、站点和搜索词，技术性重连最多 3 次。'
                 '若 binding_status 返回 failure_code=browser_unavailable，调用 page_blocked 返回该代码并停止，保留检查点。'

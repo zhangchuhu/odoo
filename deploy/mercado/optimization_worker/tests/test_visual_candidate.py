@@ -54,6 +54,13 @@ class VisualCandidateTests(unittest.TestCase):
             match_level=None,visual_features=None)
         self.source = 'https://http2.mlstatic.com/source.jpg'
 
+    def test_home_status_reports_no_pending_visual_before_next_detail(self):
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline
+        self.review.plan['strategy']='card-home-v4'
+        with sqlite3.connect(self.ledger) as db:
+            initialize_pipeline(db)
+        self.assertEqual(self.review.status(self.store,self.root),{'state':'no_pending_visual'})
+
     def test_download_vision_and_socket_write_survive_browser_switch(self):
         start = dict(self.event,operation='visual_photo_start',detail=self.detail,photo=1,source=self.source,variant='selected-pink')
         ticket = self.review.native(self.broker,start,self.store,self.downloads)

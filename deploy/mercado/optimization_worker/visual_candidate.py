@@ -161,7 +161,12 @@ class VisualCandidate:
 
     def status(self, store, directory):
         with closing(self.open()) as db:
-            ordinal, identity = self.current(db)
+            try:
+                ordinal, identity = self.current(db)
+            except ValueError as exc:
+                if str(exc) == 'No pending candidate' and self.plan.get('strategy') == 'card-home-v4':
+                    return {'state': 'no_pending_visual'}
+                raise
             rows = db.execute('SELECT id,metadata,sha,file FROM visual_photos WHERE scope=? AND ordinal=? AND sha IS NOT NULL ORDER BY photo',
                               (self.scope,ordinal)).fetchall()
         images = []
