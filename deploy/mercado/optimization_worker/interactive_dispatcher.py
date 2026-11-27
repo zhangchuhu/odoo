@@ -120,6 +120,13 @@ def research_prompt(action):
                 '需短信或邮箱信息、能力不可用或两次失败时，在已核验的搜索或详情阶段先调用 arm_home_verification，'
                 '随后在绑定采集器点击“验证完成后自动恢复任务”，再调用 page_blocked 返回 captcha_required 并停止。'
                 '若观察启动失败，仍调用 page_blocked 保留检查点，由用户手动恢复。'
+                '视觉候选接口没有待办不代表页面不可读，应按后台进度继续详情或完成。'
+                '仅在实际观察到页面无法读取时才回传 page_blocked，必须附 diagnostic：'
+                'stage、symptom、page_type、tab_match 四项分别使用固定枚举；'
+                'stage 为 search、pagination、detail、visual、gallery、binding 或 unknown；'
+                'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
+                'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+                '先检查扩展页面错误和实际目标标签；无法确认的字段填 unknown，禁止猜测和传入页面内容。'
                 '不得记录验证码图片、验证码内容、cookie 或令牌。'
                 '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='card-visual-v3' or (isinstance(config,dict) and config.get('strategy')=='card-visual-v3'):

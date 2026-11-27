@@ -635,6 +635,12 @@ class ResearchSearchSessionPromptTests(unittest.TestCase):
         self.assertIn('visual_candidate_status',prompt)
         self.assertIn('已有视觉待办时不要再次核验销量',prompt)
 
+    def test_home_page_failure_requires_observed_diagnostic(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        for phrase in ('stage、symptom、page_type、tab_match','extension_error','视觉候选接口没有待办不代表页面不可读'):
+            self.assertIn(phrase,prompt)
+
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})
