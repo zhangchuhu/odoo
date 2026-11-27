@@ -6,6 +6,17 @@ from pathlib import Path
 from optimization_worker.research_bridge_socket import Server, send
 
 class Tests(unittest.TestCase):
+    def test_diagnostics_only_record_operation_and_outcome(self):
+        events=[]
+        class Bridge:
+            request_id='bound'
+            def call(self,request,op,data): return {'accepted':True}
+        with tempfile.TemporaryDirectory() as tmp:
+            with Server(Path(tmp)/'s',Bridge(),on_event=lambda op,accepted: events.append((op,accepted))) as server:
+                thread=threading.Thread(target=server.serve_once);thread.start()
+                self.assertEqual(send(server.path,{'operation':'page_blocked','data':{'code':'private-value'}}),{'accepted':True})
+                thread.join(2)
+        self.assertEqual(events,[('page_blocked',True)])
     def test_home_protocol_responses_reach_the_child(self):
         responses = {
             'seal_suggestions': {'accepted': True, 'selection': {'queries': [{'query': 'a'}, {'query': 'b'}, {'query': 'c'}]}},

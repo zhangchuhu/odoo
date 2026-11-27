@@ -531,7 +531,11 @@ class Dispatcher:
                     bridge = self.bridge_factory(request)
                     if bridge.request_id != request:
                         raise ValueError('Bridge request mismatch')
-                    with Server(Path(directory)/'socket', bridge) as server:
+                    bridge_started=time.monotonic()
+                    def trace_bridge(operation,accepted):
+                        try:self._telemetry(request,checkpoint,'bridge',operation+(':'+'ok' if accepted else ':'+'rejected'),bridge_started)
+                        except sqlite3.Error:pass
+                    with Server(Path(directory)/'socket', bridge,on_event=trace_bridge) as server:
                         bridge.save_directory = directory
                         env['OPTIMIZATION_RETURN_SOCKET'] = str(server.path)
                         env['TMPDIR'] = directory
