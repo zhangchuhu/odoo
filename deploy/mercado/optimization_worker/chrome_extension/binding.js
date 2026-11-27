@@ -28,6 +28,11 @@
     await CollectorTrace.render(document.getElementById('binding-trace'));
   }
   let anchorAttempts=0, landingStarted=0;
+  async function guardFailure(result) {
+    const allowed=['guard_pending_conflict','guard_tab_changed','guard_status_unavailable','guard_request_changed','guard_tab_unmatched','guard_not_required'];
+    if (allowed.includes(result?.diagnostic)) await trace('guard_check',result.diagnostic);
+    throw Error(result?.error || 'guard_ack_timeout');
+  }
   const verificationWatch=document.getElementById('home-watch-verification');
   if(typeof verificationWatch?.addEventListener === 'function')verificationWatch.addEventListener('click',async()=>{
     try {
@@ -44,7 +49,7 @@
         state.bound_tab_id === target && state.guard_required === true && state.guard_active !== true) {
       const result = await bounded(chrome.runtime.sendMessage({type:'ensure_collector_guard',
         request_id:requestId,tab_id:target,window_id:tab.windowId}), 'guard_ack_timeout');
-      if (result?.ok !== true) throw Error(result?.error || 'guard_ack_timeout');
+      if (result?.ok !== true) await guardFailure(result);
     }
   }
   function bounded(promise, code, timeout = code === 'anchor_recovery_timeout' ? 22000 : 12000) {
@@ -190,7 +195,7 @@
     if (reply?.error === 'checkpoint_guard_pending' && (operation === 'collector_progress' || operation === 'checkpoint_detail' || operation === 'next_candidate')) {
       const ready = await bounded(chrome.runtime.sendMessage({type:'ensure_collector_guard',
         request_id:requestId,tab_id:target,window_id:tab.windowId}), 'guard_ack_timeout');
-      if (ready?.ok !== true) throw Error(ready?.error || 'guard_ack_timeout');
+      if (ready?.ok !== true) await guardFailure(ready);
       reply = await bounded(chrome.runtime.sendNativeMessage(HOST, message), 'checkpoint_timeout');
     }
     if (reply?.ok !== true) throw Error([reply?.error || 'checkpoint_unavailable', reply?.message].filter(Boolean).join('：'));
