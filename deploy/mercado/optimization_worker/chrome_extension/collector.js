@@ -621,8 +621,8 @@
           if(!Number.isInteger(photo)||photo<1||photo>100)throw Error('图片位置无效');
           const observed=await globalThis.readCandidatePhoto(chrome,binding,identity,photo);
           const page=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
-          if(page.blocked || page.identity_matches!==true || page.identity!==identity || page.sold_display!==next.detail.sold_display || !CardV3Collector.sameDetailPage(page.page_url,next.detail.detail_url))
-            throw Error('下载时商品身份或销量已变化');
+          const mismatch=CardV3Collector.detailMismatch(page,next.detail,identity);
+          if(mismatch){if(globalThis.CollectorTrace)await CollectorTrace.append('visual_detail_check',mismatch);throw Error('下载时商品身份或销量已变化（'+mismatch+'）');}
           await observed.recheck();
           const result=await globalThis.downloadVisualCandidatePhoto({api:chrome,requestId:binding.request_id,checkpoint:globalThis.collectorCheckpoint,
             observation:{detail:next.detail,photo,source:observed.source,variant:observed.variant},recheck:observed.recheck});

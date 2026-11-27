@@ -9,6 +9,15 @@ test('gallery fragment changes preserve detail identity while path and query cha
  assert.equal(sameDetailPage(before,before.replace('2270575061','2270575062')),false);
  assert.equal(sameDetailPage(before,'javascript:alert(1)'),false);
 });
+test('visual detail mismatch identifies the failing check',()=>{
+ const {detailMismatch}=require('../chrome_extension/card_v3_collector.js');
+ const detail={sold_display:'+500 vendidos',detail_url:'https://articulo.mercadolibre.com.mx/MLM-123-item?variation=1'};
+ const page={identity:'mercado-libre-mx:MLM123',identity_matches:true,sold_display:'+500 vendidos',page_url:detail.detail_url+'#gid=1'};
+ assert.equal(detailMismatch(page,detail,page.identity),null);
+ assert.equal(detailMismatch({...page,page_url:'https://articulo.mercadolibre.com.mx/MLM-123-item#gid=1'},detail,page.identity),'visual_url_changed');
+ assert.equal(detailMismatch({...page,sold_display:null},detail,page.identity),'visual_sales_changed');
+ assert.equal(detailMismatch({...page,identity_matches:false},detail,page.identity),'visual_identity_changed');
+});
 
 test('resumes durable page batches and saves only new observations before finishing',async()=>{
  const prior=[{product_id:'MLM1',rank:1}],second={product_id:'MLM2',rank:2};let scans=0;const saved=[];

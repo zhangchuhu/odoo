@@ -6,6 +6,13 @@ function sameDetailPage(left,right){
     a.hash='';b.hash='';return a.href===b.href;
   } catch (_) {return false;}
 }
+function detailMismatch(page,detail,identity){
+  if(page?.blocked)return 'visual_page_blocked';
+  if(page?.identity_matches!==true || page.identity!==identity)return 'visual_identity_changed';
+  if(page.sold_display!==detail.sold_display)return 'visual_sales_changed';
+  if(!sameDetailPage(page.page_url,detail.detail_url))return 'visual_url_changed';
+  return null;
+}
 // One page only. Navigation and task ownership remain under the native broker.
 async function collectPage({queryIndex,query,page,prior,nextBatch,send,save,finish,delay,onProgress=()=>{}}){
   if(!Number.isInteger(queryIndex)||queryIndex<0||queryIndex>8||typeof query!=='string'||!query.trim()||
@@ -37,5 +44,5 @@ async function collectPage({queryIndex,query,page,prior,nextBatch,send,save,fini
     await delay(endChecks?1000:350);
   }
 }
-if(typeof module!=='undefined')module.exports={collectPage,sameDetailPage};
-if(typeof globalThis!=='undefined')globalThis.CardV3Collector={collectPage,sameDetailPage};
+if(typeof module!=='undefined')module.exports={collectPage,sameDetailPage,detailMismatch};
+if(typeof globalThis!=='undefined')globalThis.CardV3Collector={collectPage,sameDetailPage,detailMismatch};
