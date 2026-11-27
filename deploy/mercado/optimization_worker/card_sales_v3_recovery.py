@@ -5,11 +5,12 @@ import sqlite3
 from datetime import datetime,timezone
 
 TABLES=('card_v3_queries','card_v3_batches','card_v3_batch_evidence','card_v3_pages','card_v3_navigation','card_v3_page_evidence','card_v3_queue','card_v3_details','card_v3_detail_observations',
-        'card_v3_visual','card_v3_meta','card_v3_visual_source','card_v3_visual_evidence')
+        'card_v3_visual','card_v3_meta','card_v3_visual_source','card_v3_visual_evidence','home_collection_end')
 
 
-def validate_source_receipts(db,scope,*,verify_photo=None):
+def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False):
     """Require recent historical query and page proofs before copying business data."""
+    if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
     now=datetime.now(timezone.utc)
     queries=dict(db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope))
     try:
@@ -18,6 +19,9 @@ def validate_source_receipts(db,scope,*,verify_photo=None):
     except (sqlite3.Error,ValueError,TypeError) as exc:raise ValueError('Historical browser evidence missing') from exc
     pages=set(db.execute('SELECT DISTINCT query_index,page FROM card_v3_batches WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope))
     pages.update(db.execute('SELECT query_index,page FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope))
+    if homepage_only:
+        if any(page!=1 for _,page in pages):raise ValueError('Homepage recovery cannot include later pages')
+        if db.execute("SELECT 1 FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND status!='home_complete'",scope).fetchone():raise ValueError('Invalid homepage history')
     batches=db.execute('''SELECT e.screenshot_sha,e.screenshot_file FROM card_v3_batches b LEFT JOIN card_v3_batch_evidence e
         USING (request_id,plan_digest,lease_epoch,query_index,page,batch_index)
         WHERE b.request_id=? AND b.plan_digest=? AND b.lease_epoch=?''',scope).fetchall()
@@ -26,7 +30,7 @@ def validate_source_receipts(db,scope,*,verify_photo=None):
         verify_photo(filename,sha)
     for index,page in pages:
         query=queries.get(index)
-        matching=[r for r in receipts if r.get('version')==4 and r.get('platform')=='mercado-libre-mx' and r.get('request_id')==scope[0] and r.get('plan_digest')==scope[1] and r.get('lease_epoch')==scope[2] and r.get('query_index')==index and r.get('query')==query]
+        matching=[r for r in receipts if r.get('version')==(5 if homepage_only else 4) and r.get('platform')=='mercado-libre-mx' and r.get('request_id')==scope[0] and r.get('plan_digest')==scope[1] and r.get('lease_epoch')==scope[2] and r.get('query_index')==index and r.get('query')==query]
         accepted=[]
         for r in matching:
             try:
@@ -53,6 +57,8 @@ def restore_scope(db,source,target,source_plan_hash,target_plan_hash,*,authorize
             or source==target or type(source[2]) is not int or type(target[2]) is not int or not 0<source[2]<target[2]
             or not source_plan_hash or source_plan_hash!=target_plan_hash or not callable(authorize) or authorize() is not True
             or not callable(fence) or fence() is not True):raise ValueError('Recovery authorization mismatch')
+    from .home_collection_policy import initialize_end_reason
+    initialize_end_reason(db)
     db.execute('''CREATE TABLE IF NOT EXISTS card_v3_lineage (request_id TEXT,plan_digest TEXT,lease_epoch INTEGER,
         source_request TEXT,source_digest TEXT,source_epoch INTEGER,content_hash TEXT,
         PRIMARY KEY(request_id,plan_digest,lease_epoch))''')

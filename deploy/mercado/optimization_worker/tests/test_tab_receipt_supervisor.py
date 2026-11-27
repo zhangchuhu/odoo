@@ -10,6 +10,96 @@ class FakeBroker:
     def serve_once(self): self.done=True; time.sleep(.001)
 
 class SupervisorTest(unittest.TestCase):
+    def test_home_supervisor_rebinds_current_query_without_replaying_older_queries(self):
+        from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
+        seen=[];state={'pending':(2,1)}
+        class Changed(FakeBroker):
+            def serve_once(self):self.rebind_requested=True
+        class Rebound(FakeBroker):
+            def serve_once(self):state['pending']=None;self.done=True
+        class Watch(FakeBroker):
+            def serve_once(self):time.sleep(.001)
+        def factory(i,*,rebind=False,watch_only=False):
+            seen.append((i,rebind,watch_only))
+            return Watch() if watch_only else Rebound() if rebind else Changed()
+        supervisor=CardPageSupervisor(factory,lambda:state['pending'],homepage=True)
+        supervisor.stop.wait=lambda delay:False
+        supervisor.start()
+        for _ in range(200):
+            if state['pending'] is None:break
+            time.sleep(.01)
+        supervisor.close()
+        self.assertEqual(seen[:2],[(2,False,False),(2,True,False)])
+    def test_home_supervisor_stops_after_three_reconnect_attempts(self):
+        from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
+        calls=[];delays=[]
+        class Changed(FakeBroker):
+            def serve_once(self):self.rebind_requested=True
+        def factory(index,*,rebind=False,watch_only=False):
+            calls.append((index,rebind));return Changed()
+        supervisor=CardPageSupervisor(factory,lambda:(1,1),homepage=True)
+        supervisor.stop.wait=lambda delay:delays.append(delay) or False
+        supervisor.start();supervisor.thread.join(2)
+        self.assertFalse(supervisor.thread.is_alive());self.assertEqual(delays,[2,5,10])
+        self.assertEqual(len(calls),4);self.assertEqual(supervisor.error,'ValueError');self.assertEqual(supervisor.failure_code,'browser_unavailable')
+    def test_home_supervisor_rebinds_last_query_when_detail_tab_is_lost(self):
+        from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
+        seen=[];done={'bound':False}
+        class Lost(FakeBroker):
+            def serve_once(self):self.rebind_requested=True
+        class Rebound(FakeBroker):
+            def serve_once(self):done['bound']=True;self.done=True
+        class Watch(FakeBroker):
+            def serve_once(self):time.sleep(.001)
+        def factory(index,*,rebind=False,watch_only=False):
+            seen.append((index,rebind,watch_only))
+            return (Watch() if done['bound'] else Lost()) if watch_only else Rebound()
+        supervisor=CardPageSupervisor(factory,lambda:None,homepage=True,rebind_step=lambda:(2,0))
+        supervisor.stop.wait=lambda delay:False
+        supervisor.start()
+        for _ in range(200):
+            if done['bound']:break
+            time.sleep(.01)
+        supervisor.close()
+        self.assertEqual(seen[:2],[(0,False,True),(2,True,False)])
+    def test_home_supervisor_uses_durable_retry_and_clears_after_progress(self):
+        from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
+        events=[];state={'pending':(1,1)}
+        class Changed(FakeBroker):
+            def serve_once(self):self.rebind_requested=True
+        class Finished(FakeBroker):
+            def serve_once(self):state['pending']=None;self.done=True
+        class Watch(FakeBroker):
+            def serve_once(self):time.sleep(.001)
+        def factory(index,*,rebind=False,watch_only=False):return Watch() if watch_only else Finished() if rebind else Changed()
+        supervisor=CardPageSupervisor(factory,lambda:state['pending'],homepage=True,
+            reserve_retry=lambda index:events.append(('reserve',index)) or 2,
+            clear_retry=lambda index:events.append(('clear',index)))
+        supervisor.stop.wait=lambda delay:False;supervisor.start()
+        for _ in range(200):
+            if state['pending'] is None:break
+            time.sleep(.01)
+        supervisor.close();self.assertEqual(events,[('reserve',1),('clear',1)])
+    def test_home_supervisor_retries_transient_socket_errors(self):
+        from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
+        events=[];state={'pending':(1,1)}
+        class Broken(FakeBroker):
+            def serve_once(self):raise ConnectionError('temporary')
+        class Finished(FakeBroker):
+            def serve_once(self):state['pending']=None;self.done=True
+        class Watch(FakeBroker):
+            def serve_once(self):time.sleep(.001)
+        def factory(index,*,rebind=False,watch_only=False):
+            if watch_only:return Watch()
+            events.append('open');return Broken() if events.count('open')==1 else Finished()
+        supervisor=CardPageSupervisor(factory,lambda:state['pending'],homepage=True,
+            reserve_retry=lambda index:events.append(('reserve',index)) or 2,
+            clear_retry=lambda index:events.append(('clear',index)))
+        supervisor.stop.wait=lambda delay:False;supervisor.start()
+        for _ in range(200):
+            if state['pending'] is None:break
+            time.sleep(.01)
+        supervisor.close();self.assertEqual(events,['open',('reserve',1),'open',('clear',1)])
     def test_page_supervisor_switches_only_after_durable_page_completion(self):
         from optimization_worker.tab_receipt_supervisor import CardPageSupervisor
         seen=[];pending=[(0,0),(1,1),(2,1),(0,-1),(0,2)]

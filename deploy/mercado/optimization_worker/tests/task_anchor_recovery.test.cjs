@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const anchorId='a'.repeat(32), peerId='b'.repeat(32), session='1'.repeat(32);
-function worker({rotated=false,tab=7,platform='mercado-libre-mx'}={}) {
+function worker({rotated=false,tab=7,platform='mercado-libre-mx',missing=false}={}) {
   const events=[];
   const listeners=[];
   let external, guard=false, confirmations=0;
@@ -20,10 +20,11 @@ function worker({rotated=false,tab=7,platform='mercado-libre-mx'}={}) {
           anchor_required:true,bound_tab_id:tab, platform,peer_extension_id:peerId};
         if(message.operation==='anchor_challenge') return {ok:true,token:'proof',epoch:2};
         if(message.operation==='anchor_confirm') return {ok:true,rebind_required:rotated && confirmations++===0};
+        if(message.operation==='home_tab_missing') return {ok:true};
         assert.fail(message.operation);
       },
     },
-    tabs:{onCreated:{addListener(){}},get:async id=>({id,windowId:3,url:platform==='shein-us'?'https://us.shein.com/':'https://www.mercadolibre.com.mx/'})},storage:{session:{get:async()=>({collector_session_id:session})}},
+    tabs:{onCreated:{addListener(){}},get:async id=>{if(missing && id===7)throw Error('closed');return {id,windowId:3,url:platform==='shein-us'?'https://us.shein.com/':'https://www.mercadolibre.com.mx/'}}},storage:{session:{get:async()=>({collector_session_id:session})}},
   };
   const context={chrome,URL,Date,Uint8Array,setTimeout:fn=>setImmediate(fn),importScripts(){},NativeGuard:{onMessage(){}},
     CollectorPopup:require('../chrome_extension/collector_popup.js'),
@@ -47,6 +48,10 @@ test('cold worker proves the existing window before recovering its current task 
   const result=await w.send();
   assert.equal(result.ok,true);assert.equal(result.tab_id,7);
   assert.deepEqual(w.events,['binding_status','window_proof','anchor_challenge','anchor_confirm','anchor_guard_open','binding_status']);
+});
+test('missing bound task tab requests a guarded backend rebind',async()=>{
+  const w=worker({missing:true});const result=await w.send();
+  assert.equal(result.error,'anchor_broker_rotating');assert.ok(w.events.includes('home_tab_missing'));
 });
 test('rotated broker re-confirms anchor and creates exactly one tab for concurrent recovery',async()=>{
   const w=worker({rotated:true,tab:null});

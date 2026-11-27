@@ -259,9 +259,9 @@ class LibraryCase(TransactionCase):
         detail=self.ui.workbench_collection_create({'source_sku':'MLM123','image_data':image,'image_mime':'image/png',
             'platform':'mercado-libre-mx','min_sold':800,'min_reviews':50,'min_rating':4.1,'result_limit':15})
         config=detail['snapshot']['payload']['collection_config']
-        self.assertEqual(config['strategy'],'card-visual-v3')
+        self.assertEqual(config['strategy'],'card-home-v4')
         self.assertEqual(config['min_sold'],800)
-        self.assertEqual((config['initial_query_count'],config['max_expansion_queries'],config['max_pages_per_query'],config['sales_known_target'],config['top_per_query'],config['visual_limit']),(3,6,3,100,30,30))
+        self.assertEqual((config['initial_query_count'],config['max_expansion_queries'],config['max_pages_per_query'],config['sales_known_target'],config['top_per_query'],config['visual_limit']),(3,6,1,100,30,30))
         self.start_collection(detail)
 
     def test_collection_source_search_copy_and_idempotency(self):

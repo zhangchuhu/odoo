@@ -3,6 +3,49 @@ from optimization_worker.research_return_bridge import ReturnBridge
 
 ID='8b4f7606-7811-4070-925d-d21cc78f13f0'
 class Tests(unittest.TestCase):
+    def test_arm_verification_returns_scoped_watch(self):
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,
+                            {'arm_home_verification':lambda c,d:{'stage':'search'}})
+        self.assertEqual(bridge.call(ID,'arm_home_verification',{'stage':'search'}),{'accepted':True,'watch':{'stage':'search'}})
+    def test_suggestion_unavailable_report_is_fenced(self):
+        calls=[]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),
+                            {'suggestions_unavailable':lambda c,d:calls.append(d['reason'])})
+        self.assertEqual(bridge.call(ID,'suggestions_unavailable',{'reason':'page_unavailable'}),{'accepted':True})
+        self.assertEqual(calls,['fence','page_unavailable'])
+    def test_captcha_attempt_returns_fenced_reservation(self):
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,
+                            {'reserve_captcha_attempt':lambda c,d:{'attempt':1}})
+        self.assertEqual(bridge.call(ID,'reserve_captcha_attempt',{'stage':'search','action_id':'first'}),{'accepted':True,'captcha':{'attempt':1}})
+    def test_home_expansion_options_return_bounded_sources(self):
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,
+                            {'home_expansion_options':lambda c,d:{'queries':['conjunto mujer falda blusa']}})
+        self.assertEqual(bridge.call(ID,'home_expansion_options',{}),{'accepted':True,'expansion':{'queries':['conjunto mujer falda blusa']}})
+    def test_suggestion_bootstrap_requires_exact_fields_and_scoped_fence(self):
+        calls=[]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),
+                            {'prepare_suggestions':lambda claim,data:calls.append(data)})
+        body={'source_artifact_id':'1','viewed_source_sha256':'a'*64,'category':'womens_skirt_set','anchor':'conjunto mujer falda'}
+        self.assertEqual(bridge.call(ID,'prepare_suggestions',body),{'accepted':True})
+        self.assertEqual(calls,['fence',body])
+        with self.assertRaises(ValueError):bridge.call(ID,'prepare_suggestions',dict(body,extra='unexpected'))
+    def test_suggestion_seal_returns_task_scoped_queries(self):
+        queries=[{'text':'conjunto mujer falda','source':'category_anchor'},
+                 {'text':'conjunto mujer falda blusa','source':'platform_suggestion','position':1},
+                 {'text':'conjunto mujer falda elegante','source':'image_fallback'}]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,
+                            {'seal_suggestions':lambda claim,data:{'queries':queries}})
+        self.assertEqual(bridge.call(ID,'seal_suggestions',{'profile':{}}),{'accepted':True,'selection':{'queries':queries}})
+    def test_suggestion_observation_requires_evidence_and_fence(self):
+        calls=[]
+        def receive(claim,data):
+            from pathlib import Path
+            calls.append(Path(data['screenshot']).read_bytes())
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),{'record_suggestions':receive})
+        data={'page_url':'https://www.mercadolibre.com.mx/','prefix':'conjunto mujer','visible_input':'conjunto mujer',
+              'state':'observed','suggestions':[{'text':'conjunto mujer falda','position':1}],'screenshot':b'image'}
+        self.assertEqual(bridge.call(ID,'record_suggestions',data),{'accepted':True})
+        self.assertEqual(calls,['fence',b'image'])
     def test_supplemental_candidate_also_requires_gallery(self):
         from optimization_worker.research_return_bridge import next_gallery_step
         candidate={'platform':'mercado-libre-mx','item_id':'MLM2','url':'https://articulo.mercadolibre.com.mx/MLM2'}
@@ -25,6 +68,25 @@ class Tests(unittest.TestCase):
             status=bridge.call(ID,'binding_status',{})['binding']
             self.assertEqual(status['card_v3']['next_page'],(1,1))
             self.assertEqual(status['card_v3']['known_products'],4)
+            bridge.close()
+    def test_home_binding_reports_durable_homepage_progress(self):
+        from unittest.mock import patch,Mock
+        from optimization_worker.research_return_bridge import build_bridge
+        claim={'task_type':'research.bestseller','lease_epoch':1}
+        plan={'strategy':'card-home-v4','queries':['a','b','c'],'result_limit':5}
+        selected=[{'text':'a','source':'category_anchor'},{'text':'b','source':'platform_suggestion','position':1},{'text':'c','source':'image_fallback'}]
+        store=type('Store',(),{'inspect':lambda self,request:{'collector_plan':{'digest':'d','plan':plan},'suggestion_selection':{'queries':selected}}})()
+        state={'queries':['a','b','c'],'next_page':(1,1),'known_products':4,'end_reason':None,
+               'progress':{'known_products':4,'completed_pages':[1,0,0],'selected_per_query':[4,None,None],'detail_count':0,'threshold_met':0,'supplemental':0,'excluded':0,'visual_required':0,'visual_done':0,'visual_threshold_passed':0,'visual_supplemental_passed':0}}
+        with patch('optimization_worker.host_session.worker_records',return_value=[{'request_id':ID,'claim':claim}]),patch('optimization_worker.host_session.fence'),patch('optimization_worker.tab_receipt_store.TabReceiptStore') as ledger,patch('optimization_worker.tab_receipt_supervisor.CardPageSupervisor'):
+            ledger.return_value.current_binding.return_value=None;ledger.return_value.card_home_state.return_value=state
+            client=Mock();bridge=build_bridge(ID,client,store,'journal')
+            status=bridge.call(ID,'binding_status',{})['binding']
+            self.assertEqual(status['card_v3']['next_page'],(1,1))
+            self.assertEqual(status['saved_query_groups'],1)
+            self.assertEqual(client.research_progress.call_args.args[2]['strategy'],'card-home-v4')
+            self.assertIsNone(client.research_progress.call_args.args[2]['end_reason'])
+            self.assertEqual(client.research_progress.call_args.args[2]['search_terms'],[{'text':r['text'],'source':r['source']} for r in selected])
             bridge.close()
     def test_card_v3_verdict_schema_reaches_fenced_handler(self):
         calls=[]

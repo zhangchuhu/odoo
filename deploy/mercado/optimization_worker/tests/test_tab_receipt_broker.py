@@ -12,17 +12,54 @@ from optimization_worker.native_collector_host import forward, write_message
 from optimization_worker.tab_receipt_broker import Broker
 
 class BrokerTest(unittest.TestCase):
-    def test_card_v3_stage_uses_only_backend_rebuilt_evidence(self):
+    def test_home_missing_tab_requests_fenced_rebind_only_for_current_tab(self):
+        import sqlite3
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=5,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor,rebind_check=lambda:True,progress_plan=({'strategy':'card-home-v4'},{}))
+            event=dict(operation='home_tab_missing',request_id='r',tab_id=123,window_id=4,session_id='c'*32,native_origin=anchor)
+            with sqlite3.connect(b.store.path) as db:db.execute('INSERT INTO confirmed_task_tabs VALUES (?,?,?,?,?,?,?,?)',('r','b'*64,3,'mercado-libre-mx','m','c'*32,4,123))
+            with patch.object(b,'anchor_guard_alive',return_value=True):
+                self.assertFalse(b.home_tab_missing(dict(event,tab_id=999)))
+                self.assertFalse(b.home_tab_missing(dict(event,native_origin='other')))
+                self.assertTrue(b.home_tab_missing(event));self.assertTrue(b.rebind_requested)
+            with sqlite3.connect(b.store.path) as db:self.assertEqual(db.execute('SELECT count(*) FROM confirmed_task_tabs').fetchone()[0],0)
+
+    def test_home_finish_requires_current_page_proof_and_never_follows_next_page(self):
+        import sqlite3
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        anchor='chrome-extension://'+'a'*32+'/'
+        challenge=dict(version=5,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor,progress_plan=({'strategy':'card-home-v4'},{}))
+            b.query_verified=True;b.requested_page=1
+            with sqlite3.connect(b.store.path) as db:
+                initialize(db);seal_query(db,('r','b'*64,3),0,'dress',fence=lambda:True)
+            event=dict(operation='card_v3_page_finish',request_id='r',tab_id=123,window_id=4,session_id='c'*32,
+                       query_index=0,query='dress',page=1,page_url='https://listado.mercadolibre.com.mx/dress',status='end_of_results',next_url=None,
+                       end_checks=3,end_evidence='empty_results',native_origin=anchor)
+            with patch.object(b,'anchor_guard_alive',return_value=True),patch.object(b,'_fresh_card_v3_proofs',return_value=[]):
+                self.assertFalse(b.finish_card_v3_page(event))
+            with patch.object(b,'anchor_guard_alive',return_value=True),patch.object(b,'_fresh_card_v3_proofs',return_value=[{'nonce':'d'*32}]):
+                self.assertFalse(b.finish_card_v3_page(dict(event,page=2)))
+                self.assertTrue(b.finish_card_v3_page(event))
+            with sqlite3.connect(b.store.path) as db:
+                self.assertEqual(db.execute('select page,status from card_v3_pages').fetchone(),(1,'home_complete'))
+
+    def test_card_v3_stage_uses_only_backend_rebuilt_evidence(self, strategy='card-visual-v3'):
         import sqlite3,json
         rid='12345678-1234-4234-8234-123456789abc'
         challenge=dict(version=4,request_id=rid,nonce='a'*32,lease_epoch=1,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='dress')
         with tempfile.TemporaryDirectory() as tmp:
-            b=Broker(Path(tmp)/'s',Path(tmp)/'db',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,watch_only=True,progress_plan=({'strategy':'card-visual-v3'},{'result_limit':5}))
+            b=Broker(Path(tmp)/'s',Path(tmp)/'db',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,watch_only=True,progress_plan=({'strategy':strategy},{'result_limit':5}))
             b.guard_alive=lambda *args:True;b.visual_v3_scope='scope';b.visual_v3_verify_photo=lambda *_:True
             event=dict(operation='stage_evidence',request_id=rid,tab_id=123,window_id=4,session_id='c'*32,evidence={'task_record_id':'rec'+rid.replace('-','')})
             evidence={'task_record_id':event['evidence']['task_record_id'],'backend':True}
             with patch('optimization_worker.visual_v3_finalize.prepare_stage',return_value=evidence):self.assertTrue(b.stage_evidence(event))
             with sqlite3.connect(b.store.path) as db:self.assertEqual(json.loads(db.execute('SELECT body FROM staged_evidence').fetchone()[0]),evidence)
+    def test_home_stage_uses_only_backend_rebuilt_evidence(self):
+        self.test_card_v3_stage_uses_only_backend_rebuilt_evidence('card-home-v4')
     def test_card_v3_progress_requires_current_origin_and_lease(self):
         from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
         import sqlite3
@@ -645,6 +682,23 @@ class ActivationSafetyTest(unittest.TestCase):
             self.assertFalse(broker.confirm_activation(dict(observed,nonce=issued['nonce'])))
 
 class CardsGateTest(unittest.TestCase):
+    def test_home_watch_activation_requires_current_tab_receipt_and_completed_home(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp);ch=dict(version=5,request_id='r',nonce='a'*32,lease_epoch=1,plan_digest='b'*64,platform='mercado-libre-mx',query_index=0,query='first')
+            b=Broker(p/'s',p/'l',ch,1,lambda:True,expected_window_id=2,expected_session='c'*32,watch_only=True)
+            event=dict(operation='activation_challenge',request_id='r',tab_id=1,window_id=2,session_id='c'*32)
+            with sqlite3.connect(p/'l') as db:
+                initialize(db);seal_query(db,('r','b'*64,1),0,'first',fence=lambda:True)
+                receipt={**ch,'tab_id':1,'window_id':2,'session_id':'c'*32}
+                db.execute('insert into accepted_receipts(request_id,body) values (?,?)',('r',json.dumps(receipt)))
+            self.assertIsNone(b.issue_activation(event))
+            with sqlite3.connect(p/'l') as db:
+                db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',('r','b'*64,1,0,1,'home_complete'))
+                db.execute('insert into card_v3_page_evidence values (?,?,?,?,?,?,?,?,?)',('r','b'*64,1,0,1,'https://listado.mercadolibre.com.mx/first','d'*32,'{}',3))
+            issued=b.issue_activation(event);self.assertEqual((issued['query_index'],issued['query']),(0,'first'))
+
     def test_watch_activation_uses_third_completed_query_and_fails_closed(self):
         import sqlite3,json
         with tempfile.TemporaryDirectory() as tmp:

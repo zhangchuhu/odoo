@@ -139,8 +139,8 @@ class ScreeningCase(TransactionCase):
         self.assertEqual(first, again)
         target = self.ui.workbench_detail(first['items'][0]['collection_id'])
         self.assertEqual(target['snapshot']['payload']['collection_config'], dict(
-            config, strategy='card-visual-v3', initial_query_count=3,
-            max_expansion_queries=6, max_pages_per_query=3, sales_known_target=100, top_per_query=30, visual_limit=30))
+            config, strategy='card-home-v4', initial_query_count=3,
+            max_expansion_queries=6, max_pages_per_query=1, sales_known_target=100, top_per_query=30, visual_limit=30))
         self.assertEqual(target['snapshot']['payload']['source_sku'],'MLM1')
         with self.assertRaises(ValidationError):
             self.ui.import_bestseller_batch(result['batch_id'], 'import-test', dict(config, min_sold=500))

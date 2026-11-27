@@ -167,6 +167,17 @@ test('card-v3 page completion requires three consistent current page observation
  assert.equal(calls.filter(x=>x.operation==='card_v3_page_finish').length,1);
 });
 
+test('home completion does not require or record a next-page link',async()=>{
+ let btn={addEventListener:(_,fn)=>btn.click=fn};const calls=[];
+ const url='https://listado.mercadolibre.com.mx/dress';
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,v)=>{calls.push(v);if(v.operation==='binding_status')return {ok:true,request_id:'req'};if(v.operation==='card_v3_page_challenge')return {challenge:{request_id:'req',query_index:0,query:'dress',page:1,tab_id:15,window_id:4,session_id:'b'.repeat(32),page_url:url}};return {ok:true}}},tabs:{get:async()=>({id:15,windowId:4,url}),sendMessage:async(_tab,v)=>v.type==='MERCADO_COLLECTOR_PAGE_BINDING'?{page_url:url,search_query:'dress'}:{page_url:url,status:'home_complete',end_evidence:'scroll_end',at_end:true}}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?btn:{textContent:''}},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ btn.click();await new Promise(r=>setImmediate(r));
+ assert.equal(await c.finishCardV3Page(0,'dress',1,true),true);
+ const sent=calls.find(x=>x.operation==='card_v3_page_finish');assert.equal(sent.status,'home_complete');assert.equal(sent.next_url,null);
+});
+
 test('card-v3 batch requires current visible card evidence and screenshot',async()=>{
  let btn={addEventListener:(_,fn)=>btn.click=fn};const calls=[];const url='https://listado.mercadolibre.com.mx/dress';
  const card={product_id:'MLM1',title:'Dress',is_ad:false,bbox:[1,2,30,40],sales_text:'+150 vendidos',sales_status:'known'};

@@ -21,6 +21,12 @@ test('browser receipt identifies each invalid field without logging values',()=>
  const args=[challenge,'b'.repeat(32),tab,{page_url:tab.url,search_query:'vestido'},12,'2026-11-19T00:00:00Z'];
  for(const [index,value,code] of [[0,{...challenge,nonce:'bad'},'receipt_nonce_invalid'],[1,'bad','receipt_session_invalid'],[4,13,'receipt_tab_mismatch'],[3,{page_url:tab.url,search_query:'otra'},'receipt_query_mismatch'],[3,{page_url:'https://evil.test/',search_query:'vestido'},'receipt_page_url_mismatch']]) {const a=args.slice();a[index]=value;assert.throws(()=>f(...a),e=>e.code===code && !e.message.includes('otra'));}
 });
+test('homepage receipt accepts the current query and rejects other platforms',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');const ctx={URL};vm.runInNewContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding_validation.js','utf8'),ctx);const f=ctx.CollectorBinding.makeReceipt;
+ const c={...challenge,version:5,query_index:8};
+ assert.equal(f(c,'b'.repeat(32),tab,{page_url:tab.url,search_query:'vestido'},12,'2026-11-19T00:00:00Z').version,5);
+ assert.throws(()=>f({...c,platform:'shein-us'},'b'.repeat(32),tab,{page_url:tab.url,search_query:'vestido'},12,'2026-11-19T00:00:00Z'));
+});
 test('URL mismatch diagnostics distinguish fragment, encoding and navigation without values',()=>{
  const vm=require('node:vm'),fs=require('node:fs');const ctx={URL};vm.runInNewContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding_validation.js','utf8'),ctx);const f=ctx.CollectorBinding.makeReceipt;
  const compare=(a,b,expected)=>assert.throws(()=>f(challenge,'b'.repeat(32),{...tab,url:a},{page_url:b,search_query:'vestido'},12,'2026-11-19T00:00:00Z'),e=>e.detailCode===expected && !e.message.includes('listado'));

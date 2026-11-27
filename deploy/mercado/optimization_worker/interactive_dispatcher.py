@@ -88,6 +88,32 @@ def research_prompt(action):
     supplied=action.get('collector_plan') or {}
     snapshot=action.get('context',{}).get('snapshot',{})
     config=snapshot.get('payload',{}).get('collection_config',{}) if isinstance(snapshot,dict) else {}
+    if supplied.get('strategy')=='card-home-v4' or (isinstance(config,dict) and config.get('strategy')=='card-home-v4'):
+        bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        return ('执行墨西哥站 card-home-v4 采集，仅记录实际观察。先阅读 '+str(bridge)+'。先读取源图并分析类别，'
+                '女装裙装套装的核心词为 conjunto mujer falda。'
+                '调用 prepare_suggestions 登记当前任务源图和品类；读取联想词无需正式采集标签绑定，'
+                '可用墨西哥站的可访问浏览器，核对搜索输入与可见建议，使用 record_suggestions 记录观察和页面证据。'
+                '如确实无法读取联想词，调用 suggestions_unavailable 记录实际原因，再使用源图回退词；验证码不能作为不可读取的理由。'
+                '不可把加载失败、验证页面或不可核验页面当作空结果；禁止保存验证码截图或输入短信验证码。'
+                '调用 seal_suggestions 生成初始词并锁定来源，然后使用这些词绑定正式计划；'
+                '通过 binding_status 查看 card_v3.next_page 和 queries，自动打开当前词的首页，'
+                '确认墨西哥站和搜索框实际内容后连接采集器并执行采集。每次采集结束重新读取状态。'
+                '完成已签封的首页后，若需要扩词，调用 home_expansion_options 获取有平台观察依据的后续词，'
+                '用 seal_expansion 提交返回的完整列表；返回空列表时提交空数组结束扩词。'
+                '只采集首页，逐批保存，按商品 ID 去重，已完成的首页不重跑。'
+                '只选择卡片明确销量大于 100 的商品，每词最多 30 个；按任务设置的门槛区分达标和补充。'
+                '最多 30 个详情合格商品完成视觉判断后排序；图库回传完成后结束。'
+                '任务标签关闭时重新打开并核对任务、站点和搜索词，技术性重连最多 3 次。'
+                '若 binding_status 返回 failure_code=browser_unavailable，调用 page_blocked 返回该代码并停止，保留检查点。'
+                '遇到验证码先保存进度；平台自动放行时核对页面后继续。'
+                '确认是可由浏览器交互的验证码后，每次交互前先调用 reserve_captcha_attempt，'
+                '提供当前 stage 和本次唯一 action_id，取得 accepted 与 attempt 后才能进行一次交互；'
+                '需短信或邮箱信息、能力不可用或两次失败时，在已核验的搜索或详情阶段先调用 arm_home_verification，'
+                '随后在绑定采集器点击“验证完成后自动恢复任务”，再调用 page_blocked 返回 captcha_required 并停止。'
+                '若观察启动失败，仍调用 page_blocked 保留检查点，由用户手动恢复。'
+                '不得记录验证码图片、验证码内容、cookie 或令牌。'
+                '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='card-visual-v3' or (isinstance(config,dict) and config.get('strategy')=='card-visual-v3'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
         return ('使用已授权的原生 Chrome 和运营中心绑定版采集器执行 card-visual-v3，仅记录真实观察。先阅读 '+str(bridge)+'。'

@@ -11,7 +11,7 @@ for (const [directory, expectedHosts] of Object.entries({
   test(`${directory} only declares its authorized browser and platform permissions`, () => {
     const file = path.join(__dirname, '..', directory, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const expected = directory === 'chrome_extension' ? [...basePermissions, 'tabs'] : basePermissions;
+    const expected = directory === 'chrome_extension' ? [...basePermissions, 'tabs', 'alarms'] : basePermissions;
     assert.deepEqual([...manifest.permissions].sort(), [...expected].sort());
     assert.deepEqual([...manifest.host_permissions].sort(), [...expectedHosts].sort());
     for (const script of manifest.content_scripts) {

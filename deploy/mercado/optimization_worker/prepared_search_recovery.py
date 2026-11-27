@@ -59,7 +59,7 @@ def read_prepared_search(ledger_path, record, claim):
     plan = binding.get('plan') or {}; queries = plan.get('queries'); platform = plan.get('platform')
     rid = record.get('request_id'); epoch = claim.get('lease_epoch')
     manual_pause = (record.get('state') == 'waiting'
-                    and record.get('reason') in ('captcha_required', 'login_required', 'page_unreadable')
+                    and record.get('reason') in ('captcha_required', 'login_required', 'page_unreadable', 'browser_unavailable')
                     and record.get('resume_state') in ('prepared', 'candidate_images_pending'))
     recoverable = (manual_pause or record.get('state') == 'prepared' or
                    (record.get('state') == 'unknown' and record.get('resume_state') == 'prepared'))
@@ -228,10 +228,10 @@ def restore_card_v3_checkpoint(ledger,store,runs,client,request_id,claim,renew):
                 or any(prior.get(k)!=claim.get(k) for k in ('id','company_id','snapshot_id','input_hash','task_type'))):continue
         try:
             record=store.inspect(rid);binding=record.get('collector_plan') or {};signed=dict(binding);digest=signed.pop('digest',None);plan=binding.get('plan') or {}
-            manual_pause=(record.get('state')=='waiting' and record.get('reason') in ('captcha_required','login_required','page_unreadable')
+            manual_pause=(record.get('state')=='waiting' and record.get('reason') in ('captcha_required','login_required','page_unreadable','browser_unavailable')
                           and record.get('resume_state')=='prepared')
             recoverable=record.get('state')=='prepared' or manual_pause or (record.get('state')=='unknown' and record.get('resume_state')=='prepared')
-            if (digest!=canonical_hash(signed) or binding.get('request_id')!=rid or plan.get('strategy')!='card-visual-v3'
+            if (digest!=canonical_hash(signed) or binding.get('request_id')!=rid or plan.get('strategy') not in ('card-visual-v3','card-home-v4')
                     or any(binding.get(k)!=claim.get(k) for k in ('company_id','snapshot_id','input_hash'))
                     or record.get('task_type')!='research.bestseller' or record.get('payload')!=claim.get('payload')
                     or not recoverable or (record.get('retired') and record.get('retirement_reason')!='original_worker_lease_inactive')
@@ -241,7 +241,7 @@ def restore_card_v3_checkpoint(ledger,store,runs,client,request_id,claim,renew):
             with closing(sqlite3.connect(ledger.path)) as db:
                 from .visual_candidate import VisualCandidate
                 review=VisualCandidate(ledger.path,scope,plan,None,prior)
-                validate_source_receipts(db,scope,verify_photo=lambda filename,sha:review.photo(store.files,filename,sha))
+                validate_source_receipts(db,scope,verify_photo=lambda filename,sha:review.photo(store.files,filename,sha),homepage_only=plan.get('strategy')=='card-home-v4')
                 count=sum(db.execute('SELECT count(*) FROM '+table+' WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()[0]
                           for table in ('card_v3_pages','card_v3_batches','card_v3_details'))
             if count:candidates.append((count,prior['lease_epoch'],rid,digest,plan))
@@ -251,6 +251,12 @@ def restore_card_v3_checkpoint(ledger,store,runs,client,request_id,claim,renew):
         reply=client.request('POST','/internal/meli-optimization/research-search-checkpoint',dict(params,lease_token=claim['lease_token']))
         if reply=={'allowed':False}:continue
         if reply!=dict(params,allowed=True,snapshot_id=claim['snapshot_id'],input_hash=claim['input_hash']):raise ValueError('Invalid checkpoint authorization receipt')
+        if plan.get('strategy')=='card-home-v4':
+            from .home_suggestion_bootstrap import restore_home_suggestions
+            old_claim=next(run['claim'] for run in runs if run.get('request_id')==rid and run.get('claim',{}).get('lease_epoch')==epoch)
+            with closing(sqlite3.connect(ledger.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE')
+                restore_home_suggestions(store,rid,request_id,old_claim,claim,db,plan,authorize=lambda:True,fence=lambda:(renew() or True))
         digest=bind_plan(store,request_id,claim,plan,recovery=True);plan_hash=canonical_hash(plan)
         with closing(sqlite3.connect(ledger.path)) as db,db:
             db.execute('BEGIN IMMEDIATE')

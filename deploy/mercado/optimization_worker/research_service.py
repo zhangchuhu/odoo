@@ -313,7 +313,7 @@ def continue_scoped_startup(client, task_id, store, journal, dispatcher):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('mode',choices=('once','loop'));parser.add_argument('--task-id',type=int);args=parser.parse_args()
     try:
-        from .client import Client
+        from .client import Client, APIError
         from .host_session import SessionStore, fence, worker_records
         from .cooperative_research_host import ClaimGate, GatedClient, CooperativeResearchHost
         from .host_session import SessionProvider
@@ -363,12 +363,16 @@ def main():
             c = records[0]['claim']
             key = (request,bound.get('digest'),c['lease_epoch'])
             receipts=TabReceiptStore(str(ledger));staged=plan.get('strategy')=='staged-v1'
-            if plan.get('strategy')=='card-visual-v3':
+            if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
                 import sqlite3
                 from contextlib import closing
                 from .visual_candidate import VisualCandidate
-                state=receipts.card_v3_state(*key,queries,lambda:(fence(client,journal,request) or True))
-                groups=receipts.resume_index(*key[:2],state['queries'],key[2],card_v3=True)
+                if plan.get('strategy')=='card-home-v4':
+                    state=receipts.card_home_state(*key,queries,lambda:(fence(client,journal,request) or True))
+                    groups=sum(state['progress']['completed_pages'])
+                else:
+                    state=receipts.card_v3_state(*key,queries,lambda:(fence(client,journal,request) or True))
+                    groups=receipts.resume_index(*key[:2],state['queries'],key[2],card_v3=True)
                 with closing(sqlite3.connect(str(ledger))) as db:
                     steps=sum(db.execute('SELECT count(*) FROM '+table+' WHERE request_id=? AND plan_digest=? AND lease_epoch=?',key).fetchone()[0]
                               for table in ('card_v3_batches','card_v3_pages','card_v3_details','card_v3_visual_evidence'))
@@ -395,7 +399,12 @@ def main():
         dispatcher=Dispatcher(dispatch_journal,store,before=lambda request:fence(client,journal,request), progress_probe=receipt_progress,
                               bridge_factory=lambda request:build_bridge(request,client,store,journal),config=config,host_probe=ready)
         from .archived_recovery import resume_waiting_gallery
+        from .home_verified_recovery import resume_verified_waiting
         def resume_gallery(locked_journal):
+            try:
+                resume_verified_waiting(locked_journal, store, client, Path(journal).parent/'collector-bindings.sqlite', args.task_id)
+            except (APIError, ValueError, OSError, sqlite3.Error):
+                print('Verified browser recovery could not be completed; task remains waiting.', file=sys.stderr)
             return resume_waiting_gallery(locked_journal,store,client,dispatcher,args.task_id)
         if client.research_ledger_enabled:
             worker.resume_waiting = resume_gallery

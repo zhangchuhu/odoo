@@ -99,6 +99,22 @@ def handle_progress(broker, event):
     with closing(sqlite3.connect(broker.store.path)) as db, db:
         db.execute('BEGIN IMMEDIATE' if op in ('checkpoint_detail','seal_expansion','next_candidate') else 'BEGIN')
         where = ' WHERE request_id=? AND plan_digest=? AND lease_epoch=?'
+        if plan.get('strategy')=='card-home-v4' and op=='collector_progress':
+            from .card_sales_v3_checkpoints import initialize
+            from .home_collection_policy import next_home_query
+            initialize(db)
+            declared=[row[0] for row in db.execute('SELECT query FROM card_v3_queries'+where+' ORDER BY query_index',key)]
+            index=event['query_index']
+            if type(index) is not int or not 0<=index<len(declared):raise CollectorProgressError('checkpoint_index_invalid','无效的搜索组编号')
+            step=next_home_query(db,key)
+            accessible=bool(not broker.watch_only and broker.query_verified and broker.challenge['query_index']==index and step==(index,1))
+            batches=[]
+            if accessible:
+                batches=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_batches'+where+' AND query_index=? AND page=1 ORDER BY batch_index',(*key,index))]
+            return dict(ok=True,task=task,platform=platform,strategy='card-home-v4',queries=declared,result_limit=config['result_limit'],
+                        query_index=index,page=1 if step==(index,1) else None,next_page=step,page_action='collect_page' if step else 'idle',
+                        acknowledged=accessible,cards=[card for batch in batches for card in batch] if accessible else None,
+                        next_batch_index=len(batches),binding=binding)
         if plan.get('strategy')=='card-visual-v3' and op=='collector_progress':
             from .card_sales_v3_checkpoints import initialize,next_page
             initialize(db)
@@ -173,7 +189,7 @@ def handle_progress(broker, event):
             return response
         if not broker.watch_only or not broker.guard_alive(broker.session):
             raise CollectorProgressError('checkpoint_guard_pending', '三组卡片及当前标签须先全部确认')
-        if plan.get('strategy')=='card-visual-v3' and op in ('next_candidate','checkpoint_detail'):
+        if plan.get('strategy') in ('card-visual-v3','card-home-v4') and op in ('next_candidate','checkpoint_detail'):
             from .card_sales_v3_pipeline import record_detail
             from .collector_import import _DETAIL
             queue=[(row[0],json.loads(row[1])) for row in db.execute('SELECT product_id,body FROM card_v3_queue'+where+' ORDER BY ordinal',key)]
@@ -182,7 +198,10 @@ def handle_progress(broker, event):
             eligible=[row for row in details if row['status']!='exclude']
             visual_done=db.execute('SELECT count(*) FROM card_v3_visual_evidence'+where,key).fetchone()[0]
             if not frozen and op=='next_candidate':
-                from .card_sales_v3_checkpoints import next_page
+                if plan.get('strategy')=='card-home-v4':
+                    from .home_collection_policy import next_home_query as next_page
+                else:
+                    from .card_sales_v3_checkpoints import next_page
                 return dict(ok=True,task=task,candidate=None,stage='search',action='search',requires_expansion=next_page(db,key) is None,
                             **{k:event[k] for k in ('request_id','window_id','session_id','tab_id')})
             if not frozen or len(details)>len(queue) or visual_done>len(eligible):raise CollectorProgressError('checkpoint_cards_missing','候选队列尚未冻结')
@@ -228,6 +247,28 @@ def handle_progress(broker, event):
                                 requires_expansion=False,**{k:event[k] for k in ('request_id','window_id','session_id','tab_id')})
                 raise CollectorProgressError('checkpoint_guard_pending','请先重新核验已恢复的搜索组')
         if op == 'seal_expansion':
+            if plan.get('strategy')=='card-home-v4':
+                from .card_sales_v3_checkpoints import known_count,seal_query
+                from .card_sales_v3_pipeline import freeze_queue
+                from .home_collection_policy import next_home_query,record_end_reason
+                queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries'+where+' ORDER BY query_index',key)]
+                additions=event['queries'];lookup=getattr(broker,'home_expansion_candidates',None)
+                if (next_home_query(db,key) is not None or known_count(db,key)>=100 or len(queries)>=9
+                        or not isinstance(additions,list) or len(additions)>3 or len(queries)+len(additions)>9
+                        or not callable(lookup)):
+                    raise CollectorProgressError('expansion_plan_invalid','当前不能扩展搜索词')
+                try:
+                    available=lookup(queries)
+                    if not isinstance(available,list) or additions!=available[:min(3,9-len(queries))]:
+                        raise ValueError('扩展搜索词缺少平台观察依据或顺序不一致')
+                    if additions:
+                        for offset,q in enumerate(additions):seal_query(db,key,len(queries)+offset,q,fence=broker.fence)
+                    else:
+                        freeze_queue(db,key,plan_exhausted=True,fence=broker.fence,homepage_only=True)
+                        record_end_reason(db,key,'terms_exhausted',fence=broker.fence)
+                    if not broker.anchor_guard_alive() or broker.fence() is not True:raise ValueError('Browser or lease lost')
+                except ValueError as error:raise CollectorProgressError('expansion_plan_invalid',str(error)) from error
+                return {'ok':True,'queries':queries+additions,'finished':not additions}
             if plan.get('strategy')=='card-visual-v3':
                 from .card_sales_v3_checkpoints import next_page,known_count,seal_query
                 from .card_sales_v3_pipeline import freeze_queue
@@ -503,7 +544,7 @@ def checked_detail_identity(broker, url, *, activation_started=None):
         pid, _ = _identity(url, plan['platform'])
         with closing(sqlite3.connect(broker.store.path)) as db:
             db.execute('BEGIN')
-            if plan.get('strategy')=='card-visual-v3':
+            if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
                 if not db.execute('SELECT 1 FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',key).fetchone():return None
                 queue=[row[0] for row in db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',key)]
                 details=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',key)]

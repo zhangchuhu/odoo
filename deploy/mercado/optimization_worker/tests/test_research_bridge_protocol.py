@@ -47,6 +47,18 @@ class Tests(unittest.TestCase):
             self.assertEqual(json.loads(handle_message(Bridge(),msg)),{'accepted':False})
 
 class PlanFeedbackTests(unittest.TestCase):
+    def test_v4_plan_can_use_observed_queries_distinct_from_image_seeds(self):
+        import re
+        from pathlib import Path
+        from optimization_worker.research_bridge_protocol import _valid_plan_input
+        doc=(Path(__file__).resolve().parents[1]/'RESEARCH_BRIDGE.md').read_text()
+        plan=json.loads(re.findall(r'```json\n(.*?)\n```',doc,re.S)[-1])
+        plan['strategy']='card-home-v4'
+        plan['design_profile']={'primary':{'category':plan['category'],'components':None,'length':'long','shoulders':'regular',
+            'structure':'two_piece','silhouette':'a_line','fit':None,'sleeve_length':None},'secondary':['lace'],'styles':['boho'],'occasions':[]}
+        plan['queries']=[plan['visual_profile']['query_seeds'][0],'vestido mujer encaje','vestido mujer fiesta']
+        self.assertTrue(_valid_plan_input(plan))
+        self.assertFalse(_valid_plan_input(dict(plan,strategy='card-visual-v3')))
     def test_visual_v2_plan_accepts_bound_design_profile(self):
         import re
         from pathlib import Path

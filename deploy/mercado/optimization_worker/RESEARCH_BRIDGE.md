@@ -2,6 +2,54 @@
 
 `{"operation":"binding_status","data":{}}` returns the current request's bound tab and window, plan match, completed query count, ordered queries, and live-guard status. This is a fenced read, not permission to switch tabs; the collector displays its own tab and match state. A tab ID alone does not establish current browser liveness.
 
+## Homepage research (`card-home-v4`)
+
+This section applies only when the snapshot explicitly selects `card-home-v4`.
+Read the task source image first. Before binding the search plan, call
+`prepare_suggestions` with `source_artifact_id`, `viewed_source_sha256`,
+`category`, and `anchor`. Use an accessible Mercado México browser to read the
+actual search input and visible suggestions. Call `record_suggestions` with
+`page_url`, `prefix`, `visible_input`, `state`, `suggestions`, and `screenshot`;
+each suggestion has `text` and its one-based visible `position`. The transport
+encodes the screenshot as base64. Use `observed` only for an actual visible
+nonempty list; use `unavailable` or `unverified` when it cannot be confirmed.
+Do not save a verification page or send a CAPTCHA image. If no screenshot can
+be captured because the browser or page is unavailable, report
+`suggestions_unavailable` with `reason` equal to `browser_unavailable`,
+`page_unavailable`, or `suggestions_unavailable`. This is a host report, not
+an observed empty list. A CAPTCHA is not an unavailable-suggestions report.
+
+Call `seal_suggestions` with the source `visual_profile`; its response contains
+the initial three query texts and their source labels. Submit `plan` using those
+texts in order, `strategy: "card-home-v4"`, and the `design_profile` schema
+below. For this strategy the second and third actual query texts can differ from
+the source profile's image-derived `query_seeds`. The first query is the same
+category anchor. Platform suggestions are not a claim of search popularity.
+
+Use `binding_status.card_v3.next_page` and `queries` for the next task-owned
+search. Search and scroll only the first result page. When all selected home
+pages are complete and expansion is needed, call `home_expansion_options`
+with empty data; send its returned `queries` unchanged to `seal_expansion`.
+An empty returned list means no further recorded related suggestion is
+available. Never navigate a next-page link. The host freezes a queue from
+clearly attributable card sales over 100, verifies detail sales, and separates
+the user's configured threshold from supplemental candidates.
+
+For an interactive CAPTCHA, first wait briefly for noninteractive completion.
+Before each permitted interaction, call `reserve_captcha_attempt` with `stage`
+(`suggestions`, `search`, `detail`, `visual`, or `gallery`) and a unique
+`action_id`. A confirmed response returns attempt 1 or 2; repeating an ID is
+idempotent. The task-wide limit is two attempts, including across stages and
+leases. Never submit or log verification content or screenshots. If the
+challenge requests a message/email code, the browser is unavailable, or the
+attempts are exhausted, call `arm_home_verification` with stage `search` or
+`detail` when the current page is already bound, then click **验证完成后自动恢复任务**
+in the collector, call `page_blocked` with `captcha_required`, and stop. If the
+watch cannot be armed, preserve the wait and use the manual recovery entry.
+If `binding_status.failure_code` is `browser_unavailable`, report that code
+through `page_blocked` and stop. Page identity must be checked after any
+successful verification.
+
 ## Mercado Libre candidate photos and visual decisions
 
 For `visual-v2`, the plan contains the fields in the plan example below plus

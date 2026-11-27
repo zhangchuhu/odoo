@@ -27,6 +27,16 @@
     await CollectorTrace.render(document.getElementById('binding-trace'));
   }
   let anchorAttempts=0, landingStarted=0;
+  const verificationWatch=document.getElementById('home-watch-verification');
+  if(typeof verificationWatch?.addEventListener === 'function')verificationWatch.addEventListener('click',async()=>{
+    try {
+      if(!selected || !enabled || !requestId)throw Error('请先连接当前任务');
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const result=await chrome.runtime.sendMessage({type:'home_verification_watch_start',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session});
+      if(result?.ok!==true)throw Error('验证观察未准备好');
+      show('已开启验证观察，页面恢复后将自动继续任务');
+    } catch(error) { show(error?.message || '验证观察启动失败'); }
+  });
   async function restoreGuard(state,tab) {
     if (state?.anchor_required === true && state.anchor_active !== true) throw Error('anchor_rebind_pending');
     if (state?.ok === true && state.request_id === requestId && state.matches === true &&
@@ -151,7 +161,7 @@
       await trace(stage,'failed',error);
       if (/^(?:anchor_|window_prepare_failed|session_unavailable)/.test(error?.message || '')) {
         selected=false;
-        const transient=['anchor_recovery_timeout','anchor_recovery_unavailable','anchor_challenge_failed','anchor_guard_ready_failed','anchor_rebind_pending','anchor_select_pending'].includes(error.message);
+        const transient=['anchor_recovery_timeout','anchor_recovery_unavailable','anchor_broker_rotating','anchor_challenge_failed','anchor_guard_ready_failed','anchor_rebind_pending','anchor_select_pending'].includes(error.message);
         enabled=transient && ++anchorAttempts<3;
         show('专用窗口恢复未完成（'+error.message+'）'+(enabled?'，正在等待后台重新确认':'，请核对锚点后重新连接当前任务'));return;
       }
@@ -264,17 +274,17 @@
       return reply?.ok===true;
     } catch (_) {return false;}
   };
-  globalThis.finishCardV3Page=async(queryIndex,query,page)=>{
+  globalThis.finishCardV3Page=async(queryIndex,query,page,home=false)=>{
     if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
        typeof query!=='string' || !query.trim() || !Number.isInteger(page) || page<1 || page>3)return false;
     try {
       if(await globalThis.confirmCardV3Page(queryIndex,query,page)!==true)return false;
       const tab=await chrome.tabs.get(target),session=await sessionId(),observations=[];
       for(let i=0;i<3;i++){
-        const info=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_INFO',page});
+        const info=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_INFO',page,home});
         const current=await chrome.tabs.get(target);
         if(!info || info.error || info.at_end!==true || info.page_url!==tab.url || current.url!==tab.url ||
-           !['has_next','end_of_results','page_limit'].includes(info.status))return false;
+           !(home ? ['home_complete','end_of_results'] : ['has_next','end_of_results','page_limit']).includes(info.status))return false;
         observations.push(info);
       }
       const first=observations[0];

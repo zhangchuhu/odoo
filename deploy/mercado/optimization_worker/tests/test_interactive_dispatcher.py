@@ -231,6 +231,14 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('新建任务标签通常先显示平台首页',prompt)
         self.assertIn('页码为 0 时',prompt)
         self.assertIn('不得仅因尚未打开搜索页而报告 page_unreadable',prompt)
+    def test_v4_suggestions_are_read_before_formal_task_tab_binding(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','context':{'snapshot':{'payload':{'collection_config':{'strategy':'card-home-v4'}}}}})
+        self.assertIn('无需正式采集标签绑定',prompt)
+        self.assertIn('prepare_suggestions',prompt)
+        self.assertIn('record_suggestions',prompt)
+        self.assertIn('seal_suggestions',prompt)
+        self.assertIn('只采集首页',prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]

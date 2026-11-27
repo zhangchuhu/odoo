@@ -28,16 +28,20 @@ def _fence(fence):
 def _body(value):return json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
 
 
-def freeze_queue(db,scope,*,plan_exhausted,fence):
+def freeze_queue(db,scope,*,plan_exhausted,fence,homepage_only=False):
     _fence(fence)
-    if type(plan_exhausted) is not bool:raise ValueError('Plan status required')
+    if type(plan_exhausted) is not bool or type(homepage_only) is not bool:raise ValueError('Plan status required')
     existing=db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope).fetchall()
     frozen=db.execute('SELECT 1 FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
     if frozen:return [row[0] for row in existing]
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if len(queries)<3 or len(queries)>9 or [x[0] for x in queries]!=list(range(len(queries))):raise ValueError('Invalid search plan')
     if known_count(db,scope)<100 and len(queries)<9 and not plan_exhausted:raise ValueError('Search expansion required')
-    merged=merge_candidates([(q,query_candidates(db,scope,i)) for i,q in queries])
+    if homepage_only:
+        from .home_collection_policy import home_query_candidates
+        reader=home_query_candidates
+    else:reader=query_candidates
+    merged=merge_candidates([(q,reader(db,scope,i)) for i,q in queries])
     db.execute('SAVEPOINT card_v3_freeze')
     try:
         _fence(fence)
@@ -150,15 +154,20 @@ def selection(db,scope,result_limit):
             'review':[r for r in ranked if r['level']=='review']}
 
 
-def progress(db,scope):
+def progress(db,scope,*,homepage_only=False):
     """Derive counts from confirmed checkpoints, never from browser claims."""
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if [index for index,_ in queries]!=list(range(len(queries))):raise ValueError('Invalid query history')
+    if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
+    if homepage_only:
+        from .home_collection_policy import home_query_candidates
+        reader=home_query_candidates
+    else:reader=query_candidates
     selected=[];pages=[]
     for index,_ in queries:
         history=db.execute('SELECT page,status FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? ORDER BY page',(*scope,index)).fetchall()
         pages.append(len(history))
-        try:selected.append(len(query_candidates(db,scope,index)))
+        try:selected.append(len(reader(db,scope,index)))
         except ValueError:selected.append(None)
     details=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope)]
     statuses=[item['status'] for item in details]

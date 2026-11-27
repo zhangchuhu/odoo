@@ -89,7 +89,7 @@ def _recover_archived(journal, store, client, request_id, on_verified=None):
         raise ValueError('Original evidence receipt does not match')
     params = plan['plan']; config = plan['collection_config']; result = pending['result']
     observed = result['evidence'][0]['observed_at']
-    if params.get('strategy') == 'card-visual-v3':
+    if params.get('strategy') in ('card-visual-v3','card-home-v4'):
         from .visual_candidate import VisualCandidate
         from .visual_v3_finalize import build_result,snapshot_evidence
         from contextlib import closing
@@ -122,8 +122,8 @@ def _recover_archived(journal, store, client, request_id, on_verified=None):
             params['category'], observed, result_limit=config['result_limit'], min_sold=config['min_sold'],
             min_reviews=config['min_reviews'], min_rating=config['min_rating'])
     from .research_result_candidates import all_candidates
-    verified_items=all_candidates(verified) if params.get('strategy')=='card-visual-v3' else verified['candidates']
-    result_items=all_candidates(result) if params.get('strategy')=='card-visual-v3' else result['candidates']
+    verified_items=all_candidates(verified) if params.get('strategy') in ('card-visual-v3','card-home-v4') else verified['candidates']
+    result_items=all_candidates(result) if params.get('strategy') in ('card-visual-v3','card-home-v4') else result['candidates']
     if verified['status'] != result['status'] or len(verified_items) != len(result_items):
         raise ValueError('Candidate results do not match original evidence')
     if len(verified['candidates'])!=len(result['candidates']):raise ValueError('Candidate sales tiers changed')

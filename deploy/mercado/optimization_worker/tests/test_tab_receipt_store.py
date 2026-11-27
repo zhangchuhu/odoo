@@ -18,6 +18,10 @@ class TabReceiptStoreTest(unittest.TestCase):
 
     def tearDown(self): self.tmp.cleanup()
 
+    def test_ledger_is_private(self):
+        import os,stat
+        self.assertEqual(stat.S_IMODE(os.stat(self.store.path).st_mode),0o600)
+
     def test_single_use_receipt_and_stable_tab(self):
         self.store.issue(self.request)
         self.store.accept(self.receipt, lambda: True)
@@ -41,6 +45,40 @@ class TabReceiptStoreTest(unittest.TestCase):
         self.store.accept(dict(self.receipt, **req), lambda: True)
         self.assertEqual(self.store.resume_index(*scope[:2], ['vestido', 'otro', 'tercero'], 1, card_v3=True), 1)
         with self.assertRaises(ValueError): self.store.issue(dict(req, nonce='d'*32, platform='shein-us'))
+
+    def test_home_receipt_allows_new_tab_for_current_unfinished_query_only(self):
+        import sqlite3
+        scope=('r1','b'*64,1);self.store.card_home_state(*scope,['vestido','otro','tercero'],lambda:True)
+        req=dict(self.request,version=5);self.store.issue(req);self.store.accept(dict(self.receipt,**req),lambda:True)
+        with sqlite3.connect(self.store.path) as db:db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*scope,0,1,'home_complete'))
+        next_req=dict(req,nonce='d'*32,query_index=1,query='otro');self.store.issue(next_req)
+        receipt=dict(self.receipt,**next_req,tab_id=124,collector_tab_id=124,url='https://listado.mercadolibre.com.mx/otro')
+        with self.assertRaises(ValueError):self.store.accept(receipt,lambda:True,reconcile=lambda:False)
+        self.store.accept(receipt,lambda:True,reconcile=lambda:True)
+        later=dict(req,nonce='e'*32,query_index=2,query='tercero');self.store.issue(later)
+        with self.assertRaises(ValueError):self.store.accept(dict(receipt,**later),lambda:True,reconcile=lambda:True)
+
+    def test_home_receipt_issues_proof_only_for_first_page(self):
+        import sqlite3
+        from optimization_worker.card_sales_v3_receipts import PageReceiptGuard
+        scope=('r1','b'*64,1);self.store.card_home_state(*scope,['vestido','otro','tercero'],lambda:True)
+        req=dict(self.request,version=5);receipt=dict(self.receipt,**req)
+        self.store.issue(req);self.store.accept(receipt,lambda:True)
+        with sqlite3.connect(self.store.path) as db:
+            guard=PageReceiptGuard(db)
+            self.assertEqual(guard.issue_for_page(receipt,1,fence=lambda:True)['page'],1)
+            with self.assertRaises(ValueError):guard.issue_for_page(receipt,2,fence=lambda:True)
+
+    def test_home_completed_search_can_rebind_last_query_for_detail_phase(self):
+        import sqlite3
+        scope=('r1','b'*64,1);queries=['vestido','otro','tercero'];self.store.card_home_state(*scope,queries,lambda:True)
+        with sqlite3.connect(self.store.path) as db:
+            for i in range(3):db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*scope,i,1,'home_complete'))
+        req=dict(self.request,version=5,query_index=2,query='tercero');self.store.issue(req)
+        receipt=dict(self.receipt,**req,url='https://listado.mercadolibre.com.mx/tercero')
+        self.store.accept(receipt,lambda:True)
+        wrong=dict(req,nonce='d'*32,query_index=0,query='vestido');self.store.issue(wrong)
+        with self.assertRaises(ValueError):self.store.accept(dict(receipt,**wrong),lambda:True)
 
     def test_card_v3_state_seals_initial_queries_and_returns_next_page(self):
         scope=('r1','b'*64,1);queries=['vestido','otro','tercero']

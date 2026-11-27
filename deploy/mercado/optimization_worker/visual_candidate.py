@@ -43,7 +43,7 @@ class VisualCandidate:
         if db is None:
             with closing(self.open()) as existing:
                 return self.current(existing)
-        if self.plan.get('strategy') == 'card-visual-v3':
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
             rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',self.key)]
             eligible=[row for row in rows if row.get('status') in ('threshold_met','supplemental')]
             ordinal=db.execute('SELECT count(*) FROM card_v3_visual_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=?',self.key).fetchone()[0]
@@ -139,7 +139,7 @@ class VisualCandidate:
     def valid_detail(self, detail, identity):
         try:
             product, _ = _identity(detail['detail_url'],self.plan['platform'])
-            if self.plan.get('strategy')=='card-visual-v3':
+            if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
                 from .card_sales_v3 import parse_sales
                 sold=parse_sales(detail['sold_display']);threshold_ok=sold is not None and sold>100
             else:
@@ -201,7 +201,7 @@ class VisualCandidate:
         return None
 
     def submit(self, data, store, fence):
-        if self.plan.get('strategy') == 'card-visual-v3':
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
             return self.submit_card_v3(data,store,fence)
         if self.plan.get('strategy') == 'visual-v2':
             return self.submit_visual_v2(data,store,fence)

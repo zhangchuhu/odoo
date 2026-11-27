@@ -6,6 +6,52 @@ from optimization_worker.domain import canonical_hash
 from optimization_worker.tab_receipt_factory import build_native_broker
 
 class FactoryTest(unittest.TestCase):
+    def test_home_initial_query_uses_page_receipt_protocol(self):
+        import sqlite3
+        claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}
+        plan={'platform':'mercado-libre-mx','queries':['vestido uno','vestido dos','vestido tres'],'strategy':'card-home-v4'}
+        signed={'request_id':'req','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'plan':plan};signed['digest']=canonical_hash(signed)
+        class Store:
+            def inspect(self,request):return {'task_type':'research.bestseller','state':'prepared','collector_plan':signed}
+        with tempfile.TemporaryDirectory() as tmp,patch('optimization_worker.tab_receipt_factory.worker_records',return_value=[{'request_id':'req','claim':claim}]),patch('optimization_worker.tab_receipt_factory.fence'):
+            ledger=Path(tmp)/'db';broker=build_native_broker(Path(tmp)/'s',ledger,'req',0,Store(),object(),'journal')
+            self.assertEqual(broker.challenge['version'],5)
+            with sqlite3.connect(ledger) as db:self.assertEqual([r[0] for r in db.execute('SELECT query FROM card_v3_queries ORDER BY query_index')],plan['queries'])
+
+    def test_home_watch_accepts_completed_homepages_without_replaying_tab_receipts(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        from optimization_worker.tab_receipt_store import TabReceiptStore
+        claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}
+        plan={'platform':'mercado-libre-mx','queries':['one','two','three'],'strategy':'card-home-v4'}
+        signed={'request_id':'req','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'plan':plan};signed['digest']=canonical_hash(signed)
+        class Store:
+            def inspect(self,request):return {'task_type':'research.bestseller','state':'prepared','collector_plan':signed}
+        with tempfile.TemporaryDirectory() as tmp,patch('optimization_worker.tab_receipt_factory.worker_records',return_value=[{'request_id':'req','claim':claim}]),patch('optimization_worker.tab_receipt_factory.fence'):
+            ledger=Path(tmp)/'db';TabReceiptStore(str(ledger));scope=('req',signed['digest'],4)
+            binding={'tab_id':8,'window_id':9,'session_id':'a'*32,'platform':'mercado-libre-mx','plan_digest':signed['digest']}
+            with sqlite3.connect(ledger) as db:
+                initialize(db);db.execute('INSERT INTO bindings VALUES (?,?)',('req',json.dumps(binding)))
+                for i,q in enumerate(plan['queries']):
+                    seal_query(db,scope,i,q,fence=lambda:True)
+                    db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*scope,i,1,'home_complete'))
+                    db.execute('INSERT INTO card_v3_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',(*scope,i,1,'https://listado.mercadolibre.com.mx/'+q,'d'*32,'{"no_results":true}',3))
+            self.assertTrue(build_native_broker(Path(tmp)/'s',ledger,'req',0,Store(),object(),'journal',watch_only=True).watch_only)
+
+    def test_home_resume_can_start_next_query_without_old_tab_binding(self):
+        import sqlite3
+        from optimization_worker.tab_receipt_store import TabReceiptStore
+        claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}
+        plan={'platform':'mercado-libre-mx','queries':['one','two','three'],'strategy':'card-home-v4'}
+        signed={'request_id':'req','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'plan':plan};signed['digest']=canonical_hash(signed)
+        class Store:
+            def inspect(self,request):return {'task_type':'research.bestseller','state':'prepared','collector_plan':signed}
+        with tempfile.TemporaryDirectory() as tmp,patch('optimization_worker.tab_receipt_factory.worker_records',return_value=[{'request_id':'req','claim':claim}]),patch('optimization_worker.tab_receipt_factory.fence'):
+            ledger=Path(tmp)/'db';scope=('req',signed['digest'],4);store=TabReceiptStore(str(ledger));store.card_home_state(*scope,plan['queries'],lambda:True)
+            with sqlite3.connect(ledger) as db:db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*scope,0,1,'home_complete'))
+            broker=build_native_broker(Path(tmp)/'s',ledger,'req',1,Store(),object(),'journal')
+            self.assertEqual((broker.challenge['version'],broker.challenge['query']), (5,'two'))
+
     def test_card_v3_initial_query_is_sealed_and_uses_version_four(self):
         import sqlite3
         claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}

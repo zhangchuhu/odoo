@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "permissions": [
     "activeTab",
+    "alarms",
     "downloads",
     "nativeMessaging",
     "storage",
@@ -28,6 +29,7 @@
       ],
       "js": [
         "gallery_visible.js",
+        "home_suggestions.js",
         "content.js"
       ],
       "run_at": "document_idle"

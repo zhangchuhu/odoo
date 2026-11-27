@@ -417,9 +417,20 @@
         else {window.scrollTo({top:0,left:0,behavior:'instant'});sendResponse({ok:true});}
       } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_SEARCH") {
         sendResponse(extractSearch(message.query, message.prior || [], message.limit, message.strict_scope === true, message.with_sales === true));
+      } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_SUGGESTIONS") {
+        const blocked=detectBlockingWall();
+        const input=document.querySelector('input[name="as_word"], input[name="q"], input.nav-search-input');
+        sendResponse(blocked ? {state:'blocked',suggestions:[]} :
+          globalThis.HomeSuggestions.extractSuggestions(document,input,message.prefix,isVisible));
       } else if (message?.type === "MERCADO_COLLECTOR_PAGE_INFO") {
         const blockingError=detectBlockingWall();
-        sendResponse(blockingError ? {error:blockingError} : {...cardPageInfo(document,message.page),page_url:location.href,
+        const scopes=document.querySelectorAll('.ui-search-layout');
+        const empty=cardPageInfo(document,message.page).end_evidence==='empty_results';
+        const pageInfo=message.home===true && message.page===1
+          ? empty ? {status:'end_of_results',end_evidence:'empty_results'}
+            : scopes.length===1 ? {status:'home_complete',end_evidence:'scroll_end'} : {status:'unverified'}
+          : cardPageInfo(document,message.page);
+        sendResponse(blockingError ? {error:blockingError} : {...pageInfo,page_url:location.href,
           at_end:Math.ceil(scrollY+innerHeight)>=document.documentElement.scrollHeight});
       } else if (message?.type === "MERCADO_COLLECTOR_SCROLL") {
         sendResponse(scrollPage());

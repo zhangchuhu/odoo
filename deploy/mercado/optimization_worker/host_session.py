@@ -80,6 +80,7 @@ class SessionBlocked(Exception):
         'captcha_required': '采集页面要求安全验证。请完成验证后恢复原任务。',
         'login_required': '采集页面要求登录。请在专用窗口登录后恢复原任务。',
         'page_unreadable': '采集页面无法读取。请检查当前任务标签后恢复原任务。',
+        'browser_unavailable': '采集浏览器连接未能恢复。请检查浏览器后恢复原任务。',
     }
 
     def __init__(self, code='window_registration_failed'):
