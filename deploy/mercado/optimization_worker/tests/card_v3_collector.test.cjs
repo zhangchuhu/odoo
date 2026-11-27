@@ -1,6 +1,14 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {collectPage}=require('../chrome_extension/card_v3_collector.js');
+test('gallery fragment changes preserve detail identity while path and query changes do not',()=>{
+ const {sameDetailPage}=require('../chrome_extension/card_v3_collector.js');
+ const before='https://articulo.mercadolibre.com.mx/MLM-2270575061-item-_JM?searchVariation=187370110803#sid=search';
+ assert.equal(sameDetailPage(before,before+'&gid=1&pid=1'),true);
+ assert.equal(sameDetailPage(before,before.replace('187370110803','187370110804')),false);
+ assert.equal(sameDetailPage(before,before.replace('2270575061','2270575062')),false);
+ assert.equal(sameDetailPage(before,'javascript:alert(1)'),false);
+});
 
 test('resumes durable page batches and saves only new observations before finishing',async()=>{
  const prior=[{product_id:'MLM1',rank:1}],second={product_id:'MLM2',rank:2};let scans=0;const saved=[];

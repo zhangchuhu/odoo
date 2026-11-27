@@ -1,4 +1,11 @@
 'use strict';
+function sameDetailPage(left,right){
+  try {
+    const a=new URL(left), b=new URL(right);
+    if(a.protocol!=='https:' || b.protocol!=='https:')return false;
+    a.hash='';b.hash='';return a.href===b.href;
+  } catch (_) {return false;}
+}
 // One page only. Navigation and task ownership remain under the native broker.
 async function collectPage({queryIndex,query,page,prior,nextBatch,send,save,finish,delay,onProgress=()=>{}}){
   if(!Number.isInteger(queryIndex)||queryIndex<0||queryIndex>8||typeof query!=='string'||!query.trim()||
@@ -30,5 +37,5 @@ async function collectPage({queryIndex,query,page,prior,nextBatch,send,save,fini
     await delay(endChecks?1000:350);
   }
 }
-if(typeof module!=='undefined')module.exports={collectPage};
-if(typeof globalThis!=='undefined')globalThis.CardV3Collector={collectPage};
+if(typeof module!=='undefined')module.exports={collectPage,sameDetailPage};
+if(typeof globalThis!=='undefined')globalThis.CardV3Collector={collectPage,sameDetailPage};
