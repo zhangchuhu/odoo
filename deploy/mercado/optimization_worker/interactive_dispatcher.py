@@ -94,6 +94,8 @@ def research_prompt(action):
                 '女装裙装套装的核心词为 conjunto mujer falda。'
                 '调用 prepare_suggestions 登记当前任务源图和品类；读取联想词无需正式采集标签绑定，'
                 '可用墨西哥站的可访问浏览器，核对搜索输入与可见建议，使用 record_suggestions 记录观察和页面证据。'
+                '若电脑操作工具的全局应用枚举失败，先使用 cua.getApp("com.google.Chrome") 直接检查 Chrome；'
+                '全局枚举失败不等于页面不可读取，只有直接检查也无法读取时才能报告浏览器或页面不可用。'
                 '如确实无法读取联想词，调用 suggestions_unavailable 记录实际原因，再使用源图回退词；验证码不能作为不可读取的理由。'
                 '不可把加载失败、验证页面或不可核验页面当作空结果；禁止保存验证码截图或输入短信验证码。'
                 '调用 seal_suggestions 生成初始词并锁定来源，然后使用这些词绑定正式计划；'

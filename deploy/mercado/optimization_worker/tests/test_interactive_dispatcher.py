@@ -239,6 +239,8 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('record_suggestions',prompt)
         self.assertIn('seal_suggestions',prompt)
         self.assertIn('只采集首页',prompt)
+        self.assertIn('cua.getApp("com.google.Chrome")',prompt)
+        self.assertIn('全局枚举失败不等于页面不可读取',prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]
