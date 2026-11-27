@@ -92,6 +92,8 @@ def research_prompt(action):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
         return ('使用已授权的原生 Chrome 和运营中心绑定版采集器执行 card-visual-v3，仅记录真实观察。先阅读 '+str(bridge)+'。'
           '源图及研究计划必须绑定当前任务；plan 使用 strategy=card-visual-v3，visual_profile、design_profile 和快照阈值。'
+          '墨西哥女装裙装套装（womens_skirt_set）的商品类别和首条搜索词使用 conjunto mujer falda；'
+          '其余搜索词结合可见的构造、款式或场合扩展，不将长裙、蕾丝等非必然特征写入品类核心词。'
           '用 binding_status 确认任务专用窗口、标签和 card_v3.resume_step；按后台页码使用同一任务标签打开相应搜索词与实际下一页，'
           '恢复步骤页码为 0 时重新搜索并核验该词；页码为负数时打开对应正数页并在采集器确认该历史页；正数表示采集该页。'
           '在绑定版采集器恢复本任务并点击采集。先完成三组首页，随后按后台顺序轮换各词的前三页；'

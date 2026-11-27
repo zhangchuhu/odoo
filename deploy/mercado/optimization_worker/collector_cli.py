@@ -114,7 +114,14 @@ def validate_bound_profile(snapshot, plan, historical=False):
         validate_design_profile(plan.get('design_profile'), plan['category'])
 
 
-def bind_plan(store, request_id, claim, plan):
+def validate_new_query_anchor(plan):
+    if (plan.get('platform')=='mercado-libre-mx' and plan.get('strategy')=='card-visual-v3'
+            and plan.get('category')=='womens_skirt_set'):
+        if ' '.join(plan['queries'][0].casefold().split()) != 'conjunto mujer falda':
+            raise ValueError('女装裙装套装首个搜索词应为 conjunto mujer falda')
+
+
+def bind_plan(store, request_id, claim, plan, *, recovery=False):
     required={'platform','queries','category','result_limit','source_artifact_id','viewed_source_sha256'}
     if not isinstance(plan,dict) or set(plan) not in (required, required | {'visual_profile'},required | {'visual_profile','strategy'},required | {'visual_profile','strategy','design_profile'}) or plan['platform'] not in ('shein-us','mercado-libre-mx') or ('strategy' in plan and (plan['strategy'] not in ('staged-v1','visual-v2','card-visual-v3') or plan['platform']!='mercado-libre-mx')) or (('design_profile' in plan) != (plan.get('strategy') in ('visual-v2','card-visual-v3'))) or not isinstance(plan['queries'],list) or len(plan['queries'])!=3 or any(not isinstance(x,str) or not x.strip() or len(x)>200 or disallowed_term(x) for x in plan['queries']) or len(set(plan['queries']))!=3 or plan['category'] not in _CATEGORIES or type(plan['result_limit'])!=int or plan['result_limit']<1:
         raise ValueError('Invalid collector plan')
@@ -144,6 +151,8 @@ def bind_plan(store, request_id, claim, plan):
                 raise ValueError('Task collection config changed')
             validate_platform_site(snap, config['platform'], claim['payload'].get('site_id'))
             return digest
+        if not recovery:
+            validate_new_query_anchor(plan)
         validate_source(record,claim,plan)
         validate_bound_profile(snap, plan)
         config=task_config(snap,plan)

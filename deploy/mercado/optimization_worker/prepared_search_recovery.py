@@ -251,7 +251,7 @@ def restore_card_v3_checkpoint(ledger,store,runs,client,request_id,claim,renew):
         reply=client.request('POST','/internal/meli-optimization/research-search-checkpoint',dict(params,lease_token=claim['lease_token']))
         if reply=={'allowed':False}:continue
         if reply!=dict(params,allowed=True,snapshot_id=claim['snapshot_id'],input_hash=claim['input_hash']):raise ValueError('Invalid checkpoint authorization receipt')
-        digest=bind_plan(store,request_id,claim,plan);plan_hash=canonical_hash(plan)
+        digest=bind_plan(store,request_id,claim,plan,recovery=True);plan_hash=canonical_hash(plan)
         with closing(sqlite3.connect(ledger.path)) as db,db:
             db.execute('BEGIN IMMEDIATE')
             restore_scope(db,(rid,source_digest,epoch),(request_id,digest,claim['lease_epoch']),plan_hash,plan_hash,
