@@ -629,6 +629,12 @@ class PlanPromptContractTests(unittest.TestCase):
             self.assertIn(term,text)
 
 class ResearchSearchSessionPromptTests(unittest.TestCase):
+    def test_home_resume_distinguishes_saved_sales_from_pending_visual(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        self.assertIn('visual_candidate_status',prompt)
+        self.assertIn('已有视觉待办时不要再次核验销量',prompt)
+
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})
