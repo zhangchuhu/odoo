@@ -641,6 +641,12 @@ class ResearchSearchSessionPromptTests(unittest.TestCase):
         for phrase in ('stage、symptom、page_type、tab_match','extension_error','视觉候选接口没有待办不代表页面不可读'):
             self.assertIn(phrase,prompt)
 
+    def test_home_disconnected_checkpoint_recovers_connection(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        self.assertIn('checkpoint_disconnected 不是页面不可读',prompt)
+        self.assertIn('连接当前任务',prompt)
+
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})
