@@ -6,7 +6,7 @@ test('waits for same readable search page before reporting verification',async()
  const storage={};const calls=[];let blocked=true;
  const browser={storage:{session:{get:async key=>({[key]:storage[key]}),set:async data=>Object.assign(storage,data),remove:async key=>delete storage[key]}},
   alarms:{create:async(name,data)=>calls.push(['alarm',name,data]),clear:async name=>calls.push(['clear',name])},
-  runtime:{sendNativeMessage:async(_host,msg)=>{calls.push(['native',msg]);return msg.operation==='home_verification_info'?{ok:true,stage:'search',expected:{query:'vestido'}}:{ok:true}}},
+  runtime:{sendNativeMessage:async(_host,msg)=>{calls.push(['native',msg]);return msg.operation==='home_verification_info'?{ok:true,stage:'search',expected:{query:'Vestido'}}:{ok:true}}},
   tabs:{get:async()=>({id:7,windowId:8}),sendMessage:async(_id,msg)=>msg.type==='MERCADO_COLLECTOR_STATUS'?{error:blocked?'captcha':null,page_url:'https://listado.mercadolibre.com.mx/vestido'}:{page_url:'https://listado.mercadolibre.com.mx/vestido',search_query:'vestido',verified_scope:true,observations:[]}}};
  const binding={request_id:'request',tab_id:7,window_id:8,session_id:'a'.repeat(32)};
  assert.equal(await startWatch(browser,'host',binding),true);

@@ -7,7 +7,7 @@ async function collectPage({queryIndex,query,page,prior,nextBatch,send,save,fini
   let cards=prior.slice(),batch=nextBatch,url=null,endChecks=0;
   for(;;){
     const binding=await send({type:'MERCADO_COLLECTOR_PAGE_BINDING'});
-    if(binding?.error || binding?.search_query!==query || typeof binding?.page_url!=='string' || (url && url!==binding.page_url))throw Error('page_binding_mismatch');
+    if(binding?.error || typeof binding?.search_query!=='string' || binding.search_query.normalize('NFC').toLowerCase()!==query.normalize('NFC').toLowerCase() || typeof binding?.page_url!=='string' || (url && url!==binding.page_url))throw Error('page_binding_mismatch');
     url=binding.page_url;
     const result=await send({type:'MERCADO_COLLECTOR_EXTRACT_SEARCH',query,prior:cards,limit:10000,strict_scope:true,with_sales:true});
     if(result?.error)throw Error(result.error);

@@ -1,6 +1,9 @@
 'use strict';
 // Validation primitive only. Native messaging and trusted challenge delivery
 // must be installed before this can be used as an authenticated receipt.
+function sameQuery(left,right) {
+  return typeof left==='string' && typeof right==='string' && left.normalize('NFC').toLowerCase()===right.normalize('NFC').toLowerCase();
+}
 function makeReceipt(challenge, session, tab, page, collectorTabId, observedAt) {
   const requireField=(condition,code)=>{if(!condition){const error=new Error('Invalid observed binding');error.code=code;throw error;}};
   requireField(!!challenge,'receipt_challenge_missing');
@@ -29,10 +32,10 @@ function makeReceipt(challenge, session, tab, page, collectorTabId, observedAt) 
     try{const a=new URL(tab.url),b=new URL(page.page_url);if(a.origin===b.origin && a.pathname===b.pathname && a.search===b.search && a.hash!==b.hash)error.detailCode='receipt_url_fragment_mismatch';else if(a.origin===b.origin && decodeURI(a.href)===decodeURI(b.href))error.detailCode='receipt_url_encoding_mismatch';}catch(_){error.detailCode='receipt_url_invalid';}
     throw error;
   }
-  requireField(page.search_query===challenge.query,'receipt_query_mismatch');
+  requireField(challenge.version===5 ? sameQuery(page.search_query,challenge.query) : page.search_query===challenge.query,'receipt_query_mismatch');
   requireField(typeof observedAt==='string' && Number.isFinite(Date.parse(observedAt)),'receipt_time_invalid');
   const url = new URL(tab.url);
   if (url.protocol !== 'https:' || url.hostname !== (challenge.platform === 'shein-us' ? 'us.shein.com' : 'listado.mercadolibre.com.mx') || url.port) throw new Error('Invalid platform page');
   return {...challenge, session_id:session, tab_id:tab.id,window_id:tab.windowId,collector_tab_id:collectorTabId,url:tab.url,observed_at:observedAt};
 }
-globalThis.CollectorBinding={makeReceipt};
+globalThis.CollectorBinding={makeReceipt,sameQuery};

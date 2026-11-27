@@ -147,8 +147,9 @@ test('card-v3 page proof verifies current tab URL and query before confirmation'
  btn.click();await new Promise(r=>setImmediate(r));
  assert.equal(await c.confirmCardV3Page(0,'dress',1),true);
  assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,1);
+ pageQuery='Dress';assert.equal(await c.confirmCardV3Page(0,'dress',1),true);
  pageQuery='different';assert.equal(await c.confirmCardV3Page(0,'dress',1),false);
- assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,1);
+ assert.equal(calls.filter(x=>x.operation==='card_v3_page_confirm').length,2);
 });
 
 test('card-v3 page completion requires three consistent current page observations',async()=>{

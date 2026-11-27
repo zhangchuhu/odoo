@@ -18,3 +18,11 @@ test('refuses mismatched page or unconfirmed writes',async()=>{
  await assert.rejects(collectPage({...base,send:async()=>({page_url:'https://listado.mercadolibre.com.mx/dress',search_query:'other'}),save:async()=>true}),/binding/);
  await assert.rejects(collectPage({...base,send:async msg=>msg.type==='MERCADO_COLLECTOR_PAGE_BINDING'?{page_url:'https://listado.mercadolibre.com.mx/dress',search_query:'dress'}:{page_url:'https://listado.mercadolibre.com.mx/dress',verified_scope:true,card_sales_version:3,observations:[{product_id:'MLM1',rank:1}]},save:async()=>false}),/checkpoint/);
 });
+
+test('collects a search whose displayed capitalization differs from the plan',async()=>{
+ const result=await collectPage({queryIndex:1,query:'Conjunto mujer falda top',page:1,prior:[],nextBatch:0,delay:async()=>{},
+  send:async msg=>msg.type==='MERCADO_COLLECTOR_PAGE_BINDING'?{page_url:'https://listado.mercadolibre.com.mx/conjunto',search_query:'conjunto mujer falda top'}:
+   msg.type==='MERCADO_COLLECTOR_EXTRACT_SEARCH'?{page_url:'https://listado.mercadolibre.com.mx/conjunto',verified_scope:true,card_sales_version:3,observations:[],no_results:true}:{at_end:true},
+  save:async()=>true,finish:async()=>true});
+ assert.equal(result.cards.length,0);
+});

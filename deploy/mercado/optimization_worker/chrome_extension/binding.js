@@ -3,6 +3,7 @@
 // This extension does not receive Odoo credentials. No binding is accepted
 // solely from page content or the Codex model's text.
 (() => {
+  const sameObservedQuery=(left,right)=>typeof left==='string' && typeof right==='string' && left.normalize('NFC').toLowerCase()===right.normalize('NFC').toLowerCase();
   const HOST='local.odoo.collector_binding';
   const target=Number(new URL(location.href).searchParams.get('tab'));
   if (!Number.isSafeInteger(target) || target<=0) return;
@@ -243,7 +244,7 @@
          challenge.tab_id!==target || challenge.window_id!==tab.windowId || challenge.session_id!==session || challenge.page_url!==tab.url)return false;
       const observed=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_BINDING'});
       const current=await chrome.tabs.get(target);
-      if(observed?.error || observed?.page_url!==challenge.page_url || observed?.search_query!==query || current.url!==challenge.page_url)return false;
+      if(observed?.error || observed?.page_url!==challenge.page_url || !sameObservedQuery(observed?.search_query,query) || current.url!==challenge.page_url)return false;
       const result=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_confirm',request_id:requestId,
         tab_id:target,window_id:tab.windowId,session_id:session,receipt:{...challenge,observed_at:new Date().toISOString()}}),'cards_timeout');
       return result?.ok===true;

@@ -27,7 +27,7 @@ async function checkWatch(api,host,request) {
     let page;
     if(watch.stage==='search') {
       const observed=await api.tabs.sendMessage(watch.tab_id,{type:'MERCADO_COLLECTOR_EXTRACT_SEARCH',query:watch.expected.query,prior:[],limit:30,strict_scope:true,with_sales:true});
-      if(observed?.error||observed?.verified_scope!==true||!Array.isArray(observed.observations)||observed.search_query!==watch.expected.query||observed.page_url!==status.page_url)return false;
+      if(observed?.error||observed?.verified_scope!==true||!Array.isArray(observed.observations)||typeof observed.search_query!=='string'||typeof watch.expected.query!=='string'||observed.search_query.normalize('NFC').toLowerCase()!==watch.expected.query.normalize('NFC').toLowerCase()||observed.page_url!==status.page_url)return false;
       page={url:observed.page_url,query:observed.search_query,blocked:false};
     } else if(watch.stage==='detail') {
       const observed=await api.tabs.sendMessage(watch.tab_id,{type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity:'mercado-libre-mx:'+watch.expected.product_id});

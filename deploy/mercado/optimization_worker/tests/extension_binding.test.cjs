@@ -27,6 +27,12 @@ test('homepage receipt accepts the current query and rejects other platforms',()
  assert.equal(f(c,'b'.repeat(32),tab,{page_url:tab.url,search_query:'vestido'},12,'2026-11-19T00:00:00Z').version,5);
  assert.throws(()=>f({...c,platform:'shein-us'},'b'.repeat(32),tab,{page_url:tab.url,search_query:'vestido'},12,'2026-11-19T00:00:00Z'));
 });
+test('homepage receipt accepts Mercado case normalization but rejects a different term',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');const ctx={URL};vm.runInNewContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding_validation.js','utf8'),ctx);
+ const c={...challenge,version:5,query:'Conjunto mujer falda top'};
+ assert.equal(ctx.CollectorBinding.makeReceipt(c,'b'.repeat(32),tab,{page_url:tab.url,search_query:'conjunto mujer falda top'},12,'2026-11-19T00:00:00Z').query,c.query);
+ assert.throws(()=>ctx.CollectorBinding.makeReceipt(c,'b'.repeat(32),tab,{page_url:tab.url,search_query:'conjunto mujer falda blusa'},12,'2026-11-19T00:00:00Z'));
+});
 test('URL mismatch diagnostics distinguish fragment, encoding and navigation without values',()=>{
  const vm=require('node:vm'),fs=require('node:fs');const ctx={URL};vm.runInNewContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding_validation.js','utf8'),ctx);const f=ctx.CollectorBinding.makeReceipt;
  const compare=(a,b,expected)=>assert.throws(()=>f(challenge,'b'.repeat(32),{...tab,url:a},{page_url:b,search_query:'vestido'},12,'2026-11-19T00:00:00Z'),e=>e.detailCode===expected && !e.message.includes('listado'));
