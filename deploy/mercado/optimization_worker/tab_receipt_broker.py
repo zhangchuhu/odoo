@@ -85,13 +85,21 @@ class Broker:
         return self.window == window and (self.challenge['platform'] == 'shein-us' or self.session == session)
 
     def open_anchor_guard(self,event):
-        if (not self.anchor_origin or set(event)!={'operation','request_id','session_id','window_id','marker','native_origin'}
-                or event.get('native_origin')!=self.anchor_origin or event.get('request_id')!=self.challenge['request_id']
-                or self.rebind_requested or not self._anchor_matches_binding(event.get('window_id'), event.get('session_id'))
-                or self.anchor_registry.current()!=(event.get('window_id'),event.get('session_id'),event.get('marker'))
-                or self.fence() is not True): return None
+        self.anchor_guard_failure=None
+        if (not isinstance(event,dict) or not self.anchor_origin or set(event)!={'operation','request_id','session_id','window_id','marker','native_origin'}
+                or event.get('native_origin')!=self.anchor_origin or event.get('request_id')!=self.challenge['request_id']):
+            self.anchor_guard_failure='request_invalid';return None
+        if self.rebind_requested:
+            self.anchor_guard_failure='rebind_pending';return None
+        if not self._anchor_matches_binding(event.get('window_id'),event.get('session_id')):
+            self.anchor_guard_failure='binding_mismatch';return None
+        if self.anchor_registry.current()!=(event.get('window_id'),event.get('session_id'),event.get('marker')):
+            self.anchor_guard_failure='anchor_mismatch';return None
+        if self.fence() is not True:
+            self.anchor_guard_failure='lease_invalid';return None
         with self._anchor_lock:
-            if self._live_anchor_connection(): return None
+            if self._live_anchor_connection():
+                self.anchor_guard_failure='guard_already_active';return None
             token=(event['window_id'],event['session_id'],event['marker'])
             self._anchor_guard=token;self._anchor_seen=time.monotonic();return token
 
@@ -788,7 +796,7 @@ class Broker:
                         return True
                     elif isinstance(message,dict) and message.get('operation')=='anchor_guard_open':
                         token=self.open_anchor_guard(message)
-                        trace_native(self.path.parent/'collector-window-trace.jsonl',op,'broker_result',self.challenge.get('request_id'),code='ok' if token else 'rejected')
+                        trace_native(self.path.parent/'collector-window-trace.jsonl',op,'broker_result',self.challenge.get('request_id'),code='ok' if token else self.anchor_guard_failure or 'rejected')
                         try:
                             write_message(stream,{'ok':bool(token)})
                         except OSError:

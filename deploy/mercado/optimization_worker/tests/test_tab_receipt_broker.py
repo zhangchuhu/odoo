@@ -315,6 +315,8 @@ class BrokerTest(unittest.TestCase):
             self.assertTrue(broker.anchor_confirm(proof))
             self.assertFalse(broker.anchor_confirm(proof))
             guard_event={'operation':'anchor_guard_open','request_id':'anchor','session_id':'c'*32,'window_id':4,'marker':'d'*32,'native_origin':issue['native_origin']}
+            self.assertIsNone(broker.open_anchor_guard(dict(guard_event,window_id=5)))
+            self.assertEqual(broker.anchor_guard_failure,'binding_mismatch')
             self.assertFalse(broker.anchor_guard_alive())
             guard=broker.open_anchor_guard(guard_event)
             self.assertTrue(guard)
