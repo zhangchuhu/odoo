@@ -19,7 +19,7 @@ globalThis.activateCollectorTarget=async ({requestId,target,windowId,session,ext
  if (isCandidateUrl(tab.url)) {
    stage='activation_detail_guard';await trace('started');
    const live = await chrome.runtime.sendMessage({type:'ensure_collector_guard',request_id:requestId,tab_id:target,window_id:windowId});
-   if (live?.ok !== true) {const error=Error(live?.error || 'guard_ack_timeout');error.code=error.message;throw error;}
+   if (live?.ok !== true) {const error=Error(live?.error || 'guard_ack_timeout');error.code=error.message; if(live?.diagnostic) error.detailCode=live.diagnostic; throw error;}
    stage='activation_detail_challenge';await trace('started');
    const issued = await chrome.runtime.sendNativeMessage(host, {operation:'activation_challenge', ...base, detail_url:tab.url});
    const proof = issued?.challenge;
