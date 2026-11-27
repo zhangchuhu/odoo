@@ -83,6 +83,10 @@ class Tests(unittest.TestCase):
             client=Mock();bridge=build_bridge(ID,client,store,'journal')
             status=bridge.call(ID,'binding_status',{})['binding']
             self.assertEqual(status['card_v3']['next_page'],(1,1))
+            self.assertEqual(status['card_v3']['resume_step'],(1,1))
+            state['next_page']=None
+            restored=bridge.call(ID,'binding_status',{})['binding']
+            self.assertEqual(restored['card_v3']['resume_step'],(2,0))
             self.assertEqual(status['saved_query_groups'],1)
             self.assertEqual(client.research_progress.call_args.args[2]['strategy'],'card-home-v4')
             self.assertIsNone(client.research_progress.call_args.args[2]['end_reason'])

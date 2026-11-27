@@ -417,7 +417,8 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         if card_home and isinstance(queries,list) and len(queries)==3:
             card_state=ledger.card_home_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
             queries=card_state['queries'];completed=sum(card_state['progress']['completed_pages'])
-            card_state['resume_step']=card_state['next_page'];card_state['resume_url']=None
+            card_state['resume_step']=card_state['next_page'] or ((len(queries)-1,0) if not binding else None)
+            card_state['resume_url']=None
         elif card_v3 and isinstance(queries,list) and len(queries)==3:
             card_state=ledger.card_v3_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
             queries=card_state['queries']
