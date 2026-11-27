@@ -144,6 +144,16 @@ class Tests(unittest.TestCase):
         self.assertEqual(bridge.call(ID,'window_blocked',{'code':'window_registration_failed'}),{'accepted':True})
         self.assertEqual(calls,['fence',{'code':'window_registration_failed'}])
         with self.assertRaises(ValueError):bridge.call(ID,'window_blocked',{'code':'other'})
+    def test_page_blocker_accepts_only_bounded_diagnostic_codes(self):
+        captured=[]
+        bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,{'page_blocked':lambda c,d:captured.append(d)})
+        diag={'stage':'search','symptom':'results_not_visible','page_type':'search','tab_match':'yes'}
+        self.assertEqual(bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':diag}),{'accepted':True})
+        self.assertEqual(captured[0]['diagnostic'],diag)
+        with self.assertRaises(ValueError):
+            bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':dict(diag,symptom='secret text')})
+        with self.assertRaises(ValueError):
+            bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':dict(diag,url='https://private')})
 
     def test_staged_submission_requires_timestamp_and_write_guard(self):
         calls=[]

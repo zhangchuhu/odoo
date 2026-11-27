@@ -104,6 +104,9 @@ def research_prompt(action):
           '按后台顺序下载并核验候选原图，提交 candidate_primary、secondary、styles、occasions 和实际视觉证据；'
           '最多 30 个详情通过的商品进行视觉判断，必须完成整个集合后再按相似度排序，不因达到目标数量提前停止。'
           '只将销量达标结果计入任务目标，补充候选单独保存。完成图库回执后才能结束；验证码、身份不符或页面不可核验时保留检查点。'
+          '回传 page_blocked 时附 diagnostic，必须根据实际观察填写：stage 为 search、pagination、detail、visual、gallery、binding 或 unknown；'
+          'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
+          'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。不得附网址、正文、截图或猜测。'
           '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='visual-v2' or (isinstance(config,dict) and config.get('strategy')=='visual-v2'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')

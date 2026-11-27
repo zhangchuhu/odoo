@@ -18,6 +18,12 @@ _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 _FIELDS = {'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'seal_expansion': {'queries'}, 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
            'image_saved': {'identity','order'}, 'image': {'identity','file','screenshot','source','order'}, 'finish': set(),
            'reconcile_image': {'identity','artifact_id','order'}, 'reconcile_evidence': {'artifact_id'}}
+_PAGE_DIAGNOSTIC = {
+    'stage': {'search','pagination','detail','visual','gallery','binding','unknown'},
+    'symptom': {'results_not_visible','search_input_missing','page_loading','page_error','access_blocked','captcha','login','tab_mismatch','extension_error','navigation_failed','unknown'},
+    'page_type': {'search','detail','extension','other','unknown'},
+    'tab_match': {'yes','no','unknown'},
+}
 
 def window_blocker_safe(supervisor, broker=None):
     """Permit a known pause only before any target tab has been observed."""
@@ -116,11 +122,16 @@ class ReturnBridge:
         fields=_FIELDS[operation]
         visual_v2_fields={'submission_id','receipts','candidate_primary','secondary','styles','occasions','critical_conflict','features'}
         visual_v3_fields=visual_v2_fields-{'critical_conflict'}
-        if fields is not None and set(data)!=fields and not (operation=='submit_visual_verdict' and set(data) in (visual_v2_fields,visual_v3_fields)):
+        if fields is not None and set(data)!=fields and not (operation=='submit_visual_verdict' and set(data) in (visual_v2_fields,visual_v3_fields)) and not (operation=='page_blocked' and set(data)=={'code','diagnostic'}):
             raise ValueError('Invalid fields')
         if operation == 'window_blocked' and data.get('code') != 'window_registration_failed': raise ValueError('Invalid blocker')
         if operation == 'page_blocked' and data['code'] not in ('captcha_required', 'login_required', 'page_unreadable'):
             raise ValueError('Invalid page blocker')
+        if operation == 'page_blocked' and 'diagnostic' in data:
+            diag=data['diagnostic']
+            if (not isinstance(diag,dict) or set(diag)!=set(_PAGE_DIAGNOSTIC)
+                    or any(not isinstance(diag[k],str) or diag[k] not in choices for k,choices in _PAGE_DIAGNOSTIC.items())):
+                raise ValueError('Invalid page diagnostic')
         if 'artifact_id' in data and not (operation in ('reconcile_image', 'reconcile_evidence') and data['artifact_id'] is None) and (not isinstance(data['artifact_id'],str) or not data['artifact_id'].isdigit()):
             raise ValueError('Invalid artifact identifier')
         if operation=='prior_lease_status' and (not isinstance(data['request_id'],str) or not _UUID.fullmatch(data['request_id']) or data['request_id']==self.request_id):
@@ -411,6 +422,9 @@ def build_bridge(request_id, client, store, journal):
             if any(upload.get('state') != 'confirmed' for upload in pending.get('candidate_uploads', {}).values()):
                 raise ValueError('Pending image receipt requires reconciliation')
             record.update(state='waiting', reason=data['code'], resume_state=state)
+            record['page_block_diagnostic']={'timestamp':datetime.now(timezone.utc).isoformat(),
+                'reported':data.get('diagnostic'), 'prior_state':state,
+                'plan_bound':bool(record.get('collector_plan')), 'source':'host_report'}
             store._put(db, record)
 
     def require_gallery_identity(data):
