@@ -3,6 +3,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {walkVisibleGallery} = require('../chrome_extension/gallery_walk.js');
 const {appendImage} = require('../chrome_extension/gallery_capture.js');
+test('hidden single-image counter is accepted only with one gallery figure and no visible arrows',()=>{
+ const {singleViewerPosition}=require('../chrome_extension/gallery_visible.js');
+ const counter={textContent:'1 / 1'},arrow={visible:false};
+ const viewer={querySelectorAll:s=>s==='.pswp__counter'?[counter]:[arrow]};
+ const doc={querySelectorAll:()=>[{}]};
+ assert.deepEqual(singleViewerPosition(viewer,doc,x=>!!x.visible),[1,1]);
+ assert.equal(singleViewerPosition(viewer,{querySelectorAll:()=>[{},{}]},x=>!!x.visible),null);
+ arrow.visible=true;assert.equal(singleViewerPosition(viewer,doc,x=>!!x.visible),null);
+});
 
 function fixture(slides, photoTotal, {jump=1, variationChange, first=0, saved}={}) {
   const url='https://www.mercadolibre.com.mx/up/MLMU4075103096';
