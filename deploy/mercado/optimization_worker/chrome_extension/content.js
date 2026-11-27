@@ -146,7 +146,7 @@
     const found=[];
     for (const element of card.querySelectorAll('span, p, div')) {
       if (!isVisible(element) || element.children?.length || element.closest('[class*="seller" i], [class*="vendedor" i]')) continue;
-      const text=visibleText(element).replace(/\s+/g,' ').trim();
+      const text=visibleText(element).replace(/\s+/g,' ').trim().replace(/^\|\s*/, '');
       if (/^\+?\s*(?:\d{1,3}(?:\.\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(?:mil\s+)?vendidos?$/i.test(text)) found.push(text);
     }
     const unique=[...new Set(found)];

@@ -49,6 +49,9 @@ test('card sales reads only an unambiguous visible product-sales label', () => {
     getBoundingClientRect:()=>({width:10,height:10,bottom:10,right:10,top:0,left:0})});
   const extract=context.__MERCADO_COLLECTOR_TEST__.cardSales;
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos')]}).text,'+500 vendidos');
+  assert.equal(extract({querySelectorAll:()=>[node('| +1000 vendidos')]}).text,'+1000 vendidos');
+  assert.equal(extract({querySelectorAll:()=>[node('4.6 | +1000 vendidos')]}).status,'missing');
+  assert.equal(extract({querySelectorAll:()=>[node('| +1000 vendidos',true)]}).status,'missing');
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos',true)]}).status,'missing');
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos'),node('+100 vendidos')]}).status,'ambiguous');
 });
