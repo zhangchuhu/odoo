@@ -174,7 +174,7 @@ class TabReceiptStore:
             for index,query in enumerate(initial_queries):seal_query(db,scope,index,query,fence=fence)
             queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope)]
             if queries[:3]!=initial_queries:raise ValueError('Original homepage plan changed')
-            page=next_home_query(db,scope);known=known_count(db,scope)
+            page=next_home_query(db,scope);known=known_count(db,scope,include_plus_hundred=True)
             if page is None and (known>=100 or len(queries)>=9):
                 freeze_queue(db,scope,plan_exhausted=len(queries)>=9,fence=fence,homepage_only=True)
                 record_end_reason(db,scope,'sales_target_reached' if known>=100 else 'query_limit',fence=fence)

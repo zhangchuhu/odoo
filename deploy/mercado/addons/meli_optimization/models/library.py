@@ -992,7 +992,7 @@ class CollectionWorkbench(models.Model):
                 if config['platform'] == 'mercado-libre-mx':
                     if card_v3:
                         tier='supplemental' if candidate in supplemental else 'threshold_met'
-                        if not card_v3_tier_valid(candidate,config['min_sold'],tier):
+                        if not card_v3_tier_valid(candidate,config['min_sold'],tier,allow_plus_hundred=config.get('strategy')=='card-home-v4'):
                             raise ValidationError('候选销量分层不符合任务门槛')
                         metrics=[]
                     else:

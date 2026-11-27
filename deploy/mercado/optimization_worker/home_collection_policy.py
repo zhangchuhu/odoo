@@ -49,8 +49,8 @@ def home_query_candidates(db,scope,index):
         raise ValueError('Invalid later page')
     all_cards=list(_observations(db,scope)); grouped={}
     for card in all_cards:grouped.setdefault(card['product_id'],[]).append(card.get('sales_text') if card['sales_status']=='known' else None)
-    conflicts={pid for pid,labels in grouped.items() if resolve_sales(labels)['status']=='conflict'}
-    return rank_per_query([c for c in _observations(db,scope,index) if c['product_id'] not in conflicts])
+    conflicts={pid for pid,labels in grouped.items() if resolve_sales(labels,include_plus_hundred=True)['status']=='conflict'}
+    return rank_per_query([c for c in _observations(db,scope,index) if c['product_id'] not in conflicts],include_plus_hundred=True)
 
 
 def next_home_action(completed, known_products, terms_exhausted):

@@ -49,10 +49,10 @@ class HomeCollectionIntegrationTests(unittest.TestCase):
         queries=initial_queries('conjunto mujer falda',ranked,[])
         for index,item in enumerate(queries):
             query=item['text'];db.execute('insert into card_v3_queries values (?,?,?,?,?)',(*scope,index,query))
-            card={'product_id':'MLM1','rank':1,'sales_status':'known','sales_text':'+150 vendidos','query':query}
+            card={'product_id':'MLM1','rank':1,'sales_status':'known','sales_text':'+100 vendidos','query':query}
             db.execute('insert into card_v3_batches values (?,?,?,?,?,?,?)',(*scope,index,1,0,json.dumps([card])))
             finish_homepage(db,scope,index,{'url':'https://listado.mercadolibre.com.mx/query','receipt_nonce':'a'*32,'end_checks':3,'no_results':False},fence=fence,verify=verify)
         self.assertEqual(freeze_queue(db,scope,plan_exhausted=True,fence=fence,homepage_only=True),['MLM1'])
-        detail=record_detail(db,scope,0,'MLM1','+150 vendidos',500,fence=fence)
+        detail=record_detail(db,scope,0,'MLM1','+100 vendidos',500,fence=fence,homepage_only=True)
         self.assertEqual(detail,'supplemental')
         self.assertEqual(db.execute('select count(*) from card_v3_pages where page>1').fetchone()[0],0)

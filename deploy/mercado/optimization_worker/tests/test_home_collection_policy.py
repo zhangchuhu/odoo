@@ -90,7 +90,7 @@ class HomeCollectionPolicyTests(unittest.TestCase):
         db.execute('insert into card_v3_batches values (?,?,?,?,?,?,?)',(*scope,0,1,0,json.dumps(cards)))
         with self.assertRaises(ValueError):home_query_candidates(db,scope,0)
         db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',(*scope,0,1,'home_complete'))
-        self.assertEqual([x['product_id'] for x in home_query_candidates(db,scope,0)],['B'])
+        self.assertEqual([x['product_id'] for x in home_query_candidates(db,scope,0)],['B','A'])
 
     def test_old_page_completion_is_not_reused_for_home_strategy(self):
         import sqlite3

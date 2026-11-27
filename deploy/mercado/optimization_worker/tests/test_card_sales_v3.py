@@ -56,6 +56,16 @@ class CardSalesTests(unittest.TestCase):
         self.assertEqual(classify_detail(101,0),'threshold_met')
         self.assertEqual(classify_detail(None,500),'exclude')
 
+    def test_home_plus_100_is_eligible_but_exact_100_is_not(self):
+        plus=dict(product_id='MLM1',sales_lower_bound=100,sales_status='known',sales_text='+100 vendidos',first_seen=1)
+        exact=dict(plus,product_id='MLM2',sales_text='100 vendidos',first_seen=2)
+        self.assertEqual([row['product_id'] for row in rank_per_query([plus,exact],include_plus_hundred=True)],['MLM1'])
+        self.assertEqual(rank_per_query([plus,exact]),[])
+        self.assertEqual(classify_detail(100,500,sales_text='+100 vendidos',include_plus_hundred=True),'supplemental')
+        self.assertEqual(classify_detail(100,500,sales_text='100 vendidos',include_plus_hundred=True),'exclude')
+        self.assertEqual(classify_detail(100,500,sales_text=None,include_plus_hundred=True),'exclude')
+        self.assertEqual(resolve_sales(['+100 vendidos','100 vendidos'],include_plus_hundred=True)['status'],'conflict')
+
     def test_visual_order_requires_all_decisions_and_prioritizes_similarity(self):
         rows=[dict(identity='a',level='competitor',primary_matches=3,secondary_matches=2,style_matches=0,conflicts=1,sales_lower_bound=1000),
               dict(identity='b',level='highly_similar',primary_matches=4,secondary_matches=1,style_matches=0,conflicts=0,sales_lower_bound=150)]

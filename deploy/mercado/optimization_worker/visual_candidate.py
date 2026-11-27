@@ -140,8 +140,8 @@ class VisualCandidate:
         try:
             product, _ = _identity(detail['detail_url'],self.plan['platform'])
             if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
-                from .card_sales_v3 import parse_sales
-                sold=parse_sales(detail['sold_display']);threshold_ok=sold is not None and sold>100
+                from .card_sales_v3 import parse_sales, classify_detail
+                sold=parse_sales(detail['sold_display']);threshold_ok=classify_detail(sold,self.config['min_sold'],sales_text=detail['sold_display'],include_plus_hundred=self.plan.get('strategy')=='card-home-v4')!='exclude'
             else:
                 sold=_number(detail['sold_display']);threshold_ok=sold and sold[0]>=self.config['min_sold']
             return (detail.get('identity') == identity == self.plan['platform'] + ':' + product and

@@ -231,7 +231,7 @@ def handle_progress(broker, event):
                 body=json.dumps(detail,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
                 old=db.execute('SELECT body FROM card_v3_detail_observations'+where+' AND ordinal=?',(*key,index)).fetchone()
                 if old and old[0]!=body:raise ValueError('Confirmed detail evidence changed')
-                status=record_detail(db,key,index,pid,detail['sold_display'],config['min_sold'],fence=broker.fence)
+                status=record_detail(db,key,index,pid,detail['sold_display'],config['min_sold'],fence=broker.fence,homepage_only=plan.get('strategy')=='card-home-v4')
                 if not old:db.execute('INSERT INTO card_v3_detail_observations VALUES (?,?,?,?,?)',(*key,index,body))
                 if not broker.anchor_guard_alive() or broker.fence() is not True:raise ValueError('Current browser or lease lost')
             except (ValueError,TypeError) as error:raise CollectorProgressError('detail_validation_failed',str(error)) from error
@@ -253,7 +253,7 @@ def handle_progress(broker, event):
                 from .home_collection_policy import next_home_query,record_end_reason
                 queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries'+where+' ORDER BY query_index',key)]
                 additions=event['queries'];lookup=getattr(broker,'home_expansion_candidates',None)
-                if (next_home_query(db,key) is not None or known_count(db,key)>=100 or len(queries)>=9
+                if (next_home_query(db,key) is not None or known_count(db,key,include_plus_hundred=True)>=100 or len(queries)>=9
                         or not isinstance(additions,list) or len(additions)>3 or len(queries)+len(additions)>9
                         or not callable(lookup)):
                     raise CollectorProgressError('expansion_plan_invalid','当前不能扩展搜索词')
