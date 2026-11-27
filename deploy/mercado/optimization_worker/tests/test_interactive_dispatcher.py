@@ -225,6 +225,12 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('保留旧采集器弹窗及其进度', prompt)
         self.assertIn('旧标签或旧会话里遗留的错误页面不能作为新请求的页面阻塞',prompt)
         self.assertIn('先在同一标签刷新一次',prompt)
+    def test_v3_recovery_opens_query_before_treating_tab_as_blocked(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'card-visual-v3'}})
+        self.assertIn('新建任务标签通常先显示平台首页',prompt)
+        self.assertIn('页码为 0 时',prompt)
+        self.assertIn('不得仅因尚未打开搜索页而报告 page_unreadable',prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]
