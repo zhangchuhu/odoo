@@ -33,8 +33,9 @@ def _binding(value):
 def arm(db,request,task,stage,expected,binding,*,fence):
     key=_key(request,task);ident=_binding(binding)
     if (not callable(fence) or fence() is not True or stage not in ('search','detail')
-            or not isinstance(expected,dict) or set(expected)!=( {'query'} if stage=='search' else {'product_id'})
-            or not isinstance(next(iter(expected.values())),str) or not next(iter(expected.values())).strip()):
+            or not isinstance(expected,dict) or set(expected) not in (({'query'},{'query','platform'}) if stage=='search' else ({'product_id'},{'product_id','platform'}))
+            or ('platform' in expected and expected['platform']!='shein-us')
+            or not isinstance(expected.get('query' if stage=='search' else 'product_id'),str) or not expected['query' if stage=='search' else 'product_id'].strip()):
         raise ValueError('Invalid verification watch')
     body=json.dumps(expected,sort_keys=True,separators=(',',':'))
     prior=db.execute('SELECT stage,expected,binding FROM home_verification_watch WHERE request_id=? AND company_id=? AND task_id=? AND snapshot_id=? AND lease_epoch=?',key).fetchone()

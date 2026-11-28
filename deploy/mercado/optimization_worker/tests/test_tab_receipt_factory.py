@@ -6,6 +6,17 @@ from optimization_worker.domain import canonical_hash
 from optimization_worker.tab_receipt_factory import build_native_broker
 
 class FactoryTest(unittest.TestCase):
+    def test_shein_home_initial_query_uses_version_six(self):
+        import sqlite3
+        claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}
+        plan={'platform':'shein-us','queries':['dress','dress lace','dress casual'],'strategy':'shein-home-v1'}
+        signed={'request_id':'req','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'plan':plan};signed['digest']=canonical_hash(signed)
+        class Store:
+            def inspect(self,request):return {'task_type':'research.bestseller','state':'prepared','collector_plan':signed}
+        with tempfile.TemporaryDirectory() as tmp,patch('optimization_worker.tab_receipt_factory.worker_records',return_value=[{'request_id':'req','claim':claim}]),patch('optimization_worker.tab_receipt_factory.fence'):
+            ledger=Path(tmp)/'db';broker=build_native_broker(Path(tmp)/'s',ledger,'req',0,Store(),object(),'journal')
+            self.assertEqual(broker.challenge['version'],6)
+            with sqlite3.connect(ledger) as db:self.assertEqual(db.execute('select count(*) from card_v3_queries').fetchone()[0],3)
     def test_home_initial_query_uses_page_receipt_protocol(self):
         import sqlite3
         claim={'id':1,'task_type':'research.bestseller','snapshot_id':2,'company_id':3,'input_hash':'c'*64,'lease_epoch':4}

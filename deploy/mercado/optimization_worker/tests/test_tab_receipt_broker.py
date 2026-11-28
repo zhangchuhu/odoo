@@ -107,6 +107,33 @@ class BrokerTest(unittest.TestCase):
                 with sqlite3.connect(b.store.path) as db:
                     stored=db.execute('SELECT page_url,receipt_nonce,end_evidence,end_checks FROM card_v3_page_evidence').fetchone()
                 self.assertEqual(stored,(binding['url'],token['nonce'],'empty_results',3))
+
+    def test_shein_home_page_requires_peer_and_bound_homepage(self):
+        import sqlite3,json,io,base64
+        from PIL import Image
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        anchor='chrome-extension://'+'a'*32+'/';peer='chrome-extension://'+'b'*32+'/'
+        challenge=dict(version=6,request_id='r',nonce='a'*32,lease_epoch=3,plan_digest='b'*64,platform='shein-us',query_index=0,query='dress')
+        plan={'platform':'shein-us','strategy':'shein-home-v1'}
+        with tempfile.TemporaryDirectory() as tmp:
+            b=Broker(Path(tmp)/'s',Path(tmp)/'ledger',challenge,123,lambda:True,expected_window_id=4,expected_session='c'*32,anchor_origin=anchor,peer_origin=peer,progress_plan=(plan,{}));b.query_verified=True
+            binding=dict(version=6,platform='shein-us',request_id='r',plan_digest='b'*64,lease_epoch=3,query_index=0,query='dress',tab_id=123,window_id=4,session_id='c'*32,url='https://us.shein.com/pdsearch/dress/')
+            with sqlite3.connect(b.store.path) as db:
+                initialize(db);seal_query(db,('r','b'*64,3),0,'dress',fence=lambda:True)
+                db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',('r',json.dumps(binding)))
+            event=dict(operation='card_v3_page_challenge',request_id='r',tab_id=123,window_id=4,session_id='c'*32,query_index=0,query='dress',page=1,native_origin=peer)
+            with patch.object(b,'anchor_guard_alive',return_value=True):
+                self.assertIsNone(b.issue_card_v3_page(dict(event,native_origin=anchor)))
+                token=b.issue_card_v3_page(event);self.assertEqual(token['platform'],'shein-us')
+                confirm=dict(operation='card_v3_page_confirm',request_id='r',tab_id=123,window_id=4,session_id='c'*32,receipt=dict(token,observed_at=datetime.now(timezone.utc).isoformat()),native_origin=peer)
+                self.assertTrue(b.confirm_card_v3_page(confirm))
+                screenshot=io.BytesIO();Image.new('RGB',(120,120),'white').save(screenshot,format='JPEG')
+                b.card_v3_store_screenshot=lambda _: 'screenshot.jpg'
+                card=dict(query='dress',product_id='123',url='https://us.shein.com/a-p-123.html',rank=1,bbox=[1,1,30,40],sales_text='500+ sold')
+                batch=dict(operation='card_v3_batch',request_id='r',tab_id=123,window_id=4,session_id='c'*32,query_index=0,query='dress',page=1,page_url=binding['url'],batch_index=0,cards=[card],screenshot=base64.b64encode(screenshot.getvalue()).decode(),native_origin=peer)
+                self.assertTrue(b.save_card_v3_batch(batch))
+                finish=dict(operation='card_v3_page_finish',request_id='r',tab_id=123,window_id=4,session_id='c'*32,query_index=0,query='dress',page=1,page_url=binding['url'],status='home_complete',next_url=None,end_checks=3,end_evidence='scroll_end',native_origin=peer)
+                self.assertTrue(b.finish_card_v3_page(finish))
     def test_card_v3_batch_requires_confirmed_page_and_live_anchor(self):
         import sqlite3,io,base64
         from PIL import Image

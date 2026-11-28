@@ -48,7 +48,9 @@ class CollectionStart(models.Model):
             home_limits=dict(limits,max_pages_per_query=1)
             valid_home=(set(config)==card_fields and config.get('platform')=='mercado-libre-mx' and config.get('strategy')=='card-home-v4'
                         and all(type(config.get(k)) is int and config[k]==v for k,v in home_limits.items()))
-            if set(config) != expected and not valid_visual and not valid_card and not valid_home:
+            valid_shein=(set(config)==card_fields and config.get('platform')=='shein-us' and config.get('strategy')=='shein-home-v1'
+                         and all(type(config.get(k)) is int and config[k]==v for k,v in home_limits.items()))
+            if set(config) != expected and not valid_visual and not valid_card and not valid_home and not valid_shein:
                 missing.append('collection_config')
             platform = config.get('platform')
             if platform not in ('mercado-libre-mx', 'shein-us'):

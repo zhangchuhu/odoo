@@ -1,4 +1,11 @@
 /** @odoo-module **/
+export function collectionSubmission(source) {
+    const form = {...source};
+    for (const key of ['min_sold','min_reviews','min_rating','result_limit']) form[key] = Number(form[key]);
+    if (form.platform === 'shein-us') form.strategy = 'shein-home-v1';
+    else delete form.strategy;
+    return form;
+}
 export function visibleCollectionTasks(tasks, detail) {
     if (!detail?.collection || detail.collection_started !== false) return tasks;
     const workflow = new Set(['product.facts', 'research.keywords', 'research.bestseller']);

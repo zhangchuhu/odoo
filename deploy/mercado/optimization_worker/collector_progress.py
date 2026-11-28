@@ -60,7 +60,8 @@ def handle_progress(broker, event):
     key = tuple(broker.challenge[k] for k in ('request_id', 'plan_digest', 'lease_epoch'))
     platform = broker.challenge['platform']
     origin = broker.anchor_origin if platform == 'mercado-libre-mx' else broker.peer_origin
-    if (set(event) != expected or (sales_only and (event['sales_only'] is not True or platform != 'mercado-libre-mx'))
+    shein_home=platform=='shein-us' and broker.progress_plan and broker.progress_plan[0].get('strategy')=='shein-home-v1'
+    if (set(event) != expected or (sales_only and (event['sales_only'] is not True or (platform != 'mercado-libre-mx' and not shein_home)))
             or not origin or event['native_origin'] != origin or event['request_id'] != key[0]
             or type(event['tab_id']) is not int or event['tab_id'] != broker.tab
             or type(event['window_id']) is not int or event['window_id'] != broker.window
@@ -99,7 +100,7 @@ def handle_progress(broker, event):
     with closing(sqlite3.connect(broker.store.path)) as db, db:
         db.execute('BEGIN IMMEDIATE' if op in ('checkpoint_detail','seal_expansion','next_candidate') else 'BEGIN')
         where = ' WHERE request_id=? AND plan_digest=? AND lease_epoch=?'
-        if plan.get('strategy')=='card-home-v4' and op=='collector_progress':
+        if plan.get('strategy') in ('card-home-v4','shein-home-v1') and op=='collector_progress':
             from .card_sales_v3_checkpoints import initialize
             from .home_collection_policy import next_home_query
             initialize(db)
@@ -111,7 +112,7 @@ def handle_progress(broker, event):
             batches=[]
             if accessible:
                 batches=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_batches'+where+' AND query_index=? AND page=1 ORDER BY batch_index',(*key,index))]
-            return dict(ok=True,task=task,platform=platform,strategy='card-home-v4',queries=declared,result_limit=config['result_limit'],
+            return dict(ok=True,task=task,platform=platform,strategy=plan['strategy'],queries=declared,result_limit=config['result_limit'],
                         query_index=index,page=1 if step==(index,1) else None,next_page=step,page_action='collect_page' if step else 'idle',
                         acknowledged=accessible,cards=[card for batch in batches for card in batch] if accessible else None,
                         next_batch_index=len(batches),binding=binding)
@@ -189,8 +190,8 @@ def handle_progress(broker, event):
             return response
         if not broker.watch_only or not broker.guard_alive(broker.session):
             raise CollectorProgressError('checkpoint_guard_pending', '三组卡片及当前标签须先全部确认')
-        if plan.get('strategy') in ('card-visual-v3','card-home-v4') and op in ('next_candidate','checkpoint_detail'):
-            from .card_sales_v3_pipeline import record_detail
+        if plan.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1') and op in ('next_candidate','checkpoint_detail'):
+            from .card_sales_v3_pipeline import record_detail,record_shein_detail
             from .collector_import import _DETAIL, valid_detail_fields
             queue=[(row[0],json.loads(row[1])) for row in db.execute('SELECT product_id,body FROM card_v3_queue'+where+' ORDER BY ordinal',key)]
             frozen=db.execute('SELECT 1 FROM card_v3_meta'+where,key).fetchone()
@@ -198,7 +199,7 @@ def handle_progress(broker, event):
             eligible=[row for row in details if row['status']!='exclude']
             visual_done=db.execute('SELECT count(*) FROM card_v3_visual_evidence'+where,key).fetchone()[0]
             if not frozen and op=='next_candidate':
-                if plan.get('strategy')=='card-home-v4':
+                if plan.get('strategy') in ('card-home-v4','shein-home-v1'):
                     from .home_collection_policy import next_home_query as next_page
                 else:
                     from .card_sales_v3_checkpoints import next_page
@@ -221,7 +222,7 @@ def handle_progress(broker, event):
             try:
                 pid,_=_identity(detail['detail_url'],platform)
                 valid=(type(index) is int and 0<=index<len(queue) and pid==queue[index][0]
-                       and valid_detail_fields(detail,allow_observed_at=True)
+                       and valid_detail_fields(detail,allow_observed_at=True,shein_home=bool(shein_home))
                        and detail.get('product_id')==pid and detail.get('identity')==platform+':'+pid
                        and isinstance(detail.get('title'),str) and bool(detail['title'].strip())
                        and (detail.get('sold_display') is None or isinstance(detail['sold_display'],str)))
@@ -231,7 +232,8 @@ def handle_progress(broker, event):
                 body=json.dumps(detail,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
                 old=db.execute('SELECT body FROM card_v3_detail_observations'+where+' AND ordinal=?',(*key,index)).fetchone()
                 if old and old[0]!=body:raise ValueError('Confirmed detail evidence changed')
-                status=record_detail(db,key,index,pid,detail['sold_display'],config['min_sold'],fence=broker.fence,homepage_only=plan.get('strategy')=='card-home-v4')
+                status=(record_shein_detail(db,key,index,detail,config['min_sold'],config['min_reviews'],fence=broker.fence)
+                        if shein_home else record_detail(db,key,index,pid,detail['sold_display'],config['min_sold'],fence=broker.fence,homepage_only=plan.get('strategy')=='card-home-v4'))
                 if not old:db.execute('INSERT INTO card_v3_detail_observations VALUES (?,?,?,?,?)',(*key,index,body))
                 if not broker.anchor_guard_alive() or broker.fence() is not True:raise ValueError('Current browser or lease lost')
             except (ValueError,TypeError) as error:raise CollectorProgressError('detail_validation_failed',str(error)) from error
@@ -247,13 +249,14 @@ def handle_progress(broker, event):
                                 requires_expansion=False,**{k:event[k] for k in ('request_id','window_id','session_id','tab_id')})
                 raise CollectorProgressError('checkpoint_guard_pending','请先重新核验已恢复的搜索组')
         if op == 'seal_expansion':
-            if plan.get('strategy')=='card-home-v4':
+            if plan.get('strategy') in ('card-home-v4','shein-home-v1'):
                 from .card_sales_v3_checkpoints import known_count,seal_query
                 from .card_sales_v3_pipeline import freeze_queue
-                from .home_collection_policy import next_home_query,record_end_reason
+                from .home_collection_policy import next_home_query,record_end_reason,shein_known_count
                 queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries'+where+' ORDER BY query_index',key)]
                 additions=event['queries'];lookup=getattr(broker,'home_expansion_candidates',None)
-                if (next_home_query(db,key) is not None or known_count(db,key,include_plus_hundred=True)>=100 or len(queries)>=9
+                known=shein_known_count(db,key) if shein_home else known_count(db,key,include_plus_hundred=True)
+                if (next_home_query(db,key) is not None or known>=100 or len(queries)>=9
                         or not isinstance(additions,list) or len(additions)>3 or len(queries)+len(additions)>9
                         or not callable(lookup)):
                     raise CollectorProgressError('expansion_plan_invalid','当前不能扩展搜索词')
@@ -264,7 +267,7 @@ def handle_progress(broker, event):
                     if additions:
                         for offset,q in enumerate(additions):seal_query(db,key,len(queries)+offset,q,fence=broker.fence)
                     else:
-                        freeze_queue(db,key,plan_exhausted=True,fence=broker.fence,homepage_only=True)
+                        freeze_queue(db,key,plan_exhausted=True,fence=broker.fence,homepage_only=True,platform=platform,threshold=config['min_sold'] if shein_home else None)
                         record_end_reason(db,key,'terms_exhausted',fence=broker.fence)
                     if not broker.anchor_guard_alive() or broker.fence() is not True:raise ValueError('Browser or lease lost')
                 except ValueError as error:raise CollectorProgressError('expansion_plan_invalid',str(error)) from error
@@ -544,7 +547,7 @@ def checked_detail_identity(broker, url, *, activation_started=None):
         pid, _ = _identity(url, plan['platform'])
         with closing(sqlite3.connect(broker.store.path)) as db:
             db.execute('BEGIN')
-            if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+            if plan.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1'):
                 if not db.execute('SELECT 1 FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',key).fetchone():return None
                 queue=[row[0] for row in db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',key)]
                 details=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',key)]

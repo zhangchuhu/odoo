@@ -23,6 +23,7 @@
       "js": [
         "visible_search.js",
         "gallery_visible.js",
+        "home_sales.js",
         "content.js"
       ],
       "run_at": "document_idle"

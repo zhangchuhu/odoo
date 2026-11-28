@@ -114,3 +114,48 @@ class HomeCollectionPolicyTests(unittest.TestCase):
         self.assertEqual(freeze_queue(db,scope,plan_exhausted=True,fence=lambda:True,homepage_only=True),['B'])
         body=json.loads(db.execute('select body from card_v3_queue').fetchone()[0])
         self.assertEqual(body['search_sources'],['query 0','query 1','query 2'])
+
+    def test_shein_homepage_candidates_use_card_sales_and_reject_conflicts(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import initialize
+        from optimization_worker.home_collection_policy import shein_home_query_candidates
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close);initialize(db);scope=('req','digest',1)
+        for i in range(2):
+            db.execute('insert into card_v3_queries values (?,?,?,?,?)',(*scope,i,'q'+str(i)))
+            db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',(*scope,i,1,'home_complete'))
+        rows=[[{'product_id':'1','rank':1,'sales_text':'100+ sold'}, {'product_id':'2','rank':2,'sales_text':'500+ sold'}],
+              [{'product_id':'2','rank':1,'sales_text':'100 sold'}, {'product_id':'3','rank':2,'sales_text':'200+ sold'}]]
+        for i,cards in enumerate(rows):
+            db.execute('insert into card_v3_batches values (?,?,?,?,?,?,?)',(*scope,i,1,0,json.dumps(cards)))
+        self.assertEqual([c['product_id'] for c in shein_home_query_candidates(db,scope,0,500)], ['1'])
+        self.assertEqual([c['product_id'] for c in shein_home_query_candidates(db,scope,1,500)], ['3'])
+
+    def test_shein_frozen_queue_merges_searches_and_preserves_sources(self):
+        import sqlite3,json
+        from optimization_worker.card_sales_v3_checkpoints import initialize
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline,freeze_queue
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close);initialize(db);initialize_pipeline(db);scope=('req','digest',1)
+        for i in range(3):
+            db.execute('insert into card_v3_queries values (?,?,?,?,?)',(*scope,i,'q'+str(i)))
+            cards=[{'product_id':'123','rank':1,'sales_text':'300+ sold' if i else '500+ sold','query':'q'+str(i)}]
+            db.execute('insert into card_v3_batches values (?,?,?,?,?,?,?)',(*scope,i,1,0,json.dumps(cards)))
+            db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',(*scope,i,1,'home_complete'))
+        self.assertEqual(freeze_queue(db,scope,plan_exhausted=True,fence=lambda:True,homepage_only=True,platform='shein-us',threshold=500),['123'])
+        row=json.loads(db.execute('select body from card_v3_queue').fetchone()[0])
+        self.assertEqual(row['search_sources'],['q0','q1','q2'])
+        self.assertEqual(row['sales_text'],'500+ sold')
+
+    def test_shein_state_recovers_homepage_with_english_sales(self):
+        import sqlite3,tempfile,json
+        from pathlib import Path
+        from optimization_worker.tab_receipt_store import TabReceiptStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store=TabReceiptStore(str(Path(tmp)/'ledger.db'));scope=('req','digest',1);queries=['one','two','three']
+            state=store.card_home_state(*scope,queries,lambda:True,platform='shein-us',threshold=500)
+            self.assertEqual(state['next_page'],(0,1))
+            with sqlite3.connect(store.path) as db:
+                db.execute('insert into card_v3_batches values (?,?,?,?,?,?,?)',(*scope,0,1,0,json.dumps([{'product_id':'123','rank':1,'sales_text':'500+ sold'}])))
+                db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',(*scope,0,1,'home_complete'))
+            state=store.card_home_state(*scope,queries,lambda:True,platform='shein-us',threshold=500)
+            self.assertEqual(state['next_page'],(1,1))
+            self.assertEqual(state['known_products'],1)

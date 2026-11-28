@@ -64,6 +64,22 @@ class RecoveryTest(unittest.TestCase):
         self.db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.old,0,2,'end_of_results'))
         with self.assertRaises(ValueError):validate_source_receipts(self.db,self.old,verify_photo=lambda *_:True,homepage_only=True)
 
+    def test_shein_home_recovery_requires_shein_receipts(self):
+        from optimization_worker.card_sales_v3_recovery import validate_source_receipts
+        from datetime import datetime,timezone
+        import json
+        scope=('shein','f'*64,1);stamp=datetime.now(timezone.utc).isoformat();url='https://us.shein.com/pdsearch/dress/'
+        seal_query(self.db,scope,0,'dress',fence=lambda:True)
+        self.db.execute('insert into card_v3_pages values (?,?,?,?,?,?)',(*scope,0,1,'home_complete'))
+        self.db.execute('insert into card_v3_page_evidence values (?,?,?,?,?,?,?,?,?)',(*scope,0,1,url,'c'*32,'empty',3))
+        self.db.execute('CREATE TABLE accepted_receipts (request_id TEXT,body TEXT)')
+        self.db.execute('CREATE TABLE card_v3_receipt_challenges (nonce TEXT,body TEXT,issued_at TEXT,used INTEGER)')
+        base=dict(request_id='shein',plan_digest='f'*64,lease_epoch=1,query_index=0,query='dress',session_id='d'*32,tab_id=1,window_id=2)
+        self.db.execute('insert into accepted_receipts values (?,?)',('shein',json.dumps(dict(base,version=6,platform='shein-us',observed_at=stamp))))
+        self.db.execute('insert into card_v3_receipt_challenges values (?,?,?,1)',('c'*32,json.dumps(dict(base,page=1,page_url=url)),stamp))
+        self.assertTrue(validate_source_receipts(self.db,scope,verify_photo=lambda *_:True,homepage_only=True,platform='shein-us'))
+        with self.assertRaises(ValueError):validate_source_receipts(self.db,scope,verify_photo=lambda *_:True,homepage_only=True)
+
     def test_home_recovery_preserves_verified_pages_across_multiple_leases(self):
         from optimization_worker.card_sales_v3_recovery import validate_source_receipts
         from datetime import datetime,timezone

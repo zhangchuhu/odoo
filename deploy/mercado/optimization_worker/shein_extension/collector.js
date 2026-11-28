@@ -248,11 +248,21 @@
       visual_features: status === "qualified" ? operator.visualFeatures : null};
   }
 
+  function homeDetailOutcome(expectedIdentity,visible) {
+    if (!visible || visible.blocked || visible.identity_matches!==true || visible.identity!==expectedIdentity ||
+        canonicalProductId(visible.page_url)!==visible.product_id || `shein-us:${visible.product_id}`!==expectedIdentity ||
+        typeof visible.title!=='string' || !visible.title.trim()) throw Error('home_detail_identity_unverified');
+    return {identity:expectedIdentity,status:'rejected',reason:'metric_missing_or_ambiguous',detail_url:visible.page_url,
+      product_id:visible.product_id,title:visible.title,category:visible.category || null,visual_category_code:null,
+      sold_display:null,reviews_display:visible.reviews_display || null,rating_display:visible.rating_display || null,
+      match_level:null,visual_features:null,price_observation:visible.price_observation || null,listed_at:null};
+  }
+
   const testExports = globalThis.__SHEIN_COLLECTOR_TEST__;
   if (testExports) {
     Object.assign(testExports, {
       createSession, addSearchObservations, addDetailOutcome, buildEvidence,
-      serializeEvidence, requireSafeResponse, detailOutcomePlan, nextExpectedIdentity, nextCandidate, validatePageTransition,
+      serializeEvidence, requireSafeResponse, detailOutcomePlan, homeDetailOutcome, nextExpectedIdentity, nextCandidate, validatePageTransition,
     });
   }
 
@@ -340,6 +350,11 @@
   function setStatus(message) { element("status").textContent = message; }
   function clearError() { element("error").textContent = ""; }
   function showNextCandidate() {
+    if (session?.strategy==='shein-home-v1') {
+      element('open-next-candidate').hidden=false;
+      element('next-product').textContent='按任务进度打开下一候选。';
+      return;
+    }
     const candidate = nextCandidate(session);
     element("open-next-candidate").hidden = !candidate;
     element("next-product").textContent = candidate ? `下一候选 ${candidate.identity}` : "候选核验已完成，可回传证据。";
@@ -418,10 +433,16 @@
       try {
         clearError();
         const groups = [];
-        for (let i = 0; i < 3; i++) {
-          groups.push(await globalThis.collectorCheckpoint('collector_progress', {query_index: i}));
-        }
+        groups.push(await globalThis.collectorCheckpoint('collector_progress', {query_index: 0}));
         const plan = groups[0];
+        if (plan.strategy==='shein-home-v1') {
+          const requested=element('record-id').value.trim();
+          if(requested && requested!==plan.task)throw Error('checkpoint_task_mismatch');
+          session={strategy:plan.strategy,taskRecordId:plan.task,platform:plan.platform,queries:plan.queries,resultLimit:plan.result_limit};
+          element('setup').hidden=true;element('controls').hidden=false;element('export').hidden=true;element('capture-review-photo').hidden=false;
+          showNextCandidate();setStatus('已载入 SHEIN 首页采集任务；按后台进度继续。');return;
+        }
+        for (let i = 1; i < 3; i++) groups.push(await globalThis.collectorCheckpoint('collector_progress', {query_index: i}));
         const requested = element("record-id").value.trim();
         if ((requested && requested !== plan.task) || groups.some(group => group.task !== plan.task)) {
           throw Error("checkpoint_task_mismatch：任务已变化，请核对任务绑定");
@@ -460,6 +481,19 @@
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
+        if(session.strategy==='shein-home-v1') {
+          const state=await globalThis.collectorCheckpoint('collector_progress',{query_index:0});
+          const index=state.next_page?.[0];
+          if(!Number.isInteger(index))throw Error('home_search_complete');
+          const progress=await globalThis.collectorCheckpoint('collector_progress',{query_index:index});
+          if(!progress.acknowledged || !Array.isArray(progress.cards))throw Error('home_binding_pending');
+          const query=progress.queries[index];
+          await sendToPage({type:'SHEIN_COLLECTOR_SEARCH_TOP'});
+          await SheinHomeCollector.collectHome({query,queryIndex:index,prior:progress.cards,nextBatch:progress.next_batch_index,
+            send:sendToPage,save:globalThis.saveSheinHomeBatch,finish:globalThis.finishSheinHomePage,delay,
+            onProgress:n=>setStatus(`${query}：已确认 ${n} 张首页卡片。`)});
+          setStatus(`已完成 ${query} 的首页采集。`);return;
+        }
         session.acknowledgedQueries ||= [];
         const blockIndex = session.acknowledgedQueries.length;
         const block = session.queryBlocks[blockIndex];
@@ -516,6 +550,11 @@
       button.disabled = true;
       try {
         clearError();
+        if(session?.strategy==='shein-home-v1') {
+          const progress=await globalThis.collectorCheckpoint('next_candidate',{});
+          if(!progress.candidate)throw Error('home_candidate_unavailable');
+          await globalThis.openCollectorCandidate(progress.candidate.identity,session.taskRecordId);return;
+        }
         if (session?.acknowledgedQueries?.length !== 3) throw Error("checkpoint_search_incomplete");
         await globalThis.openCollectorCandidate(nextExpectedIdentity(session), session.taskRecordId);
       } catch (error) { stopWithError(error); }
@@ -525,6 +564,14 @@
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
+        if(session.strategy==='shein-home-v1') {
+          const progress=await globalThis.collectorCheckpoint('next_candidate',{});
+          if(progress.stage!=='detail' || !progress.candidate)throw Error('home_detail_not_pending');
+          const visible=await sendToPage({type:'SHEIN_COLLECTOR_EXTRACT_HOME_DETAIL',identity:progress.candidate.identity});
+          const detail=homeDetailOutcome(progress.candidate.identity,visible);
+          const result=await globalThis.collectorCheckpoint('checkpoint_detail',{detail_index:progress.detail_index,detail,sales_only:true});
+          setStatus(`已核验 ${progress.candidate.identity}：${result.sales_screen}。`);showNextCandidate();return;
+        }
         if (session.acknowledgedQueries?.length !== 3) throw Error("checkpoint_search_incomplete：请先确认三组卡片");
         const identity = nextExpectedIdentity(session);
         const visible = await sendToPage({type: "SHEIN_COLLECTOR_EXTRACT_DETAIL", identity});
@@ -552,11 +599,29 @@
       } catch (error) { stopWithError(error); }
     }));
 
+    element('capture-review-photo').addEventListener('click',collectOnce(async()=>{
+      try {
+        clearError();
+        if(session?.strategy!=='shein-home-v1')throw Error('home_strategy_required');
+        const next=await globalThis.collectorCheckpoint('next_candidate',{});
+        if(next.stage!=='visual' || !next.candidate || !next.detail)throw Error('home_visual_not_pending');
+        const identity=next.candidate.identity,binding=await globalThis.currentGalleryBinding();
+        const observed=await globalThis.readCandidatePhoto(chrome,binding,identity);
+        const page=await sendToPage({type:'SHEIN_COLLECTOR_EXTRACT_HOME_DETAIL',identity});
+        if(!equal(homeDetailOutcome(identity,page),next.detail))throw Error('home_detail_changed');
+        await observed.recheck();
+        const receipt=await globalThis.downloadVisualCandidatePhoto({api:chrome,requestId:binding.request_id,
+          checkpoint:globalThis.collectorCheckpoint,observation:{detail:next.detail,photo:1,source:observed.source,variant:observed.variant},recheck:observed.recheck});
+        setStatus('候选原图凭证已保存，请继续视觉判断。'+receipt.receipt);
+      } catch(error) {stopWithError(error);}
+    }));
+
     element("stage-evidence").addEventListener("click", collectOnce(async () => {
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
-        if (!await globalThis.stageCollectorEvidence(JSON.parse(serializeEvidence(session)))) throw new Error("任务证据未暂存，请核验任务绑定和守护连接");
+        const evidence=session.strategy==='shein-home-v1'?{task_record_id:session.taskRecordId}:JSON.parse(serializeEvidence(session));
+        if (!await globalThis.stageCollectorEvidence(evidence)) throw new Error("任务证据未暂存，请核验任务绑定和守护连接");
         setStatus("任务证据已安全暂存，可通过 submit_staged 提交。");
       } catch(error) { element("error").textContent=String(error.message || error); }
     }));

@@ -38,12 +38,13 @@ class VisualCandidate:
         return db
 
     def current(self, db=None):
-        if self.plan['platform'] != 'mercado-libre-mx':
-            raise ValueError('Mercado Libre visual review required')
+        if (self.plan['platform'] != 'mercado-libre-mx' and
+                not (self.plan['platform']=='shein-us' and self.plan.get('strategy')=='shein-home-v1')):
+            raise ValueError('Supported visual review required')
         if db is None:
             with closing(self.open()) as existing:
                 return self.current(existing)
-        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1'):
             rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',self.key)]
             eligible=[row for row in rows if row.get('status') in ('threshold_met','supplemental')]
             ordinal=db.execute('SELECT count(*) FROM card_v3_visual_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=?',self.key).fetchone()[0]
@@ -80,7 +81,8 @@ class VisualCandidate:
             return (broker.watch_only and not broker.gallery_binding and not broker.conflict and
                     not broker.rebind_requested and broker.fence() and broker.anchor_guard_alive() and
                     broker.guard_alive(broker.session))
-        if (set(event) != fields or not broker.anchor_origin or event['native_origin'] != broker.anchor_origin or
+        origin=broker.peer_origin if self.plan.get('strategy')=='shein-home-v1' else broker.anchor_origin
+        if (set(event) != fields or not origin or event['native_origin'] != origin or
                 (event['request_id'],event['tab_id'],event['window_id'],event['session_id']) !=
                 (self.key[0],broker.tab,broker.window,broker.session) or not live()):
             fail('visual_photo_binding_invalid','需要当前候选的有效浏览器绑定')
@@ -89,7 +91,7 @@ class VisualCandidate:
             ordinal, identity = self.current(db)
             if start:
                 detail, source, variant, photo = (event[k] for k in ('detail','source','variant','photo'))
-                if (not valid_detail_fields(detail) or not self.valid_detail(detail,identity)
+                if (not valid_detail_fields(detail,shein_home=self.plan.get('strategy')=='shein-home-v1') or not self.valid_detail(detail,identity)
                         or not supported_url(source,self.plan['platform'])):
                     fail('visual_photo_candidate_invalid','商品身份、销量或图片来源未通过核验')
                 if type(photo) is not int or not 1 <= photo <= 100 or not isinstance(variant,str) or not 1 <= len(variant) <= 3500:
@@ -139,7 +141,15 @@ class VisualCandidate:
     def valid_detail(self, detail, identity):
         try:
             product, _ = _identity(detail['detail_url'],self.plan['platform'])
-            if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+            if self.plan.get('strategy')=='shein-home-v1':
+                from .visual_v3_finalize import validate_shein_result_evidence
+                with closing(sqlite3.connect(self.ledger)) as db:
+                    queue=db.execute('SELECT body FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND product_id=?',(*self.key,product)).fetchone()
+                    decision=db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND product_id=?',(*self.key,product)).fetchone()
+                if not queue or not decision:return False
+                validate_shein_result_evidence(json.loads(queue[0]),json.loads(decision[0]),detail,self.config)
+                threshold_ok=True
+            elif self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
                 from .card_sales_v3 import parse_sales, classify_detail
                 sold=parse_sales(detail['sold_display']);threshold_ok=classify_detail(sold,self.config['min_sold'],sales_text=detail['sold_display'],include_plus_hundred=self.plan.get('strategy')=='card-home-v4')!='exclude'
             else:
@@ -164,7 +174,7 @@ class VisualCandidate:
             try:
                 ordinal, identity = self.current(db)
             except ValueError as exc:
-                if str(exc) == 'No pending candidate' and self.plan.get('strategy') == 'card-home-v4':
+                if str(exc) == 'No pending candidate' and self.plan.get('strategy') in ('card-home-v4','shein-home-v1'):
                     return {'state': 'no_pending_visual'}
                 raise
             rows = db.execute('SELECT id,metadata,sha,file FROM visual_photos WHERE scope=? AND ordinal=? AND sha IS NOT NULL ORDER BY photo',
@@ -206,7 +216,7 @@ class VisualCandidate:
         return None
 
     def submit(self, data, store, fence):
-        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1'):
             return self.submit_card_v3(data,store,fence)
         if self.plan.get('strategy') == 'visual-v2':
             return self.submit_visual_v2(data,store,fence)
@@ -332,7 +342,8 @@ class VisualCandidate:
                 raise ValueError('Visual review requires verified candidate photo')
             saved=[json.loads(r[0]) for r in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',self.key)]
             eligible=[row for row in saved if row['status']!='exclude']
-            if ordinal>=len(eligible) or eligible[ordinal]['identity']!=identity.split(':',1)[1] or eligible[ordinal]['sales_text']!=detail['sold_display']:
+            if (ordinal>=len(eligible) or eligible[ordinal]['identity']!=identity.split(':',1)[1]
+                    or (self.plan.get('strategy')!='shein-home-v1' and eligible[ordinal]['sales_text']!=detail['sold_display'])):
                 raise ValueError('Candidate detail differs from confirmed observation')
             index=next(i for i,row in enumerate(saved) if row['identity']==eligible[ordinal]['identity'])
             original=db.execute('SELECT body FROM card_v3_detail_observations WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND ordinal=?',(*self.key,index)).fetchone()

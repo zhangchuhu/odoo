@@ -9,7 +9,7 @@ def append_home_batch(db,scope,index,batch_index,cards,*,fence):
     append_page_batch(db,scope,index,1,batch_index,cards,fence=fence)
 
 
-def finish_homepage(db,scope,index,data,*,fence,verify):
+def finish_homepage(db,scope,index,data,*,fence,verify,platform='mercado-libre-mx'):
     if not callable(fence) or fence() is not True:raise ValueError('Active lease required')
     if (not isinstance(scope,tuple) or len(scope)!=3 or type(index) is not int or index<0
             or not isinstance(data,dict) or set(data)!={'url','receipt_nonce','end_checks','no_results'}
@@ -18,7 +18,8 @@ def finish_homepage(db,scope,index,data,*,fence,verify):
             or not re.fullmatch(r'[a-f0-9]{32}',data['receipt_nonce'])):raise ValueError('Invalid homepage completion')
     try:url=urlsplit(data['url']);port=url.port
     except ValueError as exc:raise ValueError('Invalid homepage URL') from exc
-    if url.scheme!='https' or url.hostname!='listado.mercadolibre.com.mx' or port or url.username or url.password:
+    hosts={'mercado-libre-mx':'listado.mercadolibre.com.mx','shein-us':'us.shein.com'}
+    if platform not in hosts or url.scheme!='https' or url.hostname!=hosts[platform] or port or url.username or url.password:
         raise ValueError('Invalid homepage URL')
     if not callable(verify) or verify(data) is not True:raise ValueError('Verified page evidence required')
     if not db.execute('SELECT 1 FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?',(*scope,index)).fetchone():

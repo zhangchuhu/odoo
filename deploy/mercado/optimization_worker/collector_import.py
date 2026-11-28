@@ -12,15 +12,16 @@ from .domain import validate_result
 _CARD={'query','rank','is_ad','title','url','product_id','thumbnail_url'}
 _DETAIL={'identity','status','reason','detail_url','product_id','title','category','visual_category_code','sold_display','reviews_display','rating_display','match_level','visual_features'}
 
-def valid_detail_fields(detail, *, allow_observed_at=False):
+def valid_detail_fields(detail, *, allow_observed_at=False, shein_home=False):
     if not isinstance(detail, dict): return False
     keys = set(detail)
-    optional = {'price_observation'} | ({'observed_at'} if allow_observed_at else set())
+    optional = {'price_observation'} | ({'observed_at'} if allow_observed_at else set()) | ({'listed_at'} if shein_home else set())
     if not _DETAIL <= keys or keys - _DETAIL - optional: return False
+    if shein_home and detail.get('listed_at') is not None:return False
     price = detail.get('price_observation')
     return (price is None or (isinstance(price, dict) and set(price) == {'amount','currency','source'}
         and isinstance(price['amount'], str) and bool(re.fullmatch(r'\d{1,10}(?:\.\d{1,2})?', price['amount']))
-        and price['currency'] == 'MXN' and price['source'] == 'product_detail'))
+        and price['currency'] == ('USD' if shein_home else 'MXN') and price['source'] == 'product_detail'))
 _REASONS={'visual_category_mismatch','imagery_ambiguous_or_inaccessible','metric_missing_or_ambiguous','threshold_failure','identity_changed','detail_inaccessible'}
 _CATEGORIES=frozenset(('dress','formal_gown','jumpsuit','overalls','womens_pants_set','womens_shorts_set','womens_skirt_set','womens_suit','top','blouse','shirt','vest','blazer','jacket','coat','sweater','cardigan','pants','shorts','skirt','shoes'))
 _COLOR_SIZE = re.compile(r'(?<!\w)(?:aqua|beige|black|blue|brown|burgundy|champagne|coral|cream|cyan|fuchsia|gold|gray|green|grey|indigo|ivory|khaki|lavender|lime|magenta|maroon|mustard|navy|olive|orange|pink|purple|red|silver|tan|teal|turquoise|violet|white|yellow|amarillo|anaranjado|azul|blanco|blanca|cafe|caqui|celeste|cian|crema|dorado|fucsia|gris|lila|marron|morado|mostaza|naranja|negro|negra|oliva|plateado|purpura|rojo|roja|rosa|rosado|turquesa|verde|vino|violeta|petite|tall|curvy|maternity|chica|chico|extragrande|grande|maternal|unitalla|talla|tallas|tamano|size|xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl)(?!\w)', re.I)

@@ -62,6 +62,14 @@ class CardSalesCheckpointTests(unittest.TestCase):
     def test_product_identity_must_match_the_observed_platform_url(self):
         card=dict(self.card('MLM1','+500 vendidos'),url='https://evil.test/MLM1')
         with self.assertRaises(ValueError):append_page_batch(self.db,self.scope,0,1,0,[card],fence=lambda:True)
+
+    def test_shein_card_batch_is_explicitly_platform_scoped(self):
+        card=dict(product_id='123',url='https://us.shein.com/example-p-123.html',sales_text='500+ sold',query='vestido',rank=1)
+        with self.assertRaises(ValueError):
+            append_page_batch(self.db,self.scope,0,1,0,[card],fence=lambda:True)
+        append_page_batch(self.db,self.scope,0,1,0,[card],fence=lambda:True,platform='shein-us')
+        with self.assertRaises(ValueError):
+            append_page_batch(self.db,self.scope,0,1,1,[dict(card,product_id='456')],fence=lambda:True,platform='shein-us')
     def test_next_page_requires_verified_marketplace_url(self):
         with self.assertRaises(ValueError):finish_page(self.db,self.scope,0,1,'has_next',fence=lambda:True)
         with self.assertRaises(ValueError):finish_page(self.db,self.scope,0,1,'has_next',next_url='https://evil.test/',fence=lambda:True)

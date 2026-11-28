@@ -17,6 +17,11 @@ class HomeCompletionTests(unittest.TestCase):
         self.assertEqual(self.db.execute('select page,status from card_v3_pages').fetchall(),[(1,'home_complete')])
         self.assertEqual(self.db.execute('select count(*) from card_v3_navigation').fetchone()[0],0)
 
+    def test_shein_homepage_is_platform_scoped(self):
+        data=dict(self.data,url='https://us.shein.com/pdsearch/query/')
+        with self.assertRaises(ValueError):finish_homepage(self.db,self.scope,0,data,fence=lambda:True,verify=lambda _:True)
+        finish_homepage(self.db,self.scope,0,data,fence=lambda:True,verify=lambda _:True,platform='shein-us')
+
     def test_missing_proof_wrong_site_or_no_empty_evidence_is_rejected(self):
         with self.assertRaises(ValueError):finish_homepage(self.db,self.scope,0,self.data,fence=lambda:False,verify=lambda _:True)
         with self.assertRaises(ValueError):finish_homepage(self.db,self.scope,0,dict(self.data,url='https://example.org'),fence=lambda:True,verify=lambda _:True)

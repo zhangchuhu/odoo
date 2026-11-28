@@ -10,6 +10,22 @@ from .collector_import import _identity
 from .domain import validate_result
 
 
+def validate_shein_result_evidence(card,detail,observed,config):
+    from .shein_home_sales import classify_candidate,parse_sales
+    if (not all(isinstance(value,dict) for value in (card,detail,observed,config))
+            or observed.get('identity')!='shein-us:'+str(card.get('product_id'))
+            or detail.get('identity')!=card.get('product_id')
+            or detail.get('sales_text')!=card.get('sales_text')
+            or detail.get('sales_lower_bound')!=parse_sales(card.get('sales_text'))
+            or detail.get('reviews_display')!=observed.get('reviews_display')
+            or detail.get('min_reviews')!=config.get('min_reviews')):
+        raise ValueError('SHEIN card or review evidence mismatch')
+    try:tier=classify_candidate(card,observed,min_sold=config['min_sold'],min_reviews=config['min_reviews'])
+    except (KeyError,TypeError,ValueError) as exc:raise ValueError('Invalid SHEIN thresholds') from exc
+    if tier not in ('threshold_met','supplemental') or detail.get('status')!=tier:
+        raise ValueError('SHEIN card or review qualification mismatch')
+
+
 def snapshot_evidence(db,key,photo_scope,plan,result,task_id):
     where=' WHERE request_id=? AND plan_digest=? AND lease_epoch=?'
     queries=[dict(index=i,query=q) for i,q in db.execute('SELECT query_index,query FROM card_v3_queries'+where+' ORDER BY query_index',key)]
@@ -71,8 +87,10 @@ def build_result(db,key,photo_scope,plan,config,observed_at,verify_photo):
         pid=detail['identity'];identity=plan['platform']+':'+pid
         index=next(i for i,row in enumerate(details) if row['identity']==pid)
         observed=observations.get(index)
-        if not observed or observed.get('identity')!=identity or observed.get('product_id')!=pid or observed.get('sold_display')!=detail['sales_text']:
+        if not observed or observed.get('identity')!=identity or observed.get('product_id')!=pid:
             raise ValueError('Detail evidence mismatch')
+        if plan['platform']=='shein-us':validate_shein_result_evidence(queue[pid],detail,observed,config)
+        elif observed.get('sold_display')!=detail['sales_text']:raise ValueError('Detail evidence mismatch')
         if _identity(observed['detail_url'],plan['platform'])[0]!=pid:raise ValueError('Detail identity mismatch')
         verdict=db.execute('SELECT receipt FROM visual_verdicts WHERE scope=? AND ordinal=?',(photo_scope,ordinal)).fetchone()
         visual=db.execute('SELECT body FROM card_v3_visual WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND ordinal=?',(*key,ordinal)).fetchone()
@@ -93,7 +111,7 @@ def build_result(db,key,photo_scope,plan,config,observed_at,verify_photo):
         rating_text = observed.get('rating_display')
         rating = float(rating_text.replace(',', '.')) if isinstance(rating_text, str) and re.fullmatch(r'[0-5](?:[.,]\d{1,2})?', rating_text.strip()) else None
         if rating is not None and rating > 5: rating = None
-        if 'price_observation' not in observed: rating = None  # Preserve the original result of older checkpoints.
+        if plan['platform']!='shein-us' and 'price_observation' not in observed: rating = None  # Preserve older checkpoints.
         price = observed.get('price_observation') or {}
         result = {'platform':plan['platform'],'item_id':pid,'title':observed['title'],'url':canonical,
           'raw_url':observed['detail_url'],'query':card['query'],'position':card['rank'],'is_ad':card.get('is_ad'),
@@ -103,8 +121,16 @@ def build_result(db,key,photo_scope,plan,config,observed_at,verify_photo):
           'observed_at':observed_at,'observation_time_scope':'batch','selection_reason':row['level'],
           'evidence_ids':['collector'],'design_comparison':row['visual_comparison'],'search_sources':card.get('search_sources',[]),
           'sales_tier':detail['status']}
+        if plan['platform']=='shein-us':
+            from .collector_import import _number
+            reviews=_number(observed.get('reviews_display'))
+            result['review_count']=reviews[0] if reviews and not reviews[1] else None
         if 'price_observation' in observed:
-            result.update(price_display='MXN ' + price['amount'] if price else None,
+            currency='USD' if plan['platform']=='shein-us' else 'MXN'
+            if price and (price.get('currency')!=currency or price.get('source')!='product_detail'
+                          or not isinstance(price.get('amount'),str) or not re.fullmatch(r'\d{1,10}(?:\.\d{1,2})?',price['amount'])):
+                raise ValueError('Invalid price observation')
+            result.update(price_display=currency+' ' + price['amount'] if price else None,
                 price=price.get('amount'), currency=price.get('currency'), price_source=price.get('source'),
                 price_observed_at=(observed.get('observed_at') or observed_at) if price else None,
                 rating_source='product_detail' if rating is not None else None, listed_at=None)

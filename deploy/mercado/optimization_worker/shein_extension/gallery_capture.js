@@ -54,6 +54,16 @@
     return lines.join('\n');
   }
 
+  async function readCandidatePhoto(api,binding,identity) {
+    const page=await observe(api,binding,identity),variant=variantKey(page);
+    const source=page.rows[0]?.url;
+    if(!source)throw Error('visual_photo_missing');
+    return {source,variant,recheck:async()=>{
+      const current=await observe(api,binding,identity);
+      if(variantKey(current)!==variant || current.rows[0]?.url!==source)throw Error('visual_photo_changed');
+    }};
+  }
+
   function appendImage(draft, page, position, total, source) {
     if (!Number.isSafeInteger(total) || total < 1 || total > 100 ||
         !Number.isSafeInteger(position) || position < 1 || position > total) throw Error('请按页面所示填写图片总数和序号');
@@ -122,7 +132,8 @@
     }
   }
 
-  if (typeof module !== 'undefined') module.exports = {appendImage, submitGallery, observe, inspectGallery};
+  if (typeof module !== 'undefined') module.exports = {appendImage, submitGallery, observe, inspectGallery, readCandidatePhoto};
+  globalThis.readCandidatePhoto=readCandidatePhoto;
   if (typeof document === 'undefined') return;
   const el = id => document.getElementById(id);
   const section = el('gallery-capture');

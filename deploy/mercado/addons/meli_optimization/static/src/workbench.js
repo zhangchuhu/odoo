@@ -3,7 +3,7 @@ import { Component, onWillStart, useState, useEffect, onWillUnmount } from '@odo
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
 import { session } from '@web/session';
-import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks, groupImageTasks, imagePlanGroups, imageReviewWaiting, workbenchLocation, workbenchListPosition } from './workbench_helpers';
+import { candidateRows, displayValue, moveSelection, productFactsView, libraryMetadataOrigin, productSourceImages, groupResearchRetries, visibleCollectionTasks, groupImageTasks, imagePlanGroups, imageReviewWaiting, workbenchLocation, workbenchListPosition, collectionSubmission } from './workbench_helpers';
 
 export class OptimizationWorkbench extends Component {
     static template = 'meli_optimization.Workbench';
@@ -310,8 +310,7 @@ export class OptimizationWorkbench extends Component {
         const version=this.navigationVersion, sourceForm=this.state.form;
         const current=()=>!this.disposed && this.navigationVersion===version && this.state.modal==='collection' && this.state.form===sourceForm;
         await this.perform(async()=>{
-            const form={...this.state.form};
-            for (const key of ['min_sold','min_reviews','min_rating','result_limit']) form[key]=Number(form[key]);
+            const form=collectionSubmission(this.state.form);
             const fingerprint=JSON.stringify(form);
             if (this.state.collectionRequestPayload && this.state.collectionRequestPayload!==fingerprint) throw new Error('上次创建结果尚未确认，请恢复原内容后重试，或关闭并重新填写');
             this.state.collectionRequestPayload=fingerprint;

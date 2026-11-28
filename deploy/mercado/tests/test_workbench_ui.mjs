@@ -19,6 +19,10 @@ test('image ordering preserves selected identity and rejects bounds', () => {
 
 // A stale completed task must never replace facts for the latest snapshot.
 const helpers = await import('../addons/meli_optimization/static/src/workbench_helpers.js');
+test('new SHEIN collections use the versioned homepage strategy', () => {
+    assert.equal(helpers.collectionSubmission({platform:'shein-us',min_sold:'500',min_reviews:'20',min_rating:'4.1',result_limit:'5'}).strategy, 'shein-home-v1');
+    assert.equal(helpers.collectionSubmission({platform:'mercado-libre-mx',strategy:'shein-home-v1',min_sold:'500',min_reviews:'20',min_rating:'4.1',result_limit:'5'}).strategy, undefined);
+});
 test('image plan counts skipped pictures as finished without counting retry history twice', () => {
     const plan = {operation:'garment_swap',snapshot_id:3,selected_indices:[0,1],target_artifact_ids:['a','b']};
     const base={task_type:'image.generate',generation_plan_id:'8',snapshot_id:3};

@@ -6,36 +6,40 @@ from .visual_profile import CATEGORY_CODES
 from .home_suggestions import _normalized
 
 
-def make_bootstrap(claim,request_id,source_sha,category,anchor):
+def make_bootstrap(claim,request_id,source_sha,category,anchor,*,platform='mercado-libre-mx'):
     if (not isinstance(claim,dict) or claim.get('task_type')!='research.bestseller'
             or any(type(claim.get(k)) is not int or claim[k]<1 for k in ('id','company_id','snapshot_id','lease_epoch'))
             or not isinstance(claim.get('input_hash'),str) or not claim['input_hash']
             or not isinstance(request_id,str) or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',request_id)
             or not isinstance(source_sha,str) or not re.fullmatch(r'[0-9a-f]{64}',source_sha)
-            or not isinstance(category,str) or category not in CATEGORY_CODES):
+            or not isinstance(category,str) or category not in CATEGORY_CODES or platform not in ('mercado-libre-mx','shein-us')):
         raise ValueError('Invalid task-scoped suggestion bootstrap')
     _normalized(anchor)
-    if category=='womens_skirt_set' and ' '.join(anchor.casefold().split())!='conjunto mujer falda':
+    if platform=='mercado-libre-mx' and category=='womens_skirt_set' and ' '.join(anchor.casefold().split())!='conjunto mujer falda':
         raise ValueError('Invalid skirt set category anchor')
     fields={k:claim[k] for k in ('id','company_id','snapshot_id','lease_epoch','input_hash','task_type')}
-    fields.update(request_id=request_id,source_sha256=source_sha,category=category,anchor=anchor,version='card-home-v4')
+    fields.update(request_id=request_id,source_sha256=source_sha,category=category,anchor=anchor,version='shein-home-v1' if platform=='shein-us' else 'card-home-v4')
     fields['digest']=canonical_hash(fields)
     return fields
 
 
 def validate_bootstrap(draft,claim,request_id):
     if not isinstance(draft,dict):return False
-    try:return draft==make_bootstrap(claim,request_id,draft['source_sha256'],draft['category'],draft['anchor'])
+    try:
+        platform='shein-us' if draft.get('version')=='shein-home-v1' else 'mercado-libre-mx'
+        return draft==make_bootstrap(claim,request_id,draft['source_sha256'],draft['category'],draft['anchor'],platform=platform)
     except (KeyError,TypeError,ValueError):return False
 
 
 def bind_bootstrap(store,request_id,claim,source_id,source_sha,category,anchor,*,fence):
     from .collector_cli import validate_source
     if not callable(fence) or fence() is not True:raise ValueError('Active lease required')
-    draft=make_bootstrap(claim,request_id,source_sha,category,anchor)
     with store._db() as db:
         record=store._get(db,request_id)
         snapshot=record.get('context',{}).get('snapshot',{})
+        config=snapshot.get('payload',{}).get('collection_config',{})
+        platform='shein-us' if isinstance(config,dict) and config.get('strategy')=='shein-home-v1' else 'mercado-libre-mx'
+        draft=make_bootstrap(claim,request_id,source_sha,category,anchor,platform=platform)
         if (record.get('retired') or record.get('state')!='prepared' or record.get('task_type')!='research.bestseller'
                 or record.get('payload')!=claim.get('payload') or snapshot.get('snapshot_id')!=claim.get('snapshot_id')
                 or record.get('collector_plan')):raise ValueError('Active unplanned research request required')
@@ -71,10 +75,11 @@ def seal_suggestion_plan(store,request_id,claim,db,profile,*,fence):
     from .home_suggestions import rank_suggestions,initial_queries
     from .visual_profile import validate_profile
     if not callable(fence) or fence() is not True:raise ValueError('Active lease required')
-    checked=validate_profile(profile,'mercado-libre-mx')
-    if checked!=profile:raise ValueError('Invalid source visual profile')
     with store._db() as host_db:
         record=store._get(host_db,request_id);draft=record.get('suggestion_bootstrap')
+        platform='shein-us' if isinstance(draft,dict) and draft.get('version')=='shein-home-v1' else 'mercado-libre-mx'
+        checked=validate_profile(profile,platform)
+        if checked!=profile:raise ValueError('Invalid source visual profile')
         if (record.get('retired') or record.get('state')!='prepared' or record.get('collector_plan')
                 or not validate_bootstrap(draft,claim,request_id) or checked['category_code']!=draft['category']
                 or checked['query_seeds'][0]!=draft['anchor']):raise ValueError('Current suggestion bootstrap required')
@@ -86,7 +91,10 @@ def seal_suggestion_plan(store,request_id,claim,db,profile,*,fence):
         if any((r['prefix'],r['evidence_sha256']) not in verified for r in observed):
             raise ValueError('Suggestion observation lacks matching read evidence')
         features=checked['construction']+checked['selling_points']+checked['style']+checked['use_scene']
-        ranked=rank_suggestions(draft['category'],observed,features)
+        if platform=='shein-us':
+            from .home_suggestions import rank_shein_suggestions
+            ranked=rank_shein_suggestions(draft['category'],observed,features)
+        else:ranked=rank_suggestions(draft['category'],observed,features)
         selected=initial_queries(draft['anchor'],ranked,checked['query_seeds'][1:])
         sealed={'profile':checked,'queries':selected}
         if record.get('suggestion_selection') is not None and record['suggestion_selection']!=sealed:
@@ -113,7 +121,11 @@ def available_expansion(store,request_id,claim,db,used,*,fence):
     profile=selection['profile']
     features=profile['construction']+profile['selling_points']+profile['style']+profile['use_scene']
     seen={_normalized(q) for q in used}
-    result=[row for row in rank_suggestions(draft['category'],rows,features) if _normalized(row['text']) not in seen]
+    if draft.get('version')=='shein-home-v1':
+        from .home_suggestions import rank_shein_suggestions
+        ranked=rank_shein_suggestions(draft['category'],rows,features)
+    else:ranked=rank_suggestions(draft['category'],rows,features)
+    result=[row for row in ranked if _normalized(row['text']) not in seen]
     if fence() is not True:raise ValueError('Active lease required')
     return result
 

@@ -15,3 +15,9 @@ class ResultTierTest(unittest.TestCase):
         self.assertFalse(card_v3_tier_valid(dict(plus,sold_display='+1000 vendidos'),500,'supplemental',allow_plus_hundred=True))
         self.assertTrue(card_v3_tier_valid(dict(plus,sales_tier='threshold_met'),101,'threshold_met',allow_plus_hundred=True))
         self.assertTrue(card_v3_tier_valid(plus,102,'supplemental',allow_plus_hundred=True))
+
+    def test_shein_plus_hundred_is_platform_scoped(self):
+        plus={'sales_tier':'supplemental','sold_lower_bound':100,'sold_display':'100+ sold'}
+        self.assertTrue(card_v3_tier_valid(plus,500,'supplemental',allow_plus_hundred=True,platform='shein-us'))
+        self.assertFalse(card_v3_tier_valid(plus,500,'supplemental',allow_plus_hundred=True))
+        self.assertFalse(card_v3_tier_valid(dict(plus,sold_display='100 sold'),500,'supplemental',allow_plus_hundred=True,platform='shein-us'))

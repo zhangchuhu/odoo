@@ -8,9 +8,9 @@ TABLES=('card_v3_queries','card_v3_batches','card_v3_batch_evidence','card_v3_pa
         'card_v3_visual','card_v3_meta','card_v3_visual_source','card_v3_visual_evidence','home_collection_end')
 
 
-def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False,_lineage=None,_verified=None):
+def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False,platform='mercado-libre-mx',_lineage=None,_verified=None):
     """Require recent historical query and page proofs before copying business data."""
-    if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
+    if type(homepage_only) is not bool or platform not in ('mercado-libre-mx','shein-us') or (platform=='shein-us' and not homepage_only):raise ValueError('Invalid collection strategy')
     lineage=set() if _lineage is None else set(_lineage)
     verified=set() if _verified is None else _verified
     if scope in lineage or len(lineage)>=32:raise ValueError('Invalid recovery lineage')
@@ -35,7 +35,8 @@ def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False,_l
         verify_photo(filename,sha)
     for index,page in pages:
         query=queries.get(index)
-        matching=[r for r in receipts if r.get('version')==(5 if homepage_only else 4) and r.get('platform')=='mercado-libre-mx' and r.get('request_id')==scope[0] and r.get('plan_digest')==scope[1] and r.get('lease_epoch')==scope[2] and r.get('query_index')==index and r.get('query')==query]
+        version=6 if platform=='shein-us' else 5 if homepage_only else 4
+        matching=[r for r in receipts if r.get('version')==version and r.get('platform')==platform and r.get('request_id')==scope[0] and r.get('plan_digest')==scope[1] and r.get('lease_epoch')==scope[2] and r.get('query_index')==index and r.get('query')==query]
         accepted=[]
         for r in matching:
             try:
@@ -66,7 +67,7 @@ def validate_source_receipts(db,scope,*,verify_photo=None,homepage_only=False,_l
                 where=' WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=? ORDER BY rowid'
                 if db.execute('SELECT '+fields+' FROM '+table+where,(*scope,index,page)).fetchall()!=db.execute('SELECT '+fields+' FROM '+table+where,(*source,index,page)).fetchall():
                     raise ValueError('Recovered page evidence changed')
-            validate_source_receipts(db,tuple(source),verify_photo=verify_photo,homepage_only=True,_lineage=lineage,_verified=verified)
+            validate_source_receipts(db,tuple(source),verify_photo=verify_photo,homepage_only=True,platform=platform,_lineage=lineage,_verified=verified)
             continue
         if not current:raise ValueError('Historical page proof missing or stale')
         evidence=db.execute('SELECT page_url,receipt_nonce FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,index,page)).fetchone()

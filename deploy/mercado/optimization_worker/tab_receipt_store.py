@@ -161,11 +161,11 @@ class TabReceiptStore:
             initialize(db)
             return read_queries(db,(request_id,plan_digest,lease_epoch))
 
-    def card_home_state(self,request_id,plan_digest,lease_epoch,initial_queries,fence):
+    def card_home_state(self,request_id,plan_digest,lease_epoch,initial_queries,fence,*,platform='mercado-libre-mx',threshold=None):
         """Read homepage checkpoints without requiring historical tab receipts."""
         from .card_sales_v3_checkpoints import initialize,seal_query,known_count
         from .card_sales_v3_pipeline import initialize_pipeline,progress,freeze_queue
-        from .home_collection_policy import next_home_query,record_end_reason,end_reason
+        from .home_collection_policy import next_home_query,record_end_reason,end_reason,shein_known_count
         if not isinstance(initial_queries,list) or len(initial_queries)!=3 or not callable(fence) or fence() is not True:
             raise ValueError('Current homepage plan required')
         scope=(request_id,plan_digest,lease_epoch)
@@ -174,12 +174,12 @@ class TabReceiptStore:
             for index,query in enumerate(initial_queries):seal_query(db,scope,index,query,fence=fence)
             queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope)]
             if queries[:3]!=initial_queries:raise ValueError('Original homepage plan changed')
-            page=next_home_query(db,scope);known=known_count(db,scope,include_plus_hundred=True)
+            page=next_home_query(db,scope);known=shein_known_count(db,scope) if platform=='shein-us' else known_count(db,scope,include_plus_hundred=True)
             if page is None and (known>=100 or len(queries)>=9):
-                freeze_queue(db,scope,plan_exhausted=len(queries)>=9,fence=fence,homepage_only=True)
+                freeze_queue(db,scope,plan_exhausted=len(queries)>=9,fence=fence,homepage_only=True,platform=platform,threshold=threshold)
                 record_end_reason(db,scope,'sales_target_reached' if known>=100 else 'query_limit',fence=fence)
             state=dict(queries=queries,next_page=page,known_products=known,
-                       progress=progress(db,scope,homepage_only=True),end_reason=end_reason(db,scope))
+                       progress=progress(db,scope,homepage_only=True,platform=platform,threshold=threshold),end_reason=end_reason(db,scope))
             if fence() is not True:raise ValueError('Current lease required')
             return state
 
@@ -330,15 +330,15 @@ class TabReceiptStore:
 
     def issue(self, request):
         if (not isinstance(request, dict) or set(request) != {'version','request_id','nonce','lease_epoch','plan_digest','platform','query_index','query'}
-                or type(request['version']) is not int or request['version'] not in (1,2,3,4,5) or not isinstance(request['request_id'],str) or not request['request_id']
+                or type(request['version']) is not int or request['version'] not in (1,2,3,4,5,6) or not isinstance(request['request_id'],str) or not request['request_id']
                 or not isinstance(request['nonce'],str) or not re.fullmatch('[A-Za-z0-9_-]{32,128}',request['nonce'])
                 or type(request['lease_epoch']) is not int or request['lease_epoch'] < 1
                 or not isinstance(request['plan_digest'],str) or not re.fullmatch('[a-f0-9]{64}',request['plan_digest'])
-                or request['platform'] not in ('mercado-libre-mx','shein-us') or (request['version'] in (3,4,5) and request['platform']!='mercado-libre-mx') or type(request['query_index']) is not int or not 0 <= request['query_index'] < ({1:3,2:6,3:9,4:9,5:9}[request['version']])
+                or request['platform'] not in ('mercado-libre-mx','shein-us') or (request['version'] in (3,4,5) and request['platform']!='mercado-libre-mx') or (request['version']==6 and request['platform']!='shein-us') or type(request['query_index']) is not int or not 0 <= request['query_index'] < ({1:3,2:6,3:9,4:9,5:9,6:9}[request['version']])
                 or not isinstance(request['query'],str) or not request['query'].strip()):
             raise ValueError('Invalid challenge')
         with closing(sqlite3.connect(self.path)) as db, db:
-            if request['version'] in (4,5):
+            if request['version'] in (4,5,6):
                 from .card_sales_v3_checkpoints import initialize
                 initialize(db)
                 row = db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?',
@@ -386,12 +386,12 @@ class TabReceiptStore:
             existing=db.execute('SELECT body FROM bindings WHERE request_id=?',(request['request_id'],)).fetchone()
             old=json.loads(existing[0]) if existing else None
             changed=bool(old and old != identity)
-            if changed and (not callable(reconcile) or old['plan_digest'] != identity['plan_digest'] or old['platform'] != identity['platform'] or (request['version']!=5 and old['session_id'] == identity['session_id']) or reconcile() is not True):
+            if changed and (not callable(reconcile) or old['plan_digest'] != identity['plan_digest'] or old['platform'] != identity['platform'] or (request['version'] not in (5,6) and old['session_id'] == identity['session_id']) or reconcile() is not True):
                 raise ValueError('Browser binding changed; reconcile before rebind')
             if fence() is not True: raise ValueError('Lease fence failed')
             prior=[json.loads(r[0]) for r in db.execute('SELECT body FROM accepted_receipts WHERE request_id=? ORDER BY id',(request['request_id'],))]
             same=[r for r in prior if all(r[k]==receipt[k] for k in ('session_id','tab_id','window_id','plan_digest','lease_epoch'))]
-            if request['version']==5:
+            if request['version'] in (5,6):
                 from .home_collection_policy import next_home_query
                 scope=(request['request_id'],request['plan_digest'],request['lease_epoch'])
                 pending=next_home_query(db,scope)

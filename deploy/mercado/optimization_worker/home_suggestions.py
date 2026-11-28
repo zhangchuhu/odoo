@@ -48,6 +48,27 @@ def rank_suggestions(category, observed, image_features):
     return [row for _,row in sorted(ranked,key=lambda x:x[0])]
 
 
+def rank_shein_suggestions(category, observed, image_features):
+    """Rank visibly observed English suggestions without changing Mercado rules."""
+    if not isinstance(observed,list) or not isinstance(image_features,list):raise ValueError('Invalid suggestion observations')
+    if category not in _CATEGORY_ANCHORS:return []
+    core=_CATEGORY_ANCHORS[category][1]
+    components={'womens_skirt_set':{'skirt'},'womens_pants_set':{'pants','trousers'},'womens_shorts_set':{'short','shorts'}}
+    component=components.get(category,set())
+    features=set(' '.join(_normalized(x) for x in image_features).split())
+    seen=set();ranked=[]
+    for row in observed:
+        if not isinstance(row,dict) or type(row.get('position')) is not int or row['position']<1:raise ValueError('Invalid suggestion position')
+        text=row.get('text');norm=_normalized(text);words=set(norm.split())
+        if norm in seen:continue
+        seen.add(norm)
+        if not words & core or contains_color_or_size(text,'en-US'):continue
+        if words & (_PRODUCT_TERMS-component-core-_PRODUCT_ALIASES.get(category,set())):continue
+        specificity=1 if component and words & component else 0
+        ranked.append(((-specificity,-len(words & features),row['position']),{'text':text.strip(),'source':'platform_suggestion','position':row['position']}))
+    return [row for _,row in sorted(ranked,key=lambda x:x[0])]
+
+
 def initial_queries(anchor, ranked, fallback):
     if not isinstance(ranked,list) or not isinstance(fallback,list):raise ValueError('Invalid query sources')
     seen={_normalized(anchor)}; result=[{'text':anchor.strip(),'source':'category_anchor'}]

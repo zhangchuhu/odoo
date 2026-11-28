@@ -56,14 +56,18 @@ def rank_per_query(observations, limit=30, *, include_plus_hundred=False):
     return sorted((v for v in unique.values() if v['sales_lower_bound']>100 or (include_plus_hundred and v['sales_lower_bound']==100 and is_plus_hundred(v.get('sales_text')))),key=lambda x:(-x['sales_lower_bound'],x['first_seen'],x['product_id']))[:limit]
 
 
-def merge_candidates(query_results):
+def merge_candidates(query_results, *, prefer_sales=False):
     unique={}
     for query,rows in query_results:
         for row in rows:
             pid=row['product_id']
             if pid not in unique:unique[pid]=dict(row,search_sources=[])
             if query not in unique[pid]['search_sources']:unique[pid]['search_sources'].append(query)
-            if _later(row,unique[pid]):
+            previous_sales=unique[pid].get('sales_lower_bound')
+            current_sales=row.get('sales_lower_bound')
+            replace=(_later(row,unique[pid]) if not prefer_sales else
+                     (type(current_sales) is int and (type(previous_sales) is not int or current_sales>previous_sales or (current_sales==previous_sales and _later(row,unique[pid])))))
+            if replace:
                 previous=unique[pid];sources=previous['search_sources']
                 unique[pid]=dict(row,search_sources=sources,first_seen=min(previous['first_seen'],row['first_seen']))
     return sorted(unique.values(),key=lambda x:(-x['sales_lower_bound'],x['first_seen'],x['product_id']))

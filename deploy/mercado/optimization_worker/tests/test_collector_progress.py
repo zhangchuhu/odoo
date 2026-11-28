@@ -14,6 +14,42 @@ from optimization_worker.tests.test_collector_import import fixture
 
 
 class CandidateCheckpointTests(unittest.TestCase):
+    def test_shein_home_freezes_when_suggestions_exhausted(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline
+        self.challenge.update(version=6,platform='shein-us');self.plan.update(platform='shein-us',strategy='shein-home-v1')
+        self.broker=self.reopen();self.broker.query_verified=True
+        self.broker.progress_plan=(self.plan,{'platform':'shein-us','min_sold':500,'min_reviews':20,'min_rating':4.1,'result_limit':5})
+        self.broker.home_expansion_candidates=lambda used:[]
+        with sqlite3.connect(self.ledger) as db:
+            initialize(db);initialize_pipeline(db)
+            for i,q in enumerate(self.plan['queries']):
+                seal_query(db,self.key,i,q,fence=lambda:True)
+                db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.key,i,1,'home_complete'))
+        result=handle_progress(self.broker,dict(self.event,operation='seal_expansion',queries=[]))
+        self.assertTrue(result['finished'])
+    def test_shein_home_detail_uses_card_sales_and_task_review_threshold(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query,append_page_batch
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline,freeze_queue
+        self.challenge.update(version=6,platform='shein-us')
+        self.plan.update(platform='shein-us',strategy='shein-home-v1')
+        self.broker=self.reopen();self.broker.query_verified=True
+        config={'platform':'shein-us','min_sold':500,'min_reviews':20,'min_rating':4.1,'result_limit':5}
+        self.broker.progress_plan=(self.plan,config)
+        with sqlite3.connect(self.ledger) as db:
+            initialize(db);initialize_pipeline(db)
+            for i,q in enumerate(self.plan['queries']):
+                seal_query(db,self.key,i,q,fence=lambda:True)
+                if i==0:
+                    card=dict(query=q,product_id='123',url='https://us.shein.com/example-p-123.html',rank=1,sales_text='500+ sold')
+                    append_page_batch(db,self.key,i,1,0,[card],fence=lambda:True,platform='shein-us')
+                db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.key,i,1,'home_complete'))
+            freeze_queue(db,self.key,plan_exhausted=True,fence=lambda:True,homepage_only=True,platform='shein-us',threshold=500)
+        self.assertEqual(checked_detail_identity(self.broker,'https://us.shein.com/example-p-123.html'),'shein-us:123')
+        self.assertIsNone(checked_detail_identity(self.broker,'https://us.shein.com/example-p-124.html'))
+        detail=dict(self.data['details'][0],identity='shein-us:123',product_id='123',detail_url='https://us.shein.com/example-p-123.html',sold_display=None,reviews_display='21')
+        result=handle_progress(self.broker,dict(self.event,native_origin='peer',operation='checkpoint_detail',detail_index=0,detail=detail,sales_only=True))
+        self.assertEqual(result['sales_screen'],'threshold_met')
     def test_home_expands_only_evidenced_suggestions_and_freezes_when_exhausted(self):
         from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
         from optimization_worker.card_sales_v3_pipeline import initialize_pipeline

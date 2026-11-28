@@ -50,6 +50,36 @@ If `binding_status.failure_code` is `browser_unavailable`, report that code
 through `page_blocked` and stop. Page identity must be checked after any
 successful verification.
 
+## SHEIN US homepage research (`shein-home-v1`)
+
+This section applies only to snapshots selecting `shein-home-v1`; historical
+SHEIN tasks retain their original protocol. Read the source image, prepare an
+English category anchor with `prepare_suggestions`, observe actual suggestions
+on `us.shein.com`, and record the matching visible input and screenshot with
+`record_suggestions`. Report a real unavailability instead of inventing a list.
+Use `seal_suggestions` and bind its three queries with strategy `shein-home-v1`
+and the same design-profile schema below. Use the task's existing minimum sales,
+minimum reviews and result limit.
+
+Connect the SHEIN collector and use **恢复本任务采集进度**. Search only the
+current query's homepage, and use **Collect current search query** to save
+visible, product-scoped cards and screenshots. A visible explicit no-results
+message ends the query; its recommendations are not search results. Use
+`home_expansion_options` and `seal_expansion` for additional observed terms.
+Never follow a next-page link. For each queued product, open the next candidate
+and use **Collect current detail** to verify identity and visible review count.
+The task threshold applies to the search-card sales, not a recommended product
+or a fabricated detail-page value. Missing or insufficient reviews exclude the
+candidate; rating is optional.
+
+For a visual candidate, show the product's main gallery and choose **核验并保存当前候选原图**.
+Read the saved photo via `visual_candidate_status`, compare it with the source
+image, then call `submit_visual_verdict` with `submission_id`, `receipts`,
+`candidate_primary`, `secondary`, `styles`, `occasions`, and `features` using
+the existing card-v3 design vocabulary. After all candidates are assessed,
+stage and submit the result, and complete the requested galleries. Preserve
+confirmed checkpoints if the page, browser, or verification is unavailable.
+
 ## Mercado Libre candidate photos and visual decisions
 
 For `visual-v2`, the plan contains the fields in the plan example below plus

@@ -53,6 +53,46 @@ def home_query_candidates(db,scope,index):
     return rank_per_query([c for c in _observations(db,scope,index) if c['product_id'] not in conflicts],include_plus_hundred=True)
 
 
+def shein_home_query_candidates(db,scope,index,threshold):
+    """Select SHEIN cards after the homepage and cross-query evidence are sealed."""
+    import json
+    from .shein_home_sales import rank_cards
+    row=db.execute('SELECT status FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=1',(*scope,index)).fetchone()
+    if row != ('home_complete',) or db.execute('SELECT 1 FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND page<>1',scope).fetchone():
+        raise ValueError('Homepage incomplete or invalid')
+    grouped={}; own=[]; sequence=0
+    for query_index,body in db.execute('SELECT query_index,body FROM card_v3_batches WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY rowid',scope):
+        for card in json.loads(body):
+            sequence+=1
+            card=dict(card,first_seen=sequence,observed_order=sequence)
+            if card.get('sales_status') in ('missing','ambiguous','conflict'):
+                card['sales_text']=None
+            grouped.setdefault(card['product_id'],[]).append(card)
+            if query_index==index:own.append(card)
+    valid={pid for pid,cards in grouped.items() if rank_cards(cards,threshold=threshold,limit=1)}
+    return rank_cards([card for card in own if card['product_id'] in valid],threshold=threshold,limit=30)
+
+
+def shein_known_count(db,scope):
+    import json,re
+    from .shein_home_sales import parse_sales
+    grouped={}
+    for body, in db.execute('SELECT body FROM card_v3_batches WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY rowid',scope):
+        for card in json.loads(body):
+            if card.get('sales_status') in ('missing','ambiguous','conflict'):continue
+            text=card.get('sales_text');value=parse_sales(text)
+            if value is None:continue
+            lower=101 if value==100 and '+' in text else value
+            upper=None if '+' in text or re.search(r'k\s*\+?\s+sold\s*$',text,re.I) else value
+            grouped.setdefault(card['product_id'],[]).append((lower,upper))
+    count=0
+    for intervals in grouped.values():
+        lower=max(x[0] for x in intervals)
+        upper=min((x[1] for x in intervals if x[1] is not None),default=None)
+        if upper is None or lower<=upper:count+=1
+    return count
+
+
 def next_home_action(completed, known_products, terms_exhausted):
     if (not isinstance(completed,list) or not 3<=len(completed)<=9
             or any(type(x) is not bool for x in completed)

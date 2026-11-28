@@ -200,11 +200,15 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
     supervisor = None
     last_progress = None
     def renew(): fence(client,journal,request_id)
+    def home_options(binding):
+        if (binding.get('plan') or {}).get('strategy')=='shein-home-v1':
+            return {'platform':'shein-us','threshold':binding['collection_config']['min_sold']}
+        return {}
     def prepare_suggestions(c,data):
         from .home_suggestion_bootstrap import bind_bootstrap
         record=store.inspect(request_id)
         config=record.get('context',{}).get('snapshot',{}).get('payload',{}).get('collection_config',{})
-        if not isinstance(config,dict) or config.get('strategy')!='card-home-v4':
+        if not isinstance(config,dict) or config.get('strategy') not in ('card-home-v4','shein-home-v1'):
             raise ValueError('Homepage suggestion strategy required')
         bind_bootstrap(store,request_id,c,data['source_artifact_id'],data['viewed_source_sha256'],
                        data['category'],data['anchor'],fence=lambda:(renew() or True))
@@ -238,7 +242,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
             scope=(request_id,draft['digest'],c['lease_epoch'])
             previous=next((row for row in reads(db,scope) if row['prefix']==body.get('prefix')),None)
             stamp=previous['observed_at'] if previous and previous['evidence_sha256']==sha else datetime.now(timezone.utc).isoformat()
-            ingest(db,scope,body,sha,stamp,
+            ingest(db,scope,body,sha,stamp,platform='shein-us' if draft.get('version')=='shein-home-v1' else 'mercado-libre-mx',
                    fence=lambda:(renew() or True),verify=lambda digest:digest==sha and stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest()==digest)
     def claim():
         rows=[r for r in worker_records(journal) if r.get('request_id')==request_id and not r.get('done')]
@@ -259,15 +263,15 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         staged=plan.get('strategy')=='staged-v1'
         visual=plan.get('strategy')=='visual-v2'
         card_v3=plan.get('strategy')=='card-visual-v3'
-        card_home=plan.get('strategy')=='card-home-v4'
+        card_home=plan.get('strategy') in ('card-home-v4','shein-home-v1')
         if card_home and not direct_gallery:
-            ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+            ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True),**home_options(binding))
             def home_page_state():
-                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True),**home_options(binding))
                 if state['next_page'] is None and not ledger.current_binding(request_id):return (len(state['queries'])-1,0)
                 return state['next_page']
             def home_rebind_step():
-                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True),**home_options(binding))
                 return (len(state['queries'])-1,0)
             def home_retry(index,clear=False):
                 import sqlite3
@@ -327,7 +331,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         receipts = TabReceiptStore(str(ledger_path))
         binding = store.inspect(request_id).get('collector_plan') or {}
         strategy=(binding.get('plan') or {}).get('strategy')
-        if strategy not in ('visual-v2','card-visual-v3','card-home-v4'):
+        if strategy not in ('visual-v2','card-visual-v3','card-home-v4','shein-home-v1'):
             receipts.require_checkpoint_evidence(request_id, binding.get('digest'), c['lease_epoch'], data['evidence'],staged=strategy=='staged-v1')
         if store.inspect(request_id).get('state')=='candidate_images_pending':
             raise ValueError('Research evidence is already archived for this request')
@@ -362,8 +366,8 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         if not broker or not broker.watch_only or not supervisor.fresh_confirmation() or not callable(getattr(broker,'home_expansion_candidates',None)):
             raise ValueError('Current homepage browser session required')
         record=store.inspect(request_id);binding=record.get('collector_plan') or {};plan=binding.get('plan') or {}
-        if plan.get('strategy')!='card-home-v4':raise ValueError('Homepage strategy required')
-        state=TabReceiptStore(str(ledger_path)).card_home_state(request_id,binding['digest'],c['lease_epoch'],plan['queries'],lambda:(renew() or True))
+        if plan.get('strategy') not in ('card-home-v4','shein-home-v1'):raise ValueError('Homepage strategy required')
+        state=TabReceiptStore(str(ledger_path)).card_home_state(request_id,binding['digest'],c['lease_epoch'],plan['queries'],lambda:(renew() or True),**home_options(binding))
         if state['next_page'] is not None or state['known_products']>=100 or len(state['queries'])>=9:
             raise ValueError('Expansion not needed or not ready')
         return {'queries':broker.home_expansion_candidates(state['queries'])[:min(3,9-len(state['queries']))]}
@@ -373,7 +377,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         from .captcha_attempt_checkpoint import initialize,reserve_attempt
         record=store.inspect(request_id);config=record.get('context',{}).get('snapshot',{}).get('payload',{}).get('collection_config',{})
         if (record.get('retired') or record.get('state') not in ('prepared','candidate_images_pending')
-                or not isinstance(config,dict) or config.get('strategy')!='card-home-v4'
+                or not isinstance(config,dict) or config.get('strategy') not in ('card-home-v4','shein-home-v1')
                 or data['stage'] not in ('suggestions','search','detail','visual','gallery')):
             raise ValueError('Active homepage verification required')
         task=(c['company_id'],c['id'],c['snapshot_id'])
@@ -389,7 +393,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         from .home_verification_watch import initialize,arm
         broker=supervisor.active_broker if supervisor else None
         stage=data['stage']
-        if (stage not in ('search','detail') or not broker or broker.challenge.get('version')!=5
+        if (stage not in ('search','detail') or not broker or broker.challenge.get('version') not in (5,6)
                 or not broker.anchor_guard_alive() or broker.fence() is not True):raise ValueError('Current homepage browser required')
         if stage=='search':
             if not broker.query_verified or broker.watch_only:raise ValueError('Verified current search required')
@@ -398,11 +402,12 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
             from .collector_progress import handle_progress
             if not broker.watch_only or not broker.guard_alive(broker.session):raise ValueError('Verified current detail required')
             result=handle_progress(broker,dict(operation='next_candidate',request_id=request_id,window_id=broker.window,
-                session_id=broker.session,tab_id=broker.tab,native_origin=broker.anchor_origin))
+                session_id=broker.session,tab_id=broker.tab,native_origin=broker.peer_origin if broker.challenge.get('version')==6 else broker.anchor_origin))
             candidate=result.get('candidate') or {};identity=candidate.get('identity')
-            if result.get('stage') not in ('detail','visual') or not isinstance(identity,str) or not identity.startswith('mercado-libre-mx:'):
+            if result.get('stage') not in ('detail','visual') or not isinstance(identity,str) or not identity.startswith(broker.challenge['platform']+':'):
                 raise ValueError('Verified current detail required')
             expected={'product_id':identity.split(':',1)[1]}
+        if broker.challenge.get('version')==6:expected['platform']='shein-us'
         task=(c['company_id'],c['id'],c['snapshot_id'],c['lease_epoch'])
         browser={'tab_id':broker.tab,'window_id':broker.window,'session_id':broker.session}
         with closing(sqlite3.connect(str(ledger_path))) as db,db:
@@ -417,10 +422,10 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         staged=plan.get('strategy')=='staged-v1'
         visual=plan.get('strategy')=='visual-v2'
         card_v3=plan.get('strategy')=='card-visual-v3'
-        card_home=plan.get('strategy')=='card-home-v4'
+        card_home=plan.get('strategy') in ('card-home-v4','shein-home-v1')
         card_state=None
         if card_home and isinstance(queries,list) and len(queries)==3:
-            card_state=ledger.card_home_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
+            card_state=ledger.card_home_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True),**home_options(item))
             queries=card_state['queries'];completed=sum(card_state['progress']['completed_pages'])
             card_state['resume_step']=card_state['next_page'] or ((len(queries)-1,0) if not binding else None)
             card_state['resume_url']=None
@@ -455,7 +460,8 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
             from .collector_progress import handle_progress, CollectorProgressError
             try:
                 progress=handle_progress(active,dict(operation='next_candidate',request_id=request_id,
-                    window_id=active.window,session_id=active.session,tab_id=active.tab,native_origin=active.anchor_origin))
+                    window_id=active.window,session_id=active.session,tab_id=active.tab,
+                    native_origin=active.peer_origin if plan.get('strategy')=='shein-home-v1' else active.anchor_origin))
                 collection_stage={k:progress[k] for k in ('stage','action','reason','requires_expansion') if k in progress}
             except (CollectorProgressError, ValueError):
                 pass
@@ -480,6 +486,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
             cp=card_state['progress'];stage=(collection_stage or {}).get('stage')
             stage='finished' if stage=='finished' else 'visual' if stage in ('visual','detail') else 'search'
             keys=('known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed')
+            if plan.get('strategy')=='shein-home-v1':keys+=('reviews_met','reviews_below','reviews_unknown')
             progress=dict(stage=stage,queries=saved_groups,reviewed=cp['detail_count'],qualified=min(cp['visual_threshold_passed'],plan['result_limit']),target=plan['result_limit'],card_v3={k:cp[k] for k in keys})
             if card_home:
                 selected=(current_record.get('suggestion_selection') or {}).get('queries')
@@ -487,7 +494,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
                         or [row.get('text') for row in selected]!=plan['queries']
                         or any(row.get('source') not in ('category_anchor','platform_suggestion','image_fallback') for row in selected)):
                     raise ValueError('Original search sources required')
-                progress['strategy']='card-home-v4'
+                progress['strategy']=plan['strategy']
                 progress['end_reason']=card_state['end_reason']
                 progress['search_terms']=[{'text':row['text'],'source':row['source']} for row in selected]
                 progress['search_terms'] += [{'text':term,'source':'platform_suggestion'} for term in queries[3:]]
@@ -601,8 +608,9 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         record = store.inspect(request_id)
         binding = record.get('collector_plan') or {}
         plan = binding.get('plan') or {}
-        if record.get('state') != 'prepared' or record.get('retired') or plan.get('platform') != 'mercado-libre-mx':
-            raise ValueError('Active Mercado candidate review required')
+        if (record.get('state') != 'prepared' or record.get('retired') or
+                not (plan.get('platform')=='mercado-libre-mx' or (plan.get('platform')=='shein-us' and plan.get('strategy')=='shein-home-v1'))):
+            raise ValueError('Active supported candidate review required')
         key = (request_id,binding['digest'],c['lease_epoch'])
         review = VisualCandidate(ledger_path,key,plan,task_config(record['context']['snapshot'],plan),c)
         if data:

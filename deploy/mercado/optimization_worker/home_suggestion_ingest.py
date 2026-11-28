@@ -5,12 +5,13 @@ from .home_suggestion_checkpoint import save_read,save_observation
 from .home_suggestions import _normalized
 
 
-def ingest(db,scope,body,evidence_sha256,observed_at,*,fence,verify):
+def ingest(db,scope,body,evidence_sha256,observed_at,*,fence,verify,platform='mercado-libre-mx'):
     if not isinstance(body,dict) or set(body)!={'page_url','prefix','visible_input','state','suggestions'}:
         raise ValueError('Invalid suggestion observation')
     try:url=urlsplit(body['page_url']);port=url.port
     except (ValueError,TypeError) as exc:raise ValueError('Invalid observation page') from exc
-    if (url.scheme!='https' or url.hostname not in ('www.mercadolibre.com.mx','listado.mercadolibre.com.mx')
+    hosts={'mercado-libre-mx':('www.mercadolibre.com.mx','listado.mercadolibre.com.mx'),'shein-us':('us.shein.com',)}
+    if (platform not in hosts or url.scheme!='https' or url.hostname not in hosts[platform]
             or port or url.username or url.password):raise ValueError('Invalid observation page')
     prefix=body['prefix'];actual=body['visible_input'];state=body['state'];items=body['suggestions']
     if (not isinstance(prefix,str) or not isinstance(actual,str) or _normalized(prefix)!=_normalized(actual)

@@ -94,6 +94,18 @@ def research_prompt(action):
     supplied=action.get('collector_plan') or {}
     snapshot=action.get('context',{}).get('snapshot',{})
     config=snapshot.get('payload',{}).get('collection_config',{}) if isinstance(snapshot,dict) else {}
+    if supplied.get('strategy')=='shein-home-v1' or (isinstance(config,dict) and config.get('strategy')=='shein-home-v1'):
+        bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        return ('执行 SHEIN US shein-home-v1 采集，仅记录当前任务的真实可见证据。先阅读 '+str(bridge)+'。'
+                '分析源图，使用英文品类核心词，调用 prepare_suggestions 登记源图并读取 SHEIN 搜索框实际联想词；'
+                '读取失败时如实登记原因并使用图片回退词。调用 seal_suggestions 绑定初始词和来源，再绑定计划。'
+                '只采集首页，按后台检查点和浏览器绑定执行；每组按搜索卡片中该商品明确销量排序，最多 30 个，'
+                '按商品 ID 去重，保留来源；搜索词不足时使用 home_expansion_options 和 seal_expansion，最多九组。'
+                '以任务设置的销量门槛区分正式和补充结果，100+ sold 可作为补充；销量缺失不得推测。'
+                '详情页确认商品身份及评论数，评论数必须达到任务门槛；缺失或不足时排除。'
+                '价格和评分仅记录当前商品的可见信息，上架日期无法确认时保留未知。最多 30 个进入视觉判断并按相似度排序。'
+                '完成图库回传后结束；遇到验证码或连接失败保留已确认进度，按桥文档如实回传原因，不编造证据。'
+                '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='card-home-v4' or (isinstance(config,dict) and config.get('strategy')=='card-home-v4'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
         return ('执行墨西哥站 card-home-v4 采集，仅记录实际观察。先阅读 '+str(bridge)+'。先读取源图并分析类别，'

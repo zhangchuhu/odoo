@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { imageReviewWaiting } from '../addons/meli_optimization/static/src/workbench_helpers.js';
+import { imageReviewWaiting, collectionSubmission } from '../addons/meli_optimization/static/src/workbench_helpers.js';
 globalThis.__imageReviewWaiting = imageReviewWaiting;
+globalThis.__collectionSubmission = collectionSubmission;
 const source = (await readFile(new URL('../addons/meli_optimization/static/src/workbench.js', import.meta.url), 'utf8'))
     .replace(/^import .*;$/gm, '')
     .replace("registry.category('actions').add('meli_optimization.workbench', OptimizationWorkbench);", '');
-const { OptimizationWorkbench } = await import('data:text/javascript,' + encodeURIComponent('class Component {}\nconst imageReviewWaiting=globalThis.__imageReviewWaiting;\n' + source));
+const { OptimizationWorkbench } = await import('data:text/javascript,' + encodeURIComponent('class Component {}\nconst imageReviewWaiting=globalThis.__imageReviewWaiting;\nconst collectionSubmission=globalThis.__collectionSubmission;\n' + source));
 function fixture() {
     const ui = Object.create(OptimizationWorkbench.prototype);
     ui.state = {loading:false, detail:{id:1,revision:1,snapshot:{id:1},artifacts:[]}, selections:{7:[0]},modal:'',preview:null};

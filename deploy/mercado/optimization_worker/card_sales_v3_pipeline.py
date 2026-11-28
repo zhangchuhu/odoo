@@ -28,20 +28,27 @@ def _fence(fence):
 def _body(value):return json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
 
 
-def freeze_queue(db,scope,*,plan_exhausted,fence,homepage_only=False):
+def freeze_queue(db,scope,*,plan_exhausted,fence,homepage_only=False,platform='mercado-libre-mx',threshold=None):
     _fence(fence)
     if type(plan_exhausted) is not bool or type(homepage_only) is not bool:raise ValueError('Plan status required')
+    if platform not in ('mercado-libre-mx','shein-us') or (platform=='shein-us' and (not homepage_only or type(threshold) is not int or threshold<0)):
+        raise ValueError('Invalid platform or task threshold')
     existing=db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope).fetchall()
     frozen=db.execute('SELECT 1 FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
     if frozen:return [row[0] for row in existing]
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if len(queries)<3 or len(queries)>9 or [x[0] for x in queries]!=list(range(len(queries))):raise ValueError('Invalid search plan')
-    if known_count(db,scope,include_plus_hundred=homepage_only)<100 and len(queries)<9 and not plan_exhausted:raise ValueError('Search expansion required')
-    if homepage_only:
+    if platform=='shein-us':
+        from .home_collection_policy import shein_home_query_candidates,shein_known_count
+        known=shein_known_count(db,scope)
+        reader=lambda db,scope,index: shein_home_query_candidates(db,scope,index,threshold)
+    elif homepage_only:
         from .home_collection_policy import home_query_candidates
-        reader=home_query_candidates
-    else:reader=query_candidates
-    merged=merge_candidates([(q,reader(db,scope,i)) for i,q in queries])
+        reader=home_query_candidates;known=known_count(db,scope,include_plus_hundred=True)
+    else:
+        reader=query_candidates;known=known_count(db,scope)
+    if known<100 and len(queries)<9 and not plan_exhausted:raise ValueError('Search expansion required')
+    merged=merge_candidates([(q,reader(db,scope,i)) for i,q in queries],prefer_sales=platform=='shein-us')
     db.execute('SAVEPOINT card_v3_freeze')
     try:
         _fence(fence)
@@ -79,6 +86,41 @@ def record_detail(db,scope,index,identity,sales_text,threshold,*,fence,homepage_
     except Exception:
         db.execute('ROLLBACK TO card_v3_detail_write');db.execute('RELEASE card_v3_detail_write');raise
     db.execute('RELEASE card_v3_detail_write')
+    return status
+
+
+def record_shein_detail(db,scope,index,detail,threshold,min_reviews,*,fence):
+    """Record a SHEIN review decision against the immutable selected card."""
+    from .shein_home_sales import classify_candidate, parse_sales
+    _fence(fence)
+    meta=db.execute('SELECT threshold FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
+    if not meta or type(index) is not int or index<0 or type(threshold) is not int or threshold<0 or type(min_reviews) is not int or min_reviews<0:
+        raise ValueError('Frozen task thresholds required')
+    if meta[0] is not None and meta[0]!=threshold:raise ValueError('Task threshold changed')
+    queued=db.execute('SELECT product_id,body FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND ordinal=?',(*scope,index)).fetchone()
+    if not queued:raise ValueError('Wrong candidate')
+    card=json.loads(queued[1])
+    if card.get('product_id')!=queued[0]:raise ValueError('Wrong candidate')
+    outcome=classify_candidate(card,detail,min_sold=threshold,min_reviews=min_reviews)
+    status=outcome if outcome in ('threshold_met','supplemental') else 'exclude'
+    body=_body(dict(identity=queued[0],sales_text=card.get('sales_text'),sales_lower_bound=parse_sales(card.get('sales_text')),
+                    status=status,review_decision=outcome,reviews_display=detail.get('reviews_display'),min_reviews=min_reviews))
+    rows=db.execute('SELECT ordinal,body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope).fetchall()
+    if rows and any(json.loads(row[1]).get('min_reviews')!=min_reviews for row in rows):raise ValueError('Review threshold changed')
+    if index<len(rows):
+        if rows[index]!=(index,body):raise ValueError('Confirmed detail cannot change')
+        return status
+    if index!=len(rows):raise ValueError('Details out of order')
+    if sum(json.loads(row[1])['status']!='exclude' for row in rows)>=30:raise ValueError('Visual candidate limit reached')
+    db.execute('SAVEPOINT shein_home_detail_write')
+    try:
+        _fence(fence)
+        db.execute('UPDATE card_v3_meta SET threshold=? WHERE request_id=? AND plan_digest=? AND lease_epoch=?',(threshold,*scope))
+        db.execute('INSERT INTO card_v3_details VALUES (?,?,?,?,?,?)',(*scope,index,queued[0],body))
+        _fence(fence)
+    except Exception:
+        db.execute('ROLLBACK TO shein_home_detail_write');db.execute('RELEASE shein_home_detail_write');raise
+    db.execute('RELEASE shein_home_detail_write')
     return status
 
 
@@ -154,15 +196,20 @@ def selection(db,scope,result_limit):
             'review':[r for r in ranked if r['level']=='review']}
 
 
-def progress(db,scope,*,homepage_only=False):
+def progress(db,scope,*,homepage_only=False,platform='mercado-libre-mx',threshold=None):
     """Derive counts from confirmed checkpoints, never from browser claims."""
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if [index for index,_ in queries]!=list(range(len(queries))):raise ValueError('Invalid query history')
-    if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
-    if homepage_only:
+    if type(homepage_only) is not bool or platform not in ('mercado-libre-mx','shein-us'):raise ValueError('Invalid collection strategy')
+    if platform=='shein-us':
+        if not homepage_only or type(threshold) is not int or threshold<0:raise ValueError('Invalid SHEIN strategy')
+        from .home_collection_policy import shein_home_query_candidates,shein_known_count
+        reader=lambda db,scope,index: shein_home_query_candidates(db,scope,index,threshold)
+        known=shein_known_count(db,scope)
+    elif homepage_only:
         from .home_collection_policy import home_query_candidates
-        reader=home_query_candidates
-    else:reader=query_candidates
+        reader=home_query_candidates;known=known_count(db,scope,include_plus_hundred=True)
+    else:reader=query_candidates;known=known_count(db,scope)
     selected=[];pages=[]
     for index,_ in queries:
         history=db.execute('SELECT page,status FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? ORDER BY page',(*scope,index)).fetchall()
@@ -178,7 +225,12 @@ def progress(db,scope,*,homepage_only=False):
     passed={'threshold_met':0,'supplemental':0}
     for detail,decision in zip(eligible,decisions):
         if decision.get('level') in ('highly_similar','competitor','broad_competitor'):passed[detail['status']]+=1
-    return dict(known_products=known_count(db,scope,include_plus_hundred=homepage_only),selected_per_query=selected,completed_pages=pages,
+    result=dict(known_products=known,selected_per_query=selected,completed_pages=pages,
                 detail_count=len(details),threshold_met=statuses.count('threshold_met'),supplemental=statuses.count('supplemental'),
                 excluded=statuses.count('exclude'),visual_required=statuses.count('threshold_met')+statuses.count('supplemental'),visual_done=visual_done,
                 visual_threshold_passed=passed['threshold_met'],visual_supplemental_passed=passed['supplemental'])
+    if platform=='shein-us':
+        decisions=[row.get('review_decision') for row in details]
+        result.update(reviews_met=sum(value in ('threshold_met','supplemental') for value in decisions),
+                      reviews_below=decisions.count('review_threshold_failure'),reviews_unknown=decisions.count('review_missing'))
+    return result

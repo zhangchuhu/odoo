@@ -18,6 +18,36 @@ class LibraryCase(TransactionCase):
         super().setUp()
         self.ui = self.env['meli.optimization.case']
 
+    def test_shein_home_task_config_is_versioned_without_changing_legacy(self):
+        image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        values={'source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'shein-us','min_sold':500,'min_reviews':20,'min_rating':4.1,'result_limit':5}
+        old=self.ui.workbench_collection_create(values)['snapshot']['payload']['collection_config']
+        self.assertNotIn('strategy',old)
+        detail=self.ui.workbench_collection_create(dict(values,strategy='shein-home-v1'))
+        new=detail['snapshot']['payload']['collection_config']
+        self.assertEqual(new['strategy'],'shein-home-v1')
+        self.assertEqual(new['min_reviews'],20)
+        self.assertEqual(new['max_pages_per_query'],1)
+        self.assertFalse(self.env['meli.optimization.case'].browse(detail['id'])._collection_start_missing(self.env['meli.optimization.snapshot'].browse(detail['snapshot']['id'])))
+
+    def test_shein_home_import_requires_reviews_and_not_rating(self):
+        image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
+        values={'source_sku':'SKU','image_data':image,'image_mime':'image/png','platform':'shein-us','min_sold':500,'min_reviews':20,'min_rating':4.1,'result_limit':5,'strategy':'shein-home-v1'}
+        d=self.ui.workbench_collection_create(values);self.start_collection(d)
+        tasks=self.env['meli.optimization.task'];evidence=[{'id':'e','source':'snapshot','observed_at':'2026-11-15T00:00:00Z'}]
+        facts=tasks.search([('case_id','=',d['id']),('task_type','=','product.facts')]);c=facts.claim(['product.facts'])
+        facts.complete(c['lease_token'],c['lease_epoch'],'facts',{'schema_version':'1','evidence':evidence,'facts':[{'name':'garment','value':'dress','evidence_ids':['e']}],'uncertainties':[]})
+        keywords=tasks.search([('case_id','=',d['id']),('task_type','=','research.keywords')]);c=keywords.claim(['research.keywords'])
+        keywords.complete(c['lease_token'],c['lease_epoch'],'keywords',{'schema_version':'1','evidence':evidence,'status':'complete','keywords':[{'text':'dress','evidence_ids':['e']}]})
+        task=tasks.search([('case_id','=',d['id']),('task_type','=','research.bestseller')]);aid=self.ui.workbench_upload_garment(d['id'],image,'image/png');art=self.env['meli.optimization.artifact'].browse(aid)
+        candidate={'platform':'shein-us','item_id':'123','url':'https://us.shein.com/a-p-123.html','raw_url':'https://us.shein.com/a-p-123.html','query':'dress','selection_reason':'similar','observed_at':'2026-11-15T00:00:00Z','sold_lower_bound':500,'sold_upper_bound':None,'review_count':20,'reviews_display':'20','position':1,'sold_display':'500+ sold','sales_tier':'threshold_met','image_url':'https://example.test/image.png','visual_category':'dress','is_ad':False,'rating':None,'evidence_ids':['e']}
+        img={'artifact_id':str(aid),'image_id':'candidate','order':0,'role':'reference','source':'https://example.test/image.png','mime_type':'image/png','sha256':art.digest,'width':1,'height':1,'evidence_ids':['e']}
+        low=dict(candidate,item_id='124',review_count=19,reviews_display='19')
+        extra=dict(candidate,item_id='125',sold_display='100+ sold',sold_lower_bound=100,sales_tier='supplemental')
+        result={'schema_version':'1','evidence':evidence,'status':'complete','candidates':[candidate,low],'supplemental_candidates':[extra]};c=task.claim(['research.bestseller']);task.complete(c['lease_token'],c['lease_epoch'],'research',result)
+        imported=self.ui.workbench_library_research_import(d['id'],task.id,{'shein-us:123':img,'shein-us:124':img,'shein-us:125':img})
+        self.assertEqual(imported['pending'],['shein-us:124']);self.assertEqual(len(imported['library_ids']),2)
+
     def test_category_attribute_response_is_read_as_an_array(self):
         import io
         from odoo.addons.meli_platform_adapter.transport import PlatformResponse

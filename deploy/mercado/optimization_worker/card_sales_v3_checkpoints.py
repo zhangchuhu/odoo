@@ -56,15 +56,17 @@ def _page_ready(db,scope,index,page):
     return q[0]
 
 
-def append_page_batch(db,scope,index,page,batch_index,cards,*,fence):
+def append_page_batch(db,scope,index,page,batch_index,cards,*,fence,platform='mercado-libre-mx'):
     from .collector_import import _identity
     _fence(fence);query=_page_ready(db,scope,index,page)
+    if platform not in ('mercado-libre-mx','shein-us'):raise ValueError('Invalid platform')
+    if platform=='shein-us' and page!=1:raise ValueError('SHEIN homepage required')
     if type(batch_index) is not int or batch_index<0 or not isinstance(cards,list) or not cards:raise ValueError('Invalid card batch')
     if any(not isinstance(c,dict) or c.get('query')!=query or not isinstance(c.get('product_id'),str) or not c['product_id']
            or type(c.get('rank')) is not int or c['rank']<1 for c in cards):
         raise ValueError('Invalid card')
     for card in cards:
-        try:pid,_=_identity(card.get('url'),'mercado-libre-mx')
+        try:pid,_=_identity(card.get('url'),platform)
         except (TypeError,ValueError,AttributeError) as exc:raise ValueError('Invalid card URL') from exc
         if pid!=card['product_id']:raise ValueError('Card identity mismatch')
     key=(*scope,index,page)

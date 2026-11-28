@@ -157,6 +157,57 @@
     if (reply?.ok !== true) throw Error([reply?.error || 'checkpoint_unavailable', reply?.message].filter(Boolean).join('：'));
     return reply;
   };
+  globalThis.confirmSheinHomePage=async(queryIndex,query)=>{
+    if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 || typeof query!=='string' || !query.trim())return false;
+    try {
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_challenge',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page:1}),'cards_timeout');
+      const challenge=reply?.challenge;
+      if(!challenge || challenge.platform!=='shein-us' || challenge.request_id!==requestId || challenge.query_index!==queryIndex || challenge.query!==query || challenge.page!==1 || challenge.tab_id!==target || challenge.window_id!==tab.windowId || challenge.session_id!==session || challenge.page_url!==tab.url)return false;
+      const observed=await chrome.tabs.sendMessage(target,{type:'SHEIN_COLLECTOR_EXTRACT_SEARCH',query,prior:[],limit:30});
+      const current=await chrome.tabs.get(target);
+      if(observed?.error || observed?.page_url!==tab.url || observed?.search_query!==query || current.url!==tab.url)return false;
+      const result=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_confirm',request_id:requestId,
+        tab_id:target,window_id:tab.windowId,session_id:session,receipt:{...challenge,observed_at:new Date().toISOString()}}),'cards_timeout');
+      return result?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.saveSheinHomeBatch=async(queryIndex,query,batchIndex,cards,prior=[])=>{
+    if(!Number.isInteger(batchIndex) || batchIndex<0 || !Array.isArray(cards) || !cards.length || !Array.isArray(prior))return false;
+    try {
+      if(!await globalThis.confirmSheinHomePage(queryIndex,query))return false;
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const verify=async()=>{
+        const active=await chrome.tabs.query({active:true,windowId:tab.windowId}),current=await chrome.tabs.get(target);
+        if(active.length!==1 || active[0].id!==target || current.url!==tab.url)return false;
+        const observed=await chrome.tabs.sendMessage(target,{type:'SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH',query,prior,limit:10000});
+        if(observed?.error || observed?.page_url!==tab.url || observed?.search_query!==query || !Array.isArray(observed.observations))return false;
+        const keys=['product_id','title','is_ad','sales_text','bbox'];
+        return cards.every(card=>observed.observations.some(row=>keys.every(key=>JSON.stringify(row[key])===JSON.stringify(card[key]))));
+      };
+      if(!await verify())return false;
+      const image=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'jpeg',quality:50});
+      const match=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(image || '');
+      if(!match || match[1].length>=850000 || !await verify())return false;
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_batch',request_id:requestId,tab_id:target,
+        window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page:1,page_url:tab.url,batch_index:batchIndex,cards,screenshot:match[1]}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
+  };
+  globalThis.finishSheinHomePage=async(queryIndex,query,noResults=false)=>{
+    try {
+      if(!await globalThis.confirmSheinHomePage(queryIndex,query))return false;
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      for(let i=0;i<3;i++){
+        const state=await chrome.tabs.sendMessage(target,noResults?{type:'SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH',query,prior:[],limit:10000}:{type:'SHEIN_COLLECTOR_SCROLL'}),current=await chrome.tabs.get(target);
+        if(state?.error || (noResults ? state?.no_results!==true : state?.at_end!==true) || current.url!==tab.url)return false;
+      }
+      const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_finish',request_id:requestId,tab_id:target,
+        window_id:tab.windowId,session_id:session,query_index:queryIndex,query,page:1,page_url:tab.url,status:noResults?'end_of_results':'home_complete',next_url:null,end_checks:3,end_evidence:noResults?'empty_results':'scroll_end'}),'cards_timeout');
+      return reply?.ok===true;
+    } catch (_) {return false;}
+  };
   globalThis.openCollectorCandidate = async (expectedIdentity, taskRecordId) => {
     if (!selected || !enabled || !requestId) throw Error('checkpoint_disconnected');
     const tab = await chrome.tabs.get(target);

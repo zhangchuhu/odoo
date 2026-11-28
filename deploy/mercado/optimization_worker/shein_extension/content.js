@@ -147,12 +147,22 @@
     return classifyVisibleAd({visibleLabels: ambiguousMarker ? [...labels, "ambiguous"] : labels, visiblyOrganic: labels.length === 0 && !ambiguousMarker});
   }
 
-  function extractSearch(query, prior, limit) {
+  function extractSearch(query, prior, limit, homeSales = false) {
     const blockingError = detectBlockingWall();
     if (blockingError) return {error: blockingError};
+    if (homeSales && SheinHomeSales.noSearchResults(document,isVisible,query)) {
+      if (prior.length) return {error:'home_no_results_conflict'};
+      return {page_url:location.href,search_query:SheinVisibleSearch.visibleSearch(document,isVisible),observations:[],no_results:true};
+    }
     const viewport = {width: innerWidth, height: innerHeight, scale: devicePixelRatio || 1};
     const visible = [];
     for (const card of candidateCards()) {
+      if (homeSales && (!card.matches('.bs-product-card.product-list__item') ||
+          !card.parentElement?.matches('.product-list') || !card.parentElement.closest('.product-list-v2__section'))) continue;
+      if (homeSales) {
+        const badges = Array.from(card.querySelectorAll('.bs-product-card__sales-label'));
+        if (badges.length && !badges.some(isVisible)) continue;
+      }
       const link = [...card.querySelectorAll('a[href*="-p-"][href*=".html"]')].find(isVisible);
       const image = [...card.querySelectorAll("img")].find(isVisible);
       if (!link || !image) continue;
@@ -171,6 +181,7 @@
           product_id: explicit,
           thumbnail_url: image.currentSrc || image.src || null,
           bbox,
+          ...(homeSales ? {sales_text: SheinHomeSales.cardSales(card, isVisible)} : {}),
         });
       } catch (error) {
         return {error: `Collection stopped: ${error.message}.`};
@@ -285,6 +296,18 @@
     };
   }
 
+  function extractHomeDetail(expectedIdentity) {
+    const detail = extractDetail(expectedIdentity);
+    if (detail.blocked || !detail.identity_matches) return detail;
+    const reviews = SheinHomeSales.productReviews(document, isVisible);
+    const reviewElement = firstVisible(['.product-intro__head-reviews-text']);
+    return {...detail, sold_display: null, reviews_display: reviews, rating_display: SheinHomeSales.productRating(document, isVisible),
+      price_observation: SheinHomeSales.productPrice(document, isVisible), listed_at: null,
+      metrics_bbox: reviews && reviewElement
+        ? normalizeBox(reviewElement.getBoundingClientRect(), {width:innerWidth, height:innerHeight, scale:devicePixelRatio || 1})
+        : null};
+  }
+
   function scrollPage() {
     const blockingError = detectBlockingWall();
     if (blockingError) return {error: blockingError};
@@ -325,6 +348,8 @@
         sendResponse({error: detectBlockingWall(), page_url: location.href, search_ready: candidateCards().length > 0});
       } else if (message?.type === "SHEIN_COLLECTOR_EXTRACT_SEARCH") {
         sendResponse(extractSearch(message.query, message.prior || [], message.limit));
+      } else if (message?.type === "SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH") {
+        sendResponse(extractSearch(message.query, message.prior || [], message.limit, true));
       } else if (message?.type === "SHEIN_COLLECTOR_SCROLL") {
         sendResponse(scrollPage());
       } else if (message?.type === "SHEIN_COLLECTOR_NEXT_PAGE") {
@@ -343,6 +368,8 @@
         }
       } else if (message?.type === "SHEIN_COLLECTOR_EXTRACT_DETAIL") {
         sendResponse(extractDetail(message.identity));
+      } else if (message?.type === "SHEIN_COLLECTOR_EXTRACT_HOME_DETAIL") {
+        sendResponse(extractHomeDetail(message.identity));
       }
       return false;
     });

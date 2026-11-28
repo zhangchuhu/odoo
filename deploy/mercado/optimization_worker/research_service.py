@@ -363,12 +363,13 @@ def main():
             c = records[0]['claim']
             key = (request,bound.get('digest'),c['lease_epoch'])
             receipts=TabReceiptStore(str(ledger));staged=plan.get('strategy')=='staged-v1'
-            if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+            if plan.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1'):
                 import sqlite3
                 from contextlib import closing
                 from .visual_candidate import VisualCandidate
-                if plan.get('strategy')=='card-home-v4':
-                    state=receipts.card_home_state(*key,queries,lambda:(fence(client,journal,request) or True))
+                if plan.get('strategy') in ('card-home-v4','shein-home-v1'):
+                    options={'platform':'shein-us','threshold':bound['collection_config']['min_sold']} if plan.get('strategy')=='shein-home-v1' else {}
+                    state=receipts.card_home_state(*key,queries,lambda:(fence(client,journal,request) or True),**options)
                     groups=sum(state['progress']['completed_pages'])
                 else:
                     state=receipts.card_v3_state(*key,queries,lambda:(fence(client,journal,request) or True))

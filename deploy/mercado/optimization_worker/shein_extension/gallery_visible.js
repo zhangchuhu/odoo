@@ -18,7 +18,7 @@ function galleryError(code, message) {
 // Only use loaded image URLs from the visible main gallery, including its opened viewer.
 function readVisibleGallery(platform, doc, isVisible) {
   const mercado = platform === 'mercado-libre-mx';
-  const containers = mercado ? '.ui-pdp-gallery' : '.product-intro__gallery, .product-intro__gallery-wrap, .product-intro__galleryWrap, [data-testid="product-gallery"]';
+  const containers = mercado ? '.ui-pdp-gallery' : '.product-intro__gallery, .product-intro__gallery-wrap, .product-intro__galleryWrap, [data-testid="product-gallery"], section.main-picture';
   const roots = [...doc.querySelectorAll(containers)].filter(isVisible);
   const galleries = roots.filter(node => !roots.some(other => other !== node && other.contains(node)));
   const viewers = mercado ? [...doc.querySelectorAll('.pswp.pswp--open, .pswp[aria-hidden="false"]')].filter(isVisible) : [];

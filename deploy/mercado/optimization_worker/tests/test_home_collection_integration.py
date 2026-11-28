@@ -10,6 +10,45 @@ from optimization_worker.home_suggestions import rank_suggestions,initial_querie
 
 
 class HomeCollectionIntegrationTests(unittest.TestCase):
+    def test_shein_home_receipts_card_and_review_flow(self):
+        import tempfile,base64,io
+        from datetime import datetime,timezone
+        from pathlib import Path
+        from unittest.mock import patch
+        from PIL import Image
+        from optimization_worker.tab_receipt_store import TabReceiptStore
+        from optimization_worker.tab_receipt_broker import Broker
+        from optimization_worker.card_sales_v3_pipeline import record_shein_detail
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger=Path(tmp)/'ledger';store=TabReceiptStore(str(ledger));scope=('req','a'*64,1);queries=['dress','dress lace','casual dress']
+            store.card_home_state(*scope,queries,lambda:True,platform='shein-us',threshold=500)
+            anchor='chrome-extension://'+'a'*32+'/';peer='chrome-extension://'+'b'*32+'/';session='b'*32
+            for index,query in enumerate(queries):
+                challenge=dict(version=6,request_id='req',nonce=str(index+1)*32,lease_epoch=1,plan_digest='a'*64,platform='shein-us',query_index=index,query=query)
+                url='https://us.shein.com/pdsearch/'+query.replace(' ','-')+'/'
+                receipt=dict(challenge,session_id=session,tab_id=11,window_id=12,collector_tab_id=11,url=url,observed_at=datetime.now(timezone.utc).isoformat())
+                store.issue(challenge);store.accept(receipt,lambda:True)
+                broker=Broker(Path(tmp)/'socket',ledger,challenge,11,lambda:True,expected_window_id=12,expected_session=session,anchor_origin=anchor,peer_origin=peer,progress_plan=({'strategy':'shein-home-v1'},{'min_sold':500}))
+                broker.requested_page=1;broker.query_verified=True
+                event=dict(operation='card_v3_page_challenge',request_id='req',tab_id=11,window_id=12,session_id=session,query_index=index,query=query,page=1,native_origin=peer)
+                with patch.object(broker,'anchor_guard_alive',return_value=True):
+                    token=broker.issue_card_v3_page(event);self.assertIsNotNone(token)
+                    confirm=dict(operation='card_v3_page_confirm',request_id='req',tab_id=11,window_id=12,session_id=session,receipt=dict(token,observed_at=datetime.now(timezone.utc).isoformat()),native_origin=peer)
+                    self.assertTrue(broker.confirm_card_v3_page(confirm))
+                    if index==0:
+                        shot=io.BytesIO();Image.new('RGB',(120,120),'white').save(shot,format='JPEG');broker.card_v3_store_screenshot=lambda _: 'test.jpg'
+                        card={'product_id':'123','url':'https://us.shein.com/x-p-123.html','query':query,'rank':1,'bbox':[1,1,30,40],'sales_text':'500+ sold'}
+                        batch=dict(operation='card_v3_batch',request_id='req',tab_id=11,window_id=12,session_id=session,query_index=index,query=query,page=1,page_url=url,batch_index=0,cards=[card],screenshot=base64.b64encode(shot.getvalue()).decode(),native_origin=peer)
+                        self.assertTrue(broker.save_card_v3_batch(batch))
+                    finish=dict(operation='card_v3_page_finish',request_id='req',tab_id=11,window_id=12,session_id=session,query_index=index,query=query,page=1,page_url=url,status='home_complete' if index==0 else 'end_of_results',next_url=None,end_checks=3,end_evidence='scroll_end' if index==0 else 'empty_results',native_origin=peer)
+                    self.assertTrue(broker.finish_card_v3_page(finish))
+            state=store.card_home_state(*scope,queries,lambda:True,platform='shein-us',threshold=500)
+            self.assertIsNone(state['next_page']);self.assertEqual(state['known_products'],1)
+            with sqlite3.connect(ledger) as db:
+                self.assertEqual(freeze_queue(db,scope,plan_exhausted=True,fence=lambda:True,homepage_only=True,platform='shein-us',threshold=500),['123'])
+                detail={'product_id':'123','detail_url':'https://us.shein.com/x-p-123.html','reviews_display':'20'}
+                self.assertEqual(record_shein_detail(db,scope,0,detail,500,20,fence=lambda:True),'threshold_met')
+                self.assertEqual(db.execute('select count(*) from card_v3_pages where page>1').fetchone()[0],0)
     def test_home_search_receipts_finish_three_empty_pages_without_next_page(self):
         import tempfile
         from datetime import datetime,timezone

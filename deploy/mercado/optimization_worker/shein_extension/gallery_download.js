@@ -154,6 +154,22 @@
     fail('gallery_download_order', '宿主尚未确认图库完成');
   }
 
-  if (typeof module !== 'undefined') module.exports = {downloadGallery};
+  async function downloadVisualCandidatePhoto({api,requestId,checkpoint,observation,recheck}) {
+    const step=await checkpoint('visual_photo_start',observation);
+    if(!step?.ok || step.source!==observation.source || !validSlot(step,requestId) || step.receipt!==step.token)
+      fail('visual_photo_slot_invalid','候选原图下载位置无法确认');
+    if(step.confirmed)return step;
+    const key='visual-photo:'+step.receipt;
+    const download=()=>downloadToSlot(api,key,step,'shein-us',wait);
+    const item=await (globalThis.navigator?.locks ? navigator.locks.request(key,download) : download());
+    await recheck();
+    const receipt=await checkpoint('visual_photo_saved',{receipt:step.receipt,download_id:item.id,final_url:item.finalUrl,size:item.fileSize});
+    if(!receipt?.ok || receipt.receipt!==step.receipt || !/^[a-f0-9]{64}$/.test(receipt.sha256))
+      fail('visual_photo_receipt_invalid','候选原图凭证未确认');
+    await api.storage.local.remove(key);
+    return receipt;
+  }
+  if (typeof module !== 'undefined') module.exports = {downloadGallery,downloadVisualCandidatePhoto};
+  globalThis.downloadVisualCandidatePhoto=downloadVisualCandidatePhoto;
   globalThis.downloadVerifiedGallery = downloadGallery;
 })();

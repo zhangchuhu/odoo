@@ -212,12 +212,13 @@ def _research_status(result, items):
         _require(_text(result.get('reason')), 'invalid_result', 'Partial/empty reason required')
 
 
-def card_v3_tier_valid(candidate, threshold, tier, *, allow_plus_hundred=False):
-    if not isinstance(candidate,dict) or type(threshold) is not int or threshold<0 or tier not in ('threshold_met','supplemental'):
+def card_v3_tier_valid(candidate, threshold, tier, *, allow_plus_hundred=False, platform='mercado-libre-mx'):
+    if not isinstance(candidate,dict) or type(threshold) is not int or threshold<0 or tier not in ('threshold_met','supplemental') or platform not in ('mercado-libre-mx','shein-us'):
         return False
     sold=candidate.get('sold_lower_bound')
     text=candidate.get('sold_display')
-    plus=allow_plus_hundred and sold==100 and isinstance(text,str) and bool(re.fullmatch(r'\s*\+\s*100\s+vendidos?\s*',text,re.IGNORECASE))
+    pattern=r'\s*(?:\+\s*100|100\s*\+)\s+sold\s*' if platform=='shein-us' else r'\s*\+\s*100\s+vendidos?\s*'
+    plus=allow_plus_hundred and sold==100 and isinstance(text,str) and bool(re.fullmatch(pattern,text,re.IGNORECASE))
     effective=101 if plus else sold
     return (candidate.get('sales_tier')==tier and type(sold) is int and (sold>100 or plus)
             and (effective>=threshold if tier=='threshold_met' else effective<threshold))

@@ -38,6 +38,7 @@
     <label>Match level <select id="match-level"><option value=""></option><option>同款</option><option>高度相似</option><option>类似竞品</option></select></label>
     <label>Visible visual features, one per line <textarea id="visual-features"></textarea></label>
     <button id="collect-detail" type="button">Collect current detail</button>
+    <button id="capture-review-photo" type="button" hidden>核验并保存当前候选原图</button>
     <button id="stage-evidence" type="button">回传当前任务证据</button>
     <button id="export" type="button">Download evidence.json</button>
   </section>
@@ -78,6 +79,7 @@
   <script src="session_persistence.js"></script>
   <script src="evidence_download.js"></script>
   <script src="detail_inputs.js"></script>
+  <script src="home_collector.js"></script>
   <script src="collector.js"></script>
 </body>
 </html>

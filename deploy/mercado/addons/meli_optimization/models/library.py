@@ -115,16 +115,17 @@ class GalleryTaskAutomation(models.Model):
     def research_progress(self, token, epoch, request_id, progress):
         self._authorize('worker'); self._lock(); self._fence(token,epoch)
         config=(self.snapshot_id.payload or {}).get('collection_config')
-        card_v3=isinstance(config,dict) and config.get('strategy') in ('card-visual-v3','card-home-v4')
-        home=isinstance(config,dict) and config.get('strategy')=='card-home-v4'
-        visual=isinstance(config,dict) and config.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4')
+        card_v3=isinstance(config,dict) and config.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1')
+        home=isinstance(config,dict) and config.get('strategy') in ('card-home-v4','shein-home-v1')
+        visual=isinstance(config,dict) and config.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4','shein-home-v1')
         base={'stage','queries','reviewed','qualified','target'}
         if home:base.update(('strategy','search_terms','end_reason'))
         card=progress.get('card_v3') if isinstance(progress,dict) else None
         card_fields={'known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed'}
+        if isinstance(config,dict) and config.get('strategy')=='shein-home-v1':card_fields|={'reviews_met','reviews_below','reviews_unknown'}
         if (self.task_type!='research.bestseller' or not isinstance(request_id,str)
                 or not isinstance(progress,dict) or set(progress)!=(base|{'card_v3'} if card_v3 else base)
-                or (home and (progress.get('strategy')!='card-home-v4' or progress.get('end_reason') not in (None,'sales_target_reached','query_limit','terms_exhausted')))
+                or (home and (progress.get('strategy')!=config['strategy'] or progress.get('end_reason') not in (None,'sales_target_reached','query_limit','terms_exhausted')))
                 or progress['stage'] not in (('search','visual','finished') if visual else ('search','repeated','single','expanded','finished'))
                 or any(type(progress[k]) is not int for k in ('queries','reviewed','qualified','target'))
                 or not 0<=progress['queries']<=(9 if visual else 6) or not 0<=progress['reviewed']<=(900 if visual else 60)
@@ -723,6 +724,11 @@ class CollectionWorkbench(models.Model):
             if config['platform']=='mercado-libre-mx':
                 config.update(strategy='card-home-v4',initial_query_count=3,max_expansion_queries=6,
                               max_pages_per_query=1,sales_known_target=100,top_per_query=30,visual_limit=30)
+            elif values.get('strategy')=='shein-home-v1':
+                config.update(strategy='shein-home-v1',initial_query_count=3,max_expansion_queries=6,
+                              max_pages_per_query=1,sales_known_target=100,top_per_query=30,visual_limit=30)
+            elif values.get('strategy'):
+                raise ValidationError('不支持的采集策略')
         source_url = str(values.get('source_url') or '').strip()
         if source_url and urlsplit(source_url).scheme not in ('https', 'http'):
             raise ValidationError('来源链接仅支持 HTTP(S)，不会由服务器抓取')
@@ -969,7 +975,7 @@ class CollectionWorkbench(models.Model):
             if hashlib.sha256(raw).hexdigest() != art.digest:
                 raise ValidationError('源图摘要不匹配')
         supplemental=task.result.get('supplemental_candidates',[])
-        card_v3=config.get('strategy') in ('card-visual-v3','card-home-v4')
+        card_v3=config.get('strategy') in ('card-visual-v3','card-home-v4','shein-home-v1')
         if supplemental and not card_v3:
             raise ValidationError('当前采集策略不支持补充候选')
         candidates = task.result['candidates'] + supplemental
@@ -990,7 +996,14 @@ class CollectionWorkbench(models.Model):
             try:
                 if candidate['platform'] != config['platform'] or not images:
                     raise ValidationError('平台或图片不可用')
-                if config['platform'] == 'mercado-libre-mx':
+                if config.get('strategy')=='shein-home-v1':
+                    tier='supplemental' if candidate in supplemental else 'threshold_met'
+                    if not card_v3_tier_valid(candidate,config['min_sold'],tier,allow_plus_hundred=True,platform='shein-us'):
+                        raise ValidationError('候选销量分层不符合任务门槛')
+                    reviews = candidate.get('review_count')
+                    if reviews is None: reviews = _visible_review_lower_bound(candidate.get('reviews_display'))
+                    metrics = [(reviews, config['min_reviews'])]
+                elif config['platform'] == 'mercado-libre-mx':
                     if card_v3:
                         tier='supplemental' if candidate in supplemental else 'threshold_met'
                         if not card_v3_tier_valid(candidate,config['min_sold'],tier,allow_plus_hundred=config.get('strategy')=='card-home-v4'):
@@ -1005,7 +1018,7 @@ class CollectionWorkbench(models.Model):
                     metrics = [(reviews, config['min_reviews']), (candidate.get('rating'), config['min_rating'])]
                 if any(type(val) not in (int, float) or not math.isfinite(val) or val < minimum for val, minimum in metrics):
                     raise ValidationError('候选指标缺失或不足')
-                if config['platform'] == 'shein-us' and candidate['rating'] > 5:
+                if config['platform'] == 'shein-us' and candidate['rating'] is not None and candidate['rating'] > 5:
                     raise ValidationError('评分无效')
                 sources = [item.get('source') for item in images]
                 if [item.get('order') for item in images] != list(range(len(images))):

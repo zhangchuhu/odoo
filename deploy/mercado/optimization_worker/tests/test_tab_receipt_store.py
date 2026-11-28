@@ -22,6 +22,19 @@ class TabReceiptStoreTest(unittest.TestCase):
         import os,stat
         self.assertEqual(stat.S_IMODE(os.stat(self.store.path).st_mode),0o600)
 
+    def test_shein_home_challenge_is_fenced_to_sealed_query(self):
+        import sqlite3
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        request=dict(self.request,version=6,platform='shein-us',query='dress')
+        with sqlite3.connect(self.store.path) as db:
+            initialize(db);seal_query(db,('r1','b'*64,1),0,'dress',fence=lambda:True)
+        with self.assertRaises(ValueError):self.store.issue(dict(request,platform='mercado-libre-mx'))
+        self.store.issue(request)
+        receipt=dict(request,session_id='c'*32,tab_id=123,window_id=1,collector_tab_id=123,
+                     observed_at=datetime.now(timezone.utc).isoformat(),url='https://us.shein.com/pdsearch/dress/')
+        self.store.accept(receipt,lambda:True)
+        with self.assertRaises(ValueError):self.store.accept(receipt,lambda:True)
+
     def test_single_use_receipt_and_stable_tab(self):
         self.store.issue(self.request)
         self.store.accept(self.receipt, lambda: True)
