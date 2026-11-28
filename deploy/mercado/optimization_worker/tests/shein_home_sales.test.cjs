@@ -61,6 +61,9 @@ test('homepage card extraction adds scoped sales without changing the legacy con
   for (const f of ['home_sales.js','content.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../shein_extension',f),'utf8'),context);
   function read(type) {let result;listener({type,query:'dress',limit:30},null,x=>result=x);return result;}
   assert.equal(read('SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH').observations[0].sales_text,'500+ sold');
+  const offscreenHeading={getBoundingClientRect:()=>({...rect,top:-200,bottom:-100})};
+  context.SheinVisibleSearch.visibleSearch=(_doc,rendered)=>rendered(offscreenHeading)?'dress':null;
+  assert.equal(read('SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH').search_query,'dress');
   assert.equal('sales_text' in read('SHEIN_COLLECTOR_EXTRACT_SEARCH').observations[0],false);
   badge.getBoundingClientRect=()=>({...rect,top:150,bottom:200});
   assert.equal(read('SHEIN_COLLECTOR_EXTRACT_HOME_SEARCH').observations.length,0);

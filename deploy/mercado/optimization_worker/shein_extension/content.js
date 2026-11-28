@@ -86,6 +86,12 @@
     return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || 1) !== 0;
   }
 
+  function isRendered(element) {
+    if (!element || typeof element.getBoundingClientRect !== 'function') return false;
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || 1) !== 0;
+  }
+
   function visibleText(element) {
     return isVisible(element) ? (element.innerText || element.textContent || "").trim() : "";
   }
@@ -152,7 +158,7 @@
     if (blockingError) return {error: blockingError};
     if (homeSales && SheinHomeSales.noSearchResults(document,isVisible,query)) {
       if (prior.length) return {error:'home_no_results_conflict'};
-      return {page_url:location.href,search_query:SheinVisibleSearch.visibleSearch(document,isVisible,query),observations:[],no_results:true};
+      return {page_url:location.href,search_query:SheinVisibleSearch.visibleSearch(document,isRendered,query),observations:[],no_results:true};
     }
     const viewport = {width: innerWidth, height: innerHeight, scale: devicePixelRatio || 1};
     const visible = [];
@@ -189,7 +195,7 @@
     }
     try {
       const observations = mergeFirstVisible(visible, prior).slice(0, limit);
-      return {page_url: location.href, search_query: SheinVisibleSearch.visibleSearch(document, isVisible, query), observations};
+      return {page_url: location.href, search_query: SheinVisibleSearch.visibleSearch(document, isRendered, query), observations};
     } catch (error) {
       return {error: `Collection stopped: ${error.message}.`};
     }
