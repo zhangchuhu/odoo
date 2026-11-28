@@ -35,6 +35,12 @@ def trace_native(path, operation, stage, request_id=None, unused=None, *, code='
         message = type(transport_error).__name__
         if error_name:
             message += f' ({error_name})'
+        elif isinstance(transport_error, ValueError):
+            reason = {'Broker disconnected':'broker_disconnected', 'Unsafe broker socket':'unsafe_broker_socket',
+                      'Truncated frame':'truncated_frame', 'Invalid frame size':'invalid_frame_size',
+                      'Invalid message':'invalid_message', 'Unknown operation':'unknown_operation',
+                      'Native origin required':'native_origin_required', 'Unsafe configuration':'unsafe_configuration'}.get(str(transport_error))
+            if reason: message += f' ({reason})'
     request_id=request_id if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',request_id) else None
     row={'timestamp':datetime.now(timezone.utc).isoformat(),'stage':('broker.' if stage.startswith('broker_') else 'native.')+stage.removeprefix('broker_'),'operation':operation,'request_id':request_id,'code':code,'message':message}
     try:

@@ -27,6 +27,14 @@ class WindowTraceTests(unittest.TestCase):
    self.assertEqual(row['message'],'BlockingIOError (EAGAIN)')
    self.assertNotIn('private socket path',p.read_text())
 
+ def test_known_native_failure_records_safe_reason(self):
+  with tempfile.TemporaryDirectory() as t:
+   p=Path(t)/'trace.log'
+   trace_native(p,'binding_status','failed','req-123',code='broker_unavailable',transport_error=ValueError('Broker disconnected'))
+   row=json.loads(p.read_text());self.assertEqual(row['message'],'ValueError (broker_disconnected)')
+   trace_native(p,'binding_status','failed','req-123',code='broker_unavailable',transport_error=ValueError('secret token'))
+   self.assertNotIn('secret token',p.read_text())
+
  def test_guard_first_response_is_traced_immediately(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'socket'; log=Path(t)/'trace.log'
