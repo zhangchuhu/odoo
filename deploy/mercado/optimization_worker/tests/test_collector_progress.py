@@ -14,6 +14,12 @@ from optimization_worker.tests.test_collector_import import fixture
 
 
 class CandidateCheckpointTests(unittest.TestCase):
+    def test_shein_home_guard_accepts_extended_query_indices(self):
+        from optimization_worker.collector_progress import guarded_query_index_allowed
+        self.assertTrue(guarded_query_index_allowed(6, 5))
+        self.assertTrue(guarded_query_index_allowed(6, 8))
+        self.assertFalse(guarded_query_index_allowed(6, 9))
+        self.assertFalse(guarded_query_index_allowed(1, 5))
     def test_shein_home_freezes_when_suggestions_exhausted(self):
         from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
         from optimization_worker.card_sales_v3_pipeline import initialize_pipeline

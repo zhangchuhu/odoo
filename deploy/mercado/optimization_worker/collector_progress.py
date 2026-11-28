@@ -37,6 +37,12 @@ def reserve_staged_detail(db,key,identity,started):
     db.execute('INSERT OR REPLACE INTO staged_detail_reservations VALUES (?,?,?,?,?)',(*key,identity,started))
 
 
+def guarded_query_index_allowed(version, index):
+    if type(index) is not int:
+        return False
+    return index == 2 or (version in (2, 3, 6) and 2 <= index <= (8 if version in (3, 6) else 5))
+
+
 def handle_progress(broker, event):
     op = event['operation']
     sales_only = op == 'checkpoint_detail' and 'sales_only' in event
@@ -73,7 +79,7 @@ def handle_progress(broker, event):
     guarded_read = op == 'collector_progress' and 'expected_binding' in event
     if guarded_read:
         proof = event['expected_binding']
-        if (type(event['query_index']) is not int or (event['query_index'] != 2 and not (broker.challenge.get('version') in (2,3) and 2<=event['query_index']<=(8 if broker.challenge.get('version')==3 else 5))) or not isinstance(proof, dict)
+        if (not guarded_query_index_allowed(broker.challenge.get('version'), event['query_index']) or not isinstance(proof, dict)
                 or set(proof) != set(binding) or any(type(proof[k]) is not type(v) or proof[k] != v for k, v in binding.items())
                 or broker.conflict or broker.rebind_requested or not broker.fence()):
             raise CollectorProgressError('checkpoint_identity_changed', '原请求、计划、租约或标签身份已经改变')
