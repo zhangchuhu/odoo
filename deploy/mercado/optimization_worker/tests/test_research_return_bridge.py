@@ -216,6 +216,11 @@ class Tests(unittest.TestCase):
         diag={'stage':'search','symptom':'results_not_visible','page_type':'search','tab_match':'yes'}
         self.assertEqual(bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':diag}),{'accepted':True})
         self.assertEqual(captured[0]['diagnostic'],diag)
+        extended=dict(diag,extension_stage='binding_select',extension_code='select_timeout')
+        self.assertEqual(bridge.call(ID,'page_blocked',{'code':'browser_unavailable','diagnostic':extended}),{'accepted':True})
+        self.assertEqual(captured[-1]['diagnostic'],extended)
+        with self.assertRaises(ValueError):
+            bridge.call(ID,'page_blocked',{'code':'browser_unavailable','diagnostic':dict(extended,extension_code='secret_token')})
         with self.assertRaises(ValueError):
             bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':dict(diag,symptom='secret text')})
         with self.assertRaises(ValueError):

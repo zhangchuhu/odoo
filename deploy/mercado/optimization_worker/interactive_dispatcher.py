@@ -81,6 +81,8 @@ def gallery_prompt(action):
         '并附 diagnostic 的 stage、symptom、page_type、tab_match：stage 为 gallery、binding 或 unknown；'
         'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
         'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+        '如为扩展错误，展开“采集器连接诊断记录”，只读取本次连接后产生的最新失败；'
+        'diagnostic 可同时附 extension_stage 和 extension_code，两者只能取受控桥文档中的枚举，无法确认填 unknown，绝不复制原始消息。'
         '只记录实际观察，不写入网址、页面内容或猜测。扩展尚未连接时先连接当前任务，不能当作平台页面不可读。'
         '保留原请求及已确认进度。禁止编造原图、截图和回执。不得扫描 Downloads 或直接请求平台、图片网址。任务数据：\n'
         + json.dumps(action, ensure_ascii=False))
@@ -133,6 +135,8 @@ def research_prompt(action):
                 'stage 为 search、pagination、detail、visual、gallery、binding 或 unknown；'
                 'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
                 'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+                '如为扩展错误，展开采集器连接诊断记录，查看本次连接后的最新失败；'
+                '可同时附 extension_stage 和 extension_code，只能使用受控桥文档中的固定枚举，无法确认填 unknown，禁止复制原始错误内容。'
                 '先检查扩展页面错误和实际目标标签；无法确认的字段填 unknown，禁止猜测和传入页面内容。'
                 '不得记录验证码图片、验证码内容、cookie 或令牌。'
                 '任务数据：\n'+json.dumps(action,ensure_ascii=False))

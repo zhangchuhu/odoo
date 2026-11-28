@@ -1,4 +1,11 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+test('connection failure records the actual failing stage',async()=>{
+ const rows=[],button={addEventListener:(_,fn)=>button.click=fn},status={textContent:''};
+ const chrome={runtime:{sendMessage:async()=>({session_id:'b'.repeat(32)}),sendNativeMessage:async(_,m)=>m.operation==='binding_status'?{ok:true,request_id:'req'}:Promise.reject(new Error('select_timeout'))},tabs:{get:async()=>({id:15,windowId:4,url:'https://listado.mercadolibre.com.mx/dress'})}};
+ const c={chrome,document:{getElementById:id=>id==='binding-connect'?button:status},location:{href:'chrome-extension://id/collector.html?tab=15'},URL,Date,setTimeout,clearTimeout,setInterval:()=>{},CollectorTrace:{begin:async()=>{},append:async()=>{},appendError:async(s,e)=>rows.push([s,e.message]),render:async()=>{}}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/chrome_extension/binding.js','utf8'),c);
+ await button.click();await new Promise(r=>setTimeout(r,10));assert.ok(rows.some(([stage,code])=>stage==='binding_select' && code==='select_timeout'));
+});
 test('checkpoint records the guard failure detail when the backend requests a guard',async()=>{
  const rows=[],button={addEventListener:(_,fn)=>button.click=fn},status={textContent:''};
  const chrome={runtime:{sendMessage:async m=>m.type==='ensure_collector_guard'?{ok:false,error:'guard_binding_changed',diagnostic:'guard_not_required'}:{session_id:'b'.repeat(32)},sendNativeMessage:async(_,m)=>m.operation==='binding_status'?{ok:true,request_id:'req'}:m.operation==='select_window'?{ok:true}:m.operation==='next_candidate'?{ok:false,error:'checkpoint_guard_pending'}:{challenge:null}},tabs:{get:async()=>({id:15,windowId:4,url:'https://listado.mercadolibre.com.mx/dress'})}};

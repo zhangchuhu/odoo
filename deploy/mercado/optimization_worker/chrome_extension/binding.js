@@ -19,7 +19,7 @@
   const pollTraceLast={};
   async function trace(stage,code,error){
     if(typeof CollectorTrace==='undefined')return;
-    if(stage==='binding_status'||stage==='binding_identity'){
+    if(['binding_status','binding_identity','binding_wait'].includes(stage)){
       const value=error?CollectorTrace.errorCode(error):code;
       if(pollTraceLast[stage]===value)return;
       pollTraceLast[stage]=value;
@@ -84,16 +84,18 @@
   }
   async function tick() {
     if (!enabled || busy || activationPending) return; busy=true;
-    let stage='binding_status';
+    let stage='binding_tab';
     try {
-        const tab=await chrome.tabs.get(target), session=await sessionId();
+        const tab=await chrome.tabs.get(target);
+        stage='binding_session';const session=await sessionId();
+        stage='binding_status';
         let state=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
         if (!state || typeof state.request_id !== 'string') throw new Error('broker_identity_unavailable');
         if (requestId && requestId !== state.request_id) { enabled=false; show('任务已切换，请关闭采集器并重新打开'); return; }
         requestId=state.request_id;
         if (state.anchor_required === true && (state.anchor_active !== true || state.matches !== true)) {
           if (state.matches !== true) selected=false;
-          state=await connectAnchor(state,tab,session);
+          stage='binding_anchor';state=await connectAnchor(state,tab,session);
           if (!state) return;
         }
         await trace('binding_identity',state.ok===true?'ok':'unverified');
@@ -101,7 +103,7 @@
         if(identity) identity.textContent=state?.ok ? `任务 ${requestId}；当前标签 ${target}；任务标签 ${state.bound_tab_id ?? "待绑定"}；${state.bound_tab_id == null ? "等待首组绑定" : state.matches ? "匹配" : "不匹配，请返回任务标签"}` : `当前标签 ${target}；后台身份待核验`;
       if (selected && state.ok !== true) throw new Error("binding_unavailable");
       if (selected) {
-        await restoreGuard(state,tab);
+        stage='binding_guard';await restoreGuard(state,tab);
         if(reconnecting){
           reconnecting=false;
           await trace('binding_reconnect',state.matches===true?'ok':'unverified');
@@ -113,12 +115,14 @@
             (!tab.url || tab.url==='about:blank' || tab.url.startsWith('chrome://newtab'))) {
           if (!landingStarted) landingStarted=Date.now();
           if (Date.now()-landingStarted<15000) {
+            await trace('binding_wait','task_tab_loading');
             show('任务标签已确认，正在等待目标平台页面载入');return;
           }
+          await trace('binding_wait','task_tab_landing_timeout');
           enabled=false;show('目标平台页面尚未载入（task_tab_landing_timeout），请在已绑定标签核对页面后重新连接');return;
         }
         landingStarted=0;
-        const url=new URL(tab.url);
+        stage='binding_select';const url=new URL(tab.url);
         if (url.protocol!=='https:' || !['www.mercadolibre.com.mx','listado.mercadolibre.com.mx','articulo.mercadolibre.com.mx'].includes(url.hostname) || url.port) throw new Error('Selected window is not on the authorized platform');
         const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'select_window',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session,observed_at:new Date().toISOString()}),'select_timeout');
         if (reply?.ok !== true) {
@@ -131,7 +135,7 @@
         }
         selected=true;anchorAttempts=0;
         await trace('binding_select','ok');
-        const confirmed=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
+        stage='binding_confirm';const confirmed=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
         if (!confirmed || confirmed.request_id !== requestId || confirmed.ok !== true) {
           if(identity) identity.textContent=`当前标签 ${target}；后台身份待核验`;
           show('窗口已登记，等待后台确认身份'); return;
@@ -139,7 +143,7 @@
         if(identity) identity.textContent=`任务 ${requestId}；当前标签 ${target}；任务标签 ${confirmed.bound_tab_id ?? "待绑定"}；${confirmed.bound_tab_id == null ? "等待首组绑定" : confirmed.matches ? "匹配" : "不匹配，请返回任务标签"}`;
         state=confirmed;
         trackPopup?.(confirmed, session);
-        await restoreGuard(confirmed,tab);
+        stage='binding_guard';await restoreGuard(confirmed,tab);
         show('已登记窗口，可以新建标签');
       }
       if (state.gallery_phase === true) {
@@ -358,10 +362,13 @@
     } catch (error) { await trace('binding_activate','failed',error);show('任务标签核验或切换失败（'+(error.code||'binding_unavailable')+'）'); }
     finally {busy=false;activationPending=false;}
   });
-  if (connect) connect.addEventListener('click',()=>{
+  if (connect) connect.addEventListener('click',async()=>{
     if (busy) return;
-    void trace('binding_connect','clicked');
-    reconnecting=selected; anchorAttempts=0;landingStarted=0; enabled=true; show('正在连接当前任务'); tick();
+    show('正在连接当前任务');
+    if (typeof CollectorTrace !== 'undefined' && CollectorTrace.begin) await CollectorTrace.begin();
+    for (const key of Object.keys(pollTraceLast)) delete pollTraceLast[key];
+    await trace('binding_connect','clicked');
+    reconnecting=selected; anchorAttempts=0;landingStarted=0; enabled=true; tick();
   });
   if (dedicated && typeof dedicated.addEventListener === 'function') dedicated.addEventListener('click',async()=>{
     if (busy) return;
@@ -371,7 +378,7 @@
       const result=await bounded(chrome.runtime.sendMessage({type:'dedicated_window_register',request_id:requestId}),'window_timeout');
       if (!Number.isSafeInteger(result?.window_id) || result.window_id<=0) throw Error('window unavailable');
       show(`专用采集窗口已确认：${result.window_id}`);
-    } catch (_) {show('专用采集窗口未确认，请检查连接并保持任务暂停');}
+    } catch (error) {await trace('binding_window','failed',error);show('专用采集窗口未确认，请检查连接并保持任务暂停');}
     finally {busy=false;}
   });
   if (taskTab && typeof taskTab.addEventListener === 'function') taskTab.addEventListener('click',async()=>{
@@ -381,7 +388,7 @@
       const result=await bounded(chrome.runtime.sendMessage({type:'dedicated_task_tab_create',request_id:requestId}),'tab_timeout');
       if (!Number.isSafeInteger(result?.tab_id) || result.tab_id<=0) throw Error('tab unavailable');
       show(`已打开${result.reused?'原任务标签':'新任务标签'} ${result.tab_id}，请按当前采集阶段继续`);
-    } catch (_) {show('任务标签未确认，请检查连接并保持任务暂停');}
+    } catch (error) {await trace('binding_task_tab','failed',error);show('任务标签未确认，请检查连接并保持任务暂停');}
     finally {busy=false;}
   });
   const resumeRequest=new URL(location.href).searchParams.get('resume_request');

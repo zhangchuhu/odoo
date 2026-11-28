@@ -363,6 +363,7 @@
   function setStatus(message) { element("status").textContent = message; }
   function clearError() { element("error").textContent = ""; }
   function stopWithError(error) {
+    if (globalThis.CollectorTrace) void globalThis.CollectorTrace.appendError('collector_action', error);
     const message = error instanceof Error ? error.message : String(error);
     element("error").textContent = message.startsWith("Collection stopped:") ? message : `Collection stopped: ${message}`;
     // Intermediate business writes are idempotent. Keep the current step and

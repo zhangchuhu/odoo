@@ -24,6 +24,10 @@ _PAGE_DIAGNOSTIC = {
     'page_type': {'search','detail','extension','other','unknown'},
     'tab_match': {'yes','no','unknown'},
 }
+_EXTENSION_DIAGNOSTIC = {
+    'extension_stage': {'binding_tab','binding_session','binding_status','binding_anchor','binding_select','binding_confirm','binding_guard','binding_wait','binding_activate','binding_window','binding_task_tab','query_challenge','query_tab_get','query_page_extract','query_receipt','query_submit','collector_action','unknown'},
+    'extension_code': {'session_timeout','status_timeout','select_timeout','anchor_recovery_timeout','anchor_recovery_unavailable','anchor_rebind_pending','anchor_select_pending','broker_identity_unavailable','window_timeout','tab_timeout','session_changed_reopen','task_tab_landing_timeout','guard_ack_timeout','guard_binding_changed','receipt_query_mismatch','receipt_page_url_mismatch','receipt_page_extract_error','evidence_not_staged','error','type_error','other_error','unknown'},
+}
 
 def window_blocker_safe(supervisor, broker=None):
     """Permit a known pause only before any target tab has been observed."""
@@ -129,8 +133,9 @@ class ReturnBridge:
             raise ValueError('Invalid page blocker')
         if operation == 'page_blocked' and 'diagnostic' in data:
             diag=data['diagnostic']
-            if (not isinstance(diag,dict) or set(diag)!=set(_PAGE_DIAGNOSTIC)
-                    or any(not isinstance(diag[k],str) or diag[k] not in choices for k,choices in _PAGE_DIAGNOSTIC.items())):
+            if (not isinstance(diag,dict) or set(diag) not in (set(_PAGE_DIAGNOSTIC), set(_PAGE_DIAGNOSTIC)|set(_EXTENSION_DIAGNOSTIC))
+                    or any(not isinstance(diag[k],str) or diag[k] not in choices for k,choices in _PAGE_DIAGNOSTIC.items())
+                    or any(k in diag and (not isinstance(diag[k],str) or diag[k] not in choices) for k,choices in _EXTENSION_DIAGNOSTIC.items())):
                 raise ValueError('Invalid page diagnostic')
         if 'artifact_id' in data and not (operation in ('reconcile_image', 'reconcile_evidence') and data['artifact_id'] is None) and (not isinstance(data['artifact_id'],str) or not data['artifact_id'].isdigit()):
             raise ValueError('Invalid artifact identifier')
