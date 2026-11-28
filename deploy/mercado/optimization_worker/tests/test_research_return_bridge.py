@@ -221,6 +221,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(captured[-1]['diagnostic'],extended)
         with self.assertRaises(ValueError):
             bridge.call(ID,'page_blocked',{'code':'browser_unavailable','diagnostic':dict(extended,extension_code='secret_token')})
+        browser_diag=dict(diag,stage='binding',symptom='computer_browser_enumeration_unavailable',page_type='unknown',tab_match='unknown')
+        self.assertEqual(bridge.call(ID,'page_blocked',{'code':'browser_unavailable','diagnostic':browser_diag}),{'accepted':True})
         with self.assertRaises(ValueError):
             bridge.call(ID,'page_blocked',{'code':'page_unreadable','diagnostic':dict(diag,symptom='secret text')})
         with self.assertRaises(ValueError):

@@ -20,7 +20,7 @@ _FIELDS = {'prepare_suggestions': {'source_artifact_id','viewed_source_sha256','
            'reconcile_image': {'identity','artifact_id','order'}, 'reconcile_evidence': {'artifact_id'}}
 _PAGE_DIAGNOSTIC = {
     'stage': {'search','pagination','detail','visual','gallery','binding','unknown'},
-    'symptom': {'results_not_visible','search_input_missing','page_loading','page_error','access_blocked','captcha','login','tab_mismatch','extension_error','navigation_failed','unknown'},
+    'symptom': {'results_not_visible','search_input_missing','page_loading','page_error','access_blocked','captcha','login','tab_mismatch','extension_error','navigation_failed','computer_browser_enumeration_unavailable','unknown'},
     'page_type': {'search','detail','extension','other','unknown'},
     'tab_match': {'yes','no','unknown'},
 }
