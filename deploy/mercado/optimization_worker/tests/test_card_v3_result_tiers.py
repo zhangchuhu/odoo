@@ -8,3 +8,10 @@ class ResultTierTest(unittest.TestCase):
         self.assertFalse(card_v3_tier_valid({'sales_tier':'supplemental','sold_lower_bound':100},500,'supplemental'))
         self.assertFalse(card_v3_tier_valid({'sales_tier':'supplemental','sold_lower_bound':500},500,'supplemental'))
         self.assertFalse(card_v3_tier_valid({'sales_tier':'threshold_met','sold_lower_bound':100},0,'threshold_met'))
+        plus={'sales_tier':'supplemental','sold_lower_bound':100,'sold_display':'+100 vendidos'}
+        self.assertTrue(card_v3_tier_valid(plus,500,'supplemental',allow_plus_hundred=True))
+        self.assertFalse(card_v3_tier_valid(plus,500,'supplemental'))
+        self.assertFalse(card_v3_tier_valid(dict(plus,sold_display='100 vendidos'),500,'supplemental',allow_plus_hundred=True))
+        self.assertFalse(card_v3_tier_valid(dict(plus,sold_display='+1000 vendidos'),500,'supplemental',allow_plus_hundred=True))
+        self.assertTrue(card_v3_tier_valid(dict(plus,sales_tier='threshold_met'),101,'threshold_met',allow_plus_hundred=True))
+        self.assertTrue(card_v3_tier_valid(plus,102,'supplemental',allow_plus_hundred=True))

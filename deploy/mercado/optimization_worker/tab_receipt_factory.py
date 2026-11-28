@@ -54,9 +54,9 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
             or digest != canonical_hash(signed) or binding.get('request_id')!=request_id
             or binding.get('snapshot_id')!=claim['snapshot_id'] or binding.get('company_id')!=claim['company_id']
             or binding.get('input_hash')!=claim['input_hash'] or plan.get('platform') not in ('mercado-libre-mx','shein-us')
-            or not isinstance(queries,list) or len(queries)!=3 or type(query_index) is not int or not 0<=query_index<(9 if plan.get('strategy') in ('visual-v2','card-visual-v3') else 6 if plan.get('strategy')=='staged-v1' else 3)):
+            or not isinstance(queries,list) or len(queries)!=3 or type(query_index) is not int or not 0<=query_index<(9 if plan.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4') else 6 if plan.get('strategy')=='staged-v1' else 3)):
         raise ValueError('Valid signed current plan required')
-    if plan.get('strategy') == 'card-visual-v3':
+    if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
         from .card_sales_v3_checkpoints import initialize, seal_query
         with closing(sqlite3.connect(str(ledger))) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -91,7 +91,7 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
         query=expansion['queries'][query_index-3]
     else:
         query=queries[query_index]
-    challenge={'version':4 if plan.get('strategy')=='card-visual-v3' else 3 if plan.get('strategy')=='visual-v2' else 2 if plan.get('strategy')=='staged-v1' else 1,'request_id':request_id,'nonce':secrets.token_hex(16),'lease_epoch':claim['lease_epoch'],
+    challenge={'version':5 if plan.get('strategy')=='card-home-v4' else 4 if plan.get('strategy')=='card-visual-v3' else 3 if plan.get('strategy')=='visual-v2' else 2 if plan.get('strategy')=='staged-v1' else 1,'request_id':request_id,'nonce':secrets.token_hex(16),'lease_epoch':claim['lease_epoch'],
                'plan_digest':digest,'platform':plan['platform'],'query_index':query_index,'query':query}
     rows=[r for r in worker_records(journal, task_id=claim['id']) if r.get('request_id')==request_id and not r.get('done')]
     if record.get('state')=='candidate_images_pending' and not watch_only and (len(rows)!=1 or not can_rebind(record,rows[0])):
@@ -118,9 +118,17 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
                                       None, claim)
             preview_reader = lambda identity,source,variant: preview.reuse_first_photo(store,identity,source,variant)
         downloads = GalleryDownloads(store,client,claim,Path.home()/'Downloads',preview_reader)
-    if query_index and not gallery and not current_binding: raise ValueError('First query tab binding required')
+    if query_index and not gallery and not current_binding and plan.get('strategy')!='card-home-v4': raise ValueError('First query tab binding required')
     if watch_only and not gallery:
-        if plan.get('strategy')=='card-visual-v3':
+        if plan.get('strategy')=='card-home-v4':
+            from .home_collection_policy import next_home_query
+            with closing(sqlite3.connect(str(ledger))) as db:
+                scope=(request_id,digest,claim['lease_epoch'])
+                all_queries=[row[0] for row in db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope)]
+                pages_complete=next_home_query(db,scope) is None
+                evidence_count=db.execute('SELECT count(*) FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND page=1',scope).fetchone()[0]
+            complete=len(all_queries) if pages_complete and evidence_count==len(all_queries) else 0
+        elif plan.get('strategy')=='card-visual-v3':
             from .card_sales_v3_checkpoints import next_page
             with closing(sqlite3.connect(str(ledger))) as db:
                 scope=(request_id,digest,claim['lease_epoch'])
@@ -142,7 +150,7 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
     def reconcile():
         rows=[r for r in worker_records(journal, task_id=claim['id']) if r.get('request_id')==request_id and not r.get('done')]
         return len(rows)==1 and renew() and can_rebind(store.inspect(request_id),rows[0])
-    if rebind and not gallery and (query_index!=0 or not current_binding or not reconcile()): raise ValueError('Rebind requires a reconciled original request')
+    if rebind and not gallery and ((query_index!=0 and plan.get('strategy')!='card-home-v4') or not current_binding or not reconcile()): raise ValueError('Rebind requires a reconciled original request')
     def capture_gallery(event, ensure_current):
         from .candidate_image_upload import capture_native_gallery
         return capture_native_gallery(store, request_id, current(claim['id']), event, ensure_current)
@@ -154,15 +162,21 @@ def build_native_broker(path, ledger, request_id, query_index, store, client, jo
                   reconcile=reconcile if rebind else None, rebind_check=reconcile if existing or gallery else None,watch_only=bool(watch_only or gallery),anchor_origin=anchor_origin,peer_origin=peer_origin,
                   gallery_binding=gallery,gallery_downloads=downloads,gallery_capture=capture_gallery, progress_plan=(plan, task_config(record.get('context', {}).get('snapshot', {}), plan)) if 'result_limit' in plan else None)
     broker.task_id = claim['id']
-    if plan.get('strategy')=='card-visual-v3':
+    if plan.get('strategy') in ('card-visual-v3','card-home-v4'):
         broker.card_v3_store_screenshot=lambda raw:Path(store._file(raw)).name
+    if plan.get('strategy')=='card-home-v4':
+        def home_expansion_candidates(used):
+            from .home_suggestion_bootstrap import available_expansion
+            with closing(sqlite3.connect(str(ledger))) as db:
+                return [row['text'] for row in available_expansion(store,request_id,current(claim['id']),db,used,fence=renew)]
+        broker.home_expansion_candidates=home_expansion_candidates
     if dedicated_required and watch_only and not gallery and plan['platform']=='mercado-libre-mx':
         from .visual_candidate import VisualCandidate
         preview = VisualCandidate(ledger, (request_id,digest,claim['lease_epoch']), plan,
                                   broker.progress_plan[1], claim)
         if plan.get('strategy') == 'visual-v2':
             broker.visual_v2_scope=preview.scope
-        elif plan.get('strategy') == 'card-visual-v3':
+        elif plan.get('strategy') in ('card-visual-v3','card-home-v4'):
             broker.visual_v3_scope=preview.scope
             broker.visual_v3_verify_photo=lambda filename,sha:preview.photo(store.files,filename,sha)
         broker.visual_photo = lambda b,e: preview.native(b,e,store,Path.home()/'Downloads')

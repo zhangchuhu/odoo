@@ -14,6 +14,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
 from .optimization import PREFIX, ExactJson, bounded, MAX_BINARY
 from ..domain import canonical_hash, validate_gallery, validate_result, card_v3_tier_valid
+from ..domain.historical_rating import historical_rating
 
 
 def _visible_review_lower_bound(value):
@@ -114,13 +115,16 @@ class GalleryTaskAutomation(models.Model):
     def research_progress(self, token, epoch, request_id, progress):
         self._authorize('worker'); self._lock(); self._fence(token,epoch)
         config=(self.snapshot_id.payload or {}).get('collection_config')
-        card_v3=isinstance(config,dict) and config.get('strategy')=='card-visual-v3'
-        visual=isinstance(config,dict) and config.get('strategy') in ('visual-v2','card-visual-v3')
+        card_v3=isinstance(config,dict) and config.get('strategy') in ('card-visual-v3','card-home-v4')
+        home=isinstance(config,dict) and config.get('strategy')=='card-home-v4'
+        visual=isinstance(config,dict) and config.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4')
         base={'stage','queries','reviewed','qualified','target'}
+        if home:base.update(('strategy','search_terms','end_reason'))
         card=progress.get('card_v3') if isinstance(progress,dict) else None
         card_fields={'known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed'}
         if (self.task_type!='research.bestseller' or not isinstance(request_id,str)
                 or not isinstance(progress,dict) or set(progress)!=(base|{'card_v3'} if card_v3 else base)
+                or (home and (progress.get('strategy')!='card-home-v4' or progress.get('end_reason') not in (None,'sales_target_reached','query_limit','terms_exhausted')))
                 or progress['stage'] not in (('search','visual','finished') if visual else ('search','repeated','single','expanded','finished'))
                 or any(type(progress[k]) is not int for k in ('queries','reviewed','qualified','target'))
                 or not 0<=progress['queries']<=(9 if visual else 6) or not 0<=progress['reviewed']<=(900 if visual else 60)
@@ -131,11 +135,16 @@ class GalleryTaskAutomation(models.Model):
                 or any(type(card[k]) is not int or card[k]<0 for k in card_fields-{'completed_pages','selected_per_query'})
                 or not isinstance(card['completed_pages'],list) or not isinstance(card['selected_per_query'],list)
                 or len(card['completed_pages'])!=len(card['selected_per_query']) or not 3<=len(card['completed_pages'])<=9
-                or any(type(n) is not int or not 0<=n<=3 for n in card['completed_pages'])
+                or any(type(n) is not int or not 0<=n<=(1 if home else 3) for n in card['completed_pages'])
                 or any(n is not None and (type(n) is not int or not 0<=n<=30) for n in card['selected_per_query'])
                 or card['visual_done']>card['visual_required'] or card['visual_required']>30
                 or card['visual_threshold_passed']>card['threshold_met'] or card['visual_supplemental_passed']>card['supplemental']):
             raise ValidationError('无效的分页采集进度')
+        if home and (not isinstance(progress['search_terms'],list) or len(progress['search_terms'])!=len(card['completed_pages'])
+                or any(not isinstance(row,dict) or set(row)!={'text','source'} or not isinstance(row['text'],str)
+                       or not row['text'].strip() or len(row['text'])>200
+                       or row['source'] not in ('category_anchor','platform_suggestion','image_fallback') for row in progress['search_terms'])):
+            raise ValidationError('无效的搜索词来源')
         if isinstance(config,dict) and config.get('result_limit')!=progress['target']:
             raise ValidationError('采集目标与任务快照不一致')
         requests=self.env[PREFIX+'external.request'].search([('task_id','=',self.id),('request_id','=',request_id),('state','=','unknown')])
@@ -712,8 +721,8 @@ class CollectionWorkbench(models.Model):
                     or type(config['result_limit']) is not int or config['result_limit'] < 1):
                 raise ValidationError('请提供商品 ID、原图及有效的平台和筛选条件')
             if config['platform']=='mercado-libre-mx':
-                config.update(strategy='card-visual-v3',initial_query_count=3,max_expansion_queries=6,
-                              max_pages_per_query=3,sales_known_target=100,top_per_query=30,visual_limit=30)
+                config.update(strategy='card-home-v4',initial_query_count=3,max_expansion_queries=6,
+                              max_pages_per_query=1,sales_known_target=100,top_per_query=30,visual_limit=30)
         source_url = str(values.get('source_url') or '').strip()
         if source_url and urlsplit(source_url).scheme not in ('https', 'http'):
             raise ValidationError('来源链接仅支持 HTTP(S)，不会由服务器抓取')
@@ -960,7 +969,7 @@ class CollectionWorkbench(models.Model):
             if hashlib.sha256(raw).hexdigest() != art.digest:
                 raise ValidationError('源图摘要不匹配')
         supplemental=task.result.get('supplemental_candidates',[])
-        card_v3=config.get('strategy')=='card-visual-v3'
+        card_v3=config.get('strategy') in ('card-visual-v3','card-home-v4')
         if supplemental and not card_v3:
             raise ValidationError('当前采集策略不支持补充候选')
         candidates = task.result['candidates'] + supplemental
@@ -984,7 +993,7 @@ class CollectionWorkbench(models.Model):
                 if config['platform'] == 'mercado-libre-mx':
                     if card_v3:
                         tier='supplemental' if candidate in supplemental else 'threshold_met'
-                        if not card_v3_tier_valid(candidate,config['min_sold'],tier):
+                        if not card_v3_tier_valid(candidate,config['min_sold'],tier,allow_plus_hundred=config.get('strategy')=='card-home-v4'):
                             raise ValidationError('候选销量分层不符合任务门槛')
                         metrics=[]
                     else:
@@ -1130,6 +1139,39 @@ class CollectionWorkbench(models.Model):
                     and entry.company_id == original.company_id and entry.name == original.name):
                 superseded.add(original.id)
         rows = []
+        historical_evidence = {}
+
+        def verified_historical_rating(entry, candidate):
+            task = entry.task_id
+            if task.task_type != 'research.bestseller' or task.state != 'succeeded':
+                return None
+            platform, item = candidate.get('platform'), candidate.get('item_id')
+            if not isinstance(platform, str) or not isinstance(item, str):
+                return None
+            result = task.result or {}
+            matches = [c for c in (result.get('candidates') or []) + (result.get('supplemental_candidates') or [])
+                       if c.get('platform') == platform and c.get('item_id') == item]
+            if len(matches) != 1 or matches[0].get('rating') is not None:
+                return None
+            if task.id not in historical_evidence:
+                evidence = [x for x in result.get('evidence', []) if x.get('id') == 'collector']
+                source = evidence[0].get('source', '') if len(evidence) == 1 else ''
+                match = re.fullmatch(r'odoo-artifact:(\d+):sha256:([0-9a-f]{64})', source)
+                value = None
+                if match:
+                    artifact = self.env[PREFIX + 'artifact'].browse(int(match.group(1))).exists()
+                    if artifact and artifact.case_id == entry.case_id and artifact.company_id == entry.company_id and artifact.digest == match.group(2) and artifact.data:
+                        try:
+                            value = (base64.b64decode(artifact.data, validate=True), match.group(2), evidence[0].get('observed_at'))
+                        except (ValueError, TypeError):
+                            pass
+                historical_evidence[task.id] = value
+            evidence = historical_evidence[task.id]
+            if not evidence:
+                return None
+            rating = historical_rating(evidence[0], evidence[1], platform, item)
+            return (rating, evidence[2]) if rating is not None else None
+
         for e in entries:
             if e.id in superseded:
                 continue
@@ -1146,6 +1188,7 @@ class CollectionWorkbench(models.Model):
                     if candidate.get(key) is not None:
                         return candidate[key]
                 return False
+            restored_rating = verified_historical_rating(e, candidate) if value('rating_display', 'rating') is False else None
             rows.append({'id': e.id, 'name': e.name, 'site_id': e.site_id, 'result_hash': e.result_hash,
                 'payload': payload, 'company_id': e.company_id.id,
                 'research_metadata_origin': origin,
@@ -1154,7 +1197,11 @@ class CollectionWorkbench(models.Model):
                 'price': value('price_display', 'price'), 'listed_at': value('listed_at', 'listing_date'),
                 'platform': value('platform'), 'title': value('title'), 'url': value('url'),
                 'sales_text': value('sold_display'), 'reviews_text': value('reviews_display', 'review_count'),
-                'rating_text': value('rating_display', 'rating'), 'visual_features': value('visual_features', 'visual_category')})
+                'rating_text': restored_rating[0] if restored_rating else value('rating_display', 'rating'),
+                'rating_observed_at': restored_rating[1] if restored_rating else candidate.get('rating_observed_at') or candidate.get('observed_at'),
+                'price_observed_at': candidate.get('price_observed_at'),
+                'rating_source': 'verified_historical_evidence' if restored_rating else candidate.get('rating_source'),
+                'visual_features': value('visual_features', 'visual_category')})
         if filters is None:
             return {'rows': rows}
         filters = filters if isinstance(filters, dict) else {}

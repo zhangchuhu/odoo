@@ -86,6 +86,10 @@ class Client:
         return self.request('POST','/internal/meli-optimization/research-retry-expired',{
             'task_id':claim['id'],'lease_token':claim['lease_token'],'lease_epoch':claim['lease_epoch'],'request_id':request_id})
 
+    def resume_verified_captcha(self, task_id, epoch, request_id):
+        return self.request('POST', '/internal/meli-optimization/research-verified-captcha-resume',
+            {'task_id': task_id, 'lease_epoch': epoch, 'request_id': request_id})
+
     def continue_registered_research(self, claim, request_id, intent_id, *, evidence_artifact_id=None,
                                      evidence_digest=None, confirmed_images=None):
         body = {

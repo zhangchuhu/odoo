@@ -19,7 +19,7 @@ globalThis.activateCollectorTarget=async ({requestId,target,windowId,session,ext
  if (isCandidateUrl(tab.url)) {
    stage='activation_detail_guard';await trace('started');
    const live = await chrome.runtime.sendMessage({type:'ensure_collector_guard',request_id:requestId,tab_id:target,window_id:windowId});
-   if (live?.ok !== true) {const error=Error(live?.error || 'guard_ack_timeout');error.code=error.message;throw error;}
+   if (live?.ok !== true) {const error=Error(live?.error || 'guard_ack_timeout');error.code=error.message; if(live?.diagnostic) error.detailCode=live.diagnostic; throw error;}
    stage='activation_detail_challenge';await trace('started');
    const issued = await chrome.runtime.sendNativeMessage(host, {operation:'activation_challenge', ...base, detail_url:tab.url});
    const proof = issued?.challenge;
@@ -53,7 +53,7 @@ globalThis.activateCollectorTarget=async ({requestId,target,windowId,session,ext
  await trace('ok');stage='activation_receipt';await trace('started');
  const receipt=CollectorBinding.makeReceipt(challenge,session,tab,page,target,new Date().toISOString());
  await trace('ok');stage='activation_confirm';await trace('started');
- const confirmed=await chrome.runtime.sendNativeMessage(host,{operation:'activation_confirm',...base,nonce:receipt.nonce,url:receipt.url,query:page.search_query,observed_at:receipt.observed_at});
+ const confirmed=await chrome.runtime.sendNativeMessage(host,{operation:'activation_confirm',...base,nonce:receipt.nonce,url:receipt.url,query:receipt.query,observed_at:receipt.observed_at});
  if(confirmed?.ok!==true) throw new Error('Activation rejected');
  await trace('ok');stage='activation_before_focus';await trace('started');
  const current=await chrome.tabs.get(target);

@@ -14,6 +14,62 @@ from optimization_worker.tests.test_collector_import import fixture
 
 
 class CandidateCheckpointTests(unittest.TestCase):
+    def test_home_expands_only_evidenced_suggestions_and_freezes_when_exhausted(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline
+        self.challenge.update(version=4,platform='mercado-libre-mx');self.plan.update(platform='mercado-libre-mx',strategy='card-visual-v3')
+        self.broker=self.reopen();self.broker.query_verified=True;self.plan['strategy']='card-home-v4'
+        self.broker.home_expansion_candidates=lambda used:['dress new'] if 'dress new' not in used else []
+        with sqlite3.connect(self.ledger) as db:
+            initialize(db);initialize_pipeline(db)
+            for i,q in enumerate(self.plan['queries']):
+                seal_query(db,self.key,i,q,fence=lambda:True)
+                db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.key,i,1,'home_complete'))
+        event=dict(self.event,native_origin='anchor',operation='seal_expansion',queries=['dress new'])
+        with self.assertRaises(CollectorProgressError):handle_progress(self.broker,dict(event,queries=['invented']))
+        with self.assertRaises(CollectorProgressError):handle_progress(self.broker,dict(event,queries=[]))
+        self.assertEqual(handle_progress(self.broker,event)['queries'][-1],'dress new')
+        with sqlite3.connect(self.ledger) as db:db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.key,3,1,'home_complete'))
+        self.assertTrue(handle_progress(self.broker,dict(event,queries=[]))['finished'])
+        with sqlite3.connect(self.ledger) as db:self.assertEqual(db.execute('SELECT reason FROM home_collection_end').fetchone()[0],'terms_exhausted')
+
+    def test_home_candidates_use_frozen_queue_and_task_threshold(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query,append_page_batch
+        from optimization_worker.card_sales_v3_pipeline import initialize_pipeline,freeze_queue
+        self.challenge.update(version=4,platform='mercado-libre-mx');self.plan.update(platform='mercado-libre-mx',strategy='card-visual-v3')
+        self.broker=self.reopen();self.broker.query_verified=True;self.plan['strategy']='card-home-v4'
+        with sqlite3.connect(self.ledger) as db:
+            initialize(db);initialize_pipeline(db)
+            for i,q in enumerate(self.plan['queries']):
+                seal_query(db,self.key,i,q,fence=lambda:True)
+                card=dict(query=q,product_id='MLM'+str(i+1),url='https://articulo.mercadolibre.com.mx/MLM'+str(i+1),rank=1,first_seen=1,sales_text='+150 vendidos')
+                append_page_batch(db,self.key,i,1,0,[card],fence=lambda:True)
+                db.execute('INSERT INTO card_v3_pages VALUES (?,?,?,?,?,?)',(*self.key,i,1,'home_complete'))
+            freeze_queue(db,self.key,plan_exhausted=True,fence=lambda:True,homepage_only=True)
+        self.assertEqual(checked_detail_identity(self.broker,'https://articulo.mercadolibre.com.mx/MLM1'),'mercado-libre-mx:MLM1')
+        result=handle_progress(self.broker,dict(self.event,native_origin='anchor',operation='next_candidate'))
+        self.assertEqual((result['stage'],result['candidate']['identity']),('detail','mercado-libre-mx:MLM1'))
+        detail=dict(self.data['details'][0],identity='mercado-libre-mx:MLM1',product_id='MLM1',detail_url='https://articulo.mercadolibre.com.mx/MLM1',sold_display='+150 vendidos')
+        result=handle_progress(self.broker,dict(self.event,native_origin='anchor',operation='checkpoint_detail',detail_index=0,detail=detail,sales_only=True))
+        self.assertEqual(result['sales_screen'],'supplemental')
+
+    def test_home_resume_reads_saved_batch_only_after_current_query_verification(self):
+        from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query,append_page_batch
+        self.challenge.update(version=4,platform='mercado-libre-mx');self.plan.update(platform='mercado-libre-mx',strategy='card-visual-v3')
+        self.broker=self.reopen();self.broker.watch_only=False;self.broker.query_verified=True
+        self.plan['strategy']='card-home-v4'
+        with sqlite3.connect(self.ledger) as db:
+            initialize(db)
+            for i,q in enumerate(self.plan['queries']):seal_query(db,self.key,i,q,fence=lambda:True)
+            card=dict(query=self.plan['queries'][0],product_id='MLM1',url='https://articulo.mercadolibre.com.mx/MLM1',rank=1,sales_text='+150 vendidos')
+            append_page_batch(db,self.key,0,1,0,[card],fence=lambda:True)
+        event=dict(self.event,native_origin='anchor',operation='collector_progress',query_index=0)
+        result=handle_progress(self.broker,event)
+        self.assertEqual((result['strategy'],result['next_page'],result['next_batch_index']),('card-home-v4',(0,1),1))
+        self.assertEqual(result['cards'][0]['product_id'],'MLM1')
+        self.broker.query_verified=False
+        self.assertIsNone(handle_progress(self.broker,event)['cards'])
+
     def test_card_v3_expands_after_completed_pages_and_freezes_when_terms_exhausted(self):
         from optimization_worker.card_sales_v3_checkpoints import initialize,seal_query,finish_page
         from optimization_worker.card_sales_v3_pipeline import initialize_pipeline

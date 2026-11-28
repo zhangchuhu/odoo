@@ -20,6 +20,26 @@
     return JSON.stringify([detailUrl(page.page_url), sku, page.variation]);
   }
 
+  async function returnToFirst(page,{read,move,variant,sleep}) {
+    const expectedVariant=variant(page), total=page.slideTotal;
+    if(!Number.isInteger(page.slidePosition) || !Number.isInteger(total) || page.slidePosition<1 || page.slidePosition>total || total>100)
+      throw Error('图库位置无法确认');
+    while(page.slidePosition>1) {
+      const previous=page.slidePosition-1;
+      await move(page);
+      let settled=false;
+      for(let i=0;i<16;i++) {
+        await sleep();
+        const next=await read();
+        if(variant(next)!==expectedVariant || next.slideTotal!==total)throw Error('图库位置或规格已变化');
+        if(next.slidePosition===previous){page=next;settled=true;break;}
+        if(next.slidePosition!==previous+1)throw Error('图库位置或规格已变化');
+      }
+      if(!settled)throw Error('无法返回图库第一项');
+    }
+    return page;
+  }
+
   async function observe(api, binding, identity) {
     const tab = await api.tabs.get(binding.tab_id);
     const [active] = await api.tabs.query({active:true, windowId:binding.window_id});
@@ -122,7 +142,7 @@
     }
   }
 
-  if (typeof module !== 'undefined') module.exports = {appendImage, submitGallery, observe, inspectGallery};
+  if (typeof module !== 'undefined') module.exports = {appendImage, submitGallery, observe, inspectGallery, returnToFirst};
   if (typeof document === 'undefined') return;
   const el = id => document.getElementById(id);
   const section = el('gallery-capture');
@@ -147,7 +167,13 @@
     }
     let page = await read();
     const variant = variantKey(page);
-    if (photo === 1 && page.slidePosition !== 1) throw Error('请从当前规格的第一项开始');
+    if (photo === 1 && page.slidePosition !== 1) page=await returnToFirst(page,{
+      read,variant:variantKey,sleep:()=>new Promise(resolve=>setTimeout(resolve,250)),
+      move:async expected=>{
+        const moved=await api.tabs.sendMessage(binding.tab_id,{type:'COLLECTOR_GALLERY_WALK_MOVE',identity,expected,direction:'previous'});
+        if(moved?.ok!==true)throw Error(moved?.error || '无法返回图库第一项');
+      },
+    });
     while (photo === 1 && page.kind === 'video') {
       const expected = page.slidePosition + 1;
       if (expected > page.slideTotal || expected > 10) throw Error('无法核验第一张照片');

@@ -187,22 +187,30 @@ class OptimizationQueueCase(TransactionCase):
         self.assertIn('100',task.status_detail['message'])
         with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'visual-progress-request',dict(p,queries=10))
 
-    def test_card_v3_progress_keeps_supplemental_separate(self):
+    def test_card_v3_progress_keeps_supplemental_separate(self, strategy='card-visual-v3'):
         batch=self.env['meli.optimization.batch'].create({'name':'Card progress'})
         case=self.env['meli.optimization.case'].create({'name':'Card progress','batch_id':batch.id})
-        snap=self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{'collection_config':{'strategy':'card-visual-v3','result_limit':5}}})
+        snap=self.env['meli.optimization.snapshot'].create({'case_id':case.id,'payload':{'collection_config':{'strategy':strategy,'result_limit':5}}})
         task=self.env['meli.optimization.task'].create({'case_id':case.id,'snapshot_id':snap.id,'task_type':'product.facts','payload':{'schema_version':'1','product_snapshot_id':str(snap.id)}})
         task._set({'task_type':'research.bestseller'});task.prepare_scoped_research()
         user=self.env['res.users'].create({'name':'Card progress worker','login':'card-progress-worker','company_id':self.env.company.id,'company_ids':[(6,0,self.env.company.ids)],'group_ids':[(6,0,[self.env.ref('meli_optimization.group_research_worker').id])]})
         worker=task.with_user(user);claim=worker.claim(['research.bestseller']);token,epoch=claim['lease_token'],claim['lease_epoch']
         worker.checkpoint(token,epoch,'initial',{'request_id':'card-progress-request','state':'unknown'})
-        detail={'known_products':110,'completed_pages':[3,2,1],'selected_per_query':[30,None,None],
+        detail={'known_products':110,'completed_pages':[1,1,1] if strategy=='card-home-v4' else [3,2,1],'selected_per_query':[30,None,None],
                 'threshold_met':4,'supplemental':2,'excluded':1,'visual_required':6,'visual_done':3,
                 'visual_threshold_passed':2,'visual_supplemental_passed':1}
         p={'stage':'visual','queries':1,'reviewed':7,'qualified':2,'target':5,'card_v3':detail}
+        if strategy=='card-home-v4':
+            p['strategy']='card-home-v4';p['end_reason']=None;p['search_terms']=[{'text':'conjunto mujer falda','source':'category_anchor'},
+                {'text':'conjunto mujer falda blusa','source':'platform_suggestion'},{'text':'conjunto mujer falda elegante','source':'image_fallback'}]
         worker.research_progress(token,epoch,'card-progress-request',p)
         self.assertEqual(task.status_detail['card_v3']['supplemental'],2)
         with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'card-progress-request',dict(p,card_v3=dict(detail,completed_pages=[4])))
+        if strategy=='card-home-v4':
+            with self.assertRaises(ValidationError):worker.research_progress(token,epoch,'card-progress-request',dict(p,card_v3=dict(detail,completed_pages=[2,1,1])))
+
+    def test_home_progress_keeps_supplemental_separate_and_rejects_second_page(self):
+        self.test_card_v3_progress_keeps_supplemental_separate('card-home-v4')
 
     def test_window_resume_requires_original_failed_scoped_request(self):
         groups = [(6, 0, [self.env.ref('meli_optimization.group_research_worker').id])]

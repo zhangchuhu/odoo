@@ -225,6 +225,22 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn('保留旧采集器弹窗及其进度', prompt)
         self.assertIn('旧标签或旧会话里遗留的错误页面不能作为新请求的页面阻塞',prompt)
         self.assertIn('先在同一标签刷新一次',prompt)
+    def test_v3_recovery_opens_query_before_treating_tab_as_blocked(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'card-visual-v3'}})
+        self.assertIn('新建任务标签通常先显示平台首页',prompt)
+        self.assertIn('页码为 0 时',prompt)
+        self.assertIn('不得仅因尚未打开搜索页而报告 page_unreadable',prompt)
+    def test_v4_suggestions_are_read_before_formal_task_tab_binding(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','context':{'snapshot':{'payload':{'collection_config':{'strategy':'card-home-v4'}}}}})
+        self.assertIn('无需正式采集标签绑定',prompt)
+        self.assertIn('prepare_suggestions',prompt)
+        self.assertIn('record_suggestions',prompt)
+        self.assertIn('seal_suggestions',prompt)
+        self.assertIn('只采集首页',prompt)
+        self.assertIn('cua.getApp("com.google.Chrome")',prompt)
+        self.assertIn('全局枚举失败不等于页面不可读取',prompt)
     def test_both_bound_extension_titles_are_distinct_from_legacy(self):
         import json
         root = Path(__file__).resolve().parents[1]
@@ -258,6 +274,35 @@ class DispatcherTests(unittest.TestCase):
                 rows=db.execute('SELECT category FROM invocation_diagnostics').fetchall()
                 self.assertEqual(rows,[('no_progress_tool_failure',)])
                 self.assertNotIn('PRIVATE-SECRET',str(rows))
+    def test_failed_tool_records_safe_structured_cause(self):
+        import json, sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal'
+            def runner(*a,**k):
+                event={'type':'item.completed','item':{'type':'mcp_tool_call','status':'failed',
+                       'server':'node_repl','tool':'js','error':{'message':'HTTP 403 forbidden token=PRIVATE-SECRET'}}}
+                k['stdout'].write((json.dumps(event)+'\n').encode())
+                return subprocess.CompletedProcess(a[0],0)
+            self.assertEqual(Dispatcher(path,Store(),runner=runner,host_probe=lambda:True).tick(),'unknown')
+            with sqlite3.connect(path) as db:
+                rows=db.execute('SELECT server,tool,error_class,http_status FROM invocation_tool_failures').fetchall()
+                self.assertEqual(rows,[('node_repl','js','http_forbidden',403)])
+                self.assertNotIn('PRIVATE-SECRET',str(db.execute('SELECT * FROM invocation_tool_failures').fetchall()))
+
+    def test_failed_tool_does_not_persist_untrusted_names_or_messages(self):
+        import json, sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal'
+            def runner(*a,**k):
+                event={'type':'item.completed','item':{'type':'mcp_tool_call','status':'failed',
+                       'server':'secret-token','tool':'private-prompt','error':{'message':'sensitive information'}}}
+                k['stdout'].write((json.dumps(event)+'\n').encode())
+                return subprocess.CompletedProcess(a[0],0)
+            self.assertEqual(Dispatcher(path,Store(),runner=runner,host_probe=lambda:True).tick(),'unknown')
+            with sqlite3.connect(path) as db:
+                rows=db.execute('SELECT server,tool,error_class FROM invocation_tool_failures').fetchall()
+                self.assertEqual(rows,[('other','other','unknown')])
+                self.assertNotIn('sensitive information',str(db.execute('SELECT * FROM invocation_tool_failures').fetchall()))
     def test_unknown_diagnostic_categories(self):
         import sqlite3
         from contextlib import closing
@@ -584,6 +629,30 @@ class PlanPromptContractTests(unittest.TestCase):
             self.assertIn(term,text)
 
 class ResearchSearchSessionPromptTests(unittest.TestCase):
+    def test_home_resume_distinguishes_saved_sales_from_pending_visual(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        self.assertIn('visual_candidate_status',prompt)
+        self.assertIn('已有视觉待办时不要再次核验销量',prompt)
+
+    def test_home_page_failure_requires_observed_diagnostic(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        for phrase in ('stage、symptom、page_type、tab_match','extension_error','视觉候选接口没有待办不代表页面不可读'):
+            self.assertIn(phrase,prompt)
+
+    def test_home_disconnected_checkpoint_recovers_connection(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','collector_plan':{'strategy':'card-home-v4'}})
+        self.assertIn('checkpoint_disconnected 不是页面不可读',prompt)
+        self.assertIn('连接当前任务',prompt)
+
+    def test_gallery_page_failure_requires_observed_diagnostic(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'request_id':'r','action':'collect_candidate_images','collector_plan':{'queries':['a','b','c']}})
+        self.assertIn('stage、symptom、page_type、tab_match',prompt)
+        self.assertIn('extension_error',prompt)
+
     def test_prompt_requires_fresh_session_and_exact_search_on_same_native_tab(self):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'request_id':'r'})

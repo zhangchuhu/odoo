@@ -929,7 +929,38 @@ class Task(models.Model):
         automatic = not self.env.su and self.env.user.has_group('meli_optimization.group_research_worker')
         return self._retry_unknown_research(automatic=automatic)
 
-    def _retry_unknown_research(self, *, automatic):
+    def resume_after_verified_captcha(self, request_id, epoch):
+        self.ensure_one()
+        self._authorize('worker')
+        if (self.env.su or self.env.user.has_group('base.group_system') or
+                not self.env.user.has_group('meli_optimization.group_research_worker')):
+            raise AccessError('Scoped non-administrator research worker required')
+        if not isinstance(request_id, str) or not request_id or type(epoch) is not int:
+            raise ValidationError('Original request and epoch required')
+        self.case_id._lock()
+        self._lock()
+        prior = self.env[PREFIX + 'event'].sudo().search([
+            ('task_id', '=', self.id), ('submission_key', '=', f'verified-captcha-resume:{epoch}')], limit=1)
+        if prior:
+            if prior.worker_uid.id != self.env.uid or prior.payload != {'request_id': request_id, 'epoch': epoch}:
+                raise AccessError('Original request owner required')
+            return dict(prior.receipt)
+        if (self.task_type != 'research.bestseller' or not self.scoped_research or self.state != 'waiting'
+                or self.lease_epoch != epoch or (self.status_detail or {}).get('code') != 'captcha_required'):
+            raise ValidationError('Original waiting verification task required')
+        external = self.env[PREFIX + 'external.request'].sudo().search([
+            ('task_id', '=', self.id), ('request_id', '=', request_id), ('retry_superseded', '=', False),
+            ('state', 'in', ('unknown', 'dispatched'))], limit=1)
+        if not external:
+            raise ValidationError('Original unresolved request required')
+        receipt = self._retry_unknown_research(automatic=False, verified_page=True)
+        payload = {'request_id': request_id, 'epoch': epoch}
+        self.env[PREFIX + 'event'].sudo()._append({'task_id': self.id, 'company_id': self.company_id.id,
+            'submission_key': f'verified-captcha-resume:{epoch}', 'digest': bounded(payload),
+            'kind': 'verified_captcha_resume', 'payload': payload, 'receipt': receipt, 'worker_uid': self.env.uid})
+        return receipt
+
+    def _retry_unknown_research(self, *, automatic, verified_page=False):
         """Retain the original task and cap automatic retries independently per task."""
         self.ensure_one()
         scoped = (not self.env.su and not self.env.user.has_group('base.group_system')
@@ -955,7 +986,7 @@ class Task(models.Model):
         if not self._unresolved_requests():
             raise ValidationError('No uncertain request to retry')
         if automatic:
-            if (self.status_detail or {}).get('code') in ('captcha_required', 'login_required', 'page_unreadable'):
+            if (self.status_detail or {}).get('code') in ('captcha_required', 'login_required', 'page_unreadable', 'browser_unavailable'):
                 return {'task_id': self.id, 'source_task_id': self.id, 'state': 'waiting'}
             if self.scoped_research and self._has_registered_evidence(
                 self.request_ids.filtered(lambda r: not r.retry_superseded and r.state in ('unknown', 'dispatched'))
@@ -983,7 +1014,7 @@ class Task(models.Model):
         unresolved = self.request_ids.filtered(lambda r: r.state in ('unknown', 'dispatched') and not r.retry_superseded)
         receipt = {'task_id': self.id, 'source_task_id': self.id, 'state': 'queued'}
         payload = {'request_ids': unresolved.mapped('request_id'), 'epoch': self.lease_epoch,
-                   'accepted_duplicate_results': True, 'trigger': 'automatic' if automatic else 'operator'}
+                   'accepted_duplicate_results': True, 'trigger': 'verified_page' if verified_page else ('automatic' if automatic else 'operator')}
         unresolved._set({'retry_superseded': True})
         self._transition('queued')
         self._set({'status_detail': None})

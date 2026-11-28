@@ -33,8 +33,8 @@ def _send(sock,data):
 
 
 class Server:
-    def __init__(self,path,bridge):
-        self.path=Path(path);self.bridge=bridge;self.sock=None
+    def __init__(self,path,bridge,on_event=None):
+        self.path=Path(path);self.bridge=bridge;self.sock=None;self.on_event=on_event
     def __enter__(self):
         parent=self.path.parent
         info=parent.stat()
@@ -53,7 +53,16 @@ class Server:
         except socket.timeout: return False
         with conn:
             conn.settimeout(CALL_TIMEOUT)
-            try: result=handle_message(self.bridge,_recv(conn,_MAX))
+            try:
+                raw=_recv(conn,_MAX)
+                result=handle_message(self.bridge,raw)
+                if self.on_event:
+                    try:
+                        from .research_return_bridge import _FIELDS
+                        message=json.loads(raw);operation=message.get('operation') if isinstance(message,dict) else None
+                        if operation in _FIELDS:
+                            self.on_event(operation,json.loads(result).get('accepted') is True)
+                    except (ValueError,TypeError,UnicodeDecodeError,OSError): pass
             except (ValueError,OSError): result=b'{"accepted":false}'
             try: _send(conn,result)
             except OSError: pass
@@ -76,7 +85,11 @@ def send(path,message):
     visual = (message.get('operation') in ('visual_candidate_status','submit_visual_verdict')
               and isinstance(response,dict) and set(response)=={'accepted','visual'}
               and response['accepted'] is True and isinstance(response['visual'],dict))
-    if response not in allowed and not binding and not prior and not visual: raise ValueError('Invalid response')
+    home_key = {'seal_suggestions':'selection', 'home_expansion_options':'expansion',
+                'reserve_captcha_attempt':'captcha', 'arm_home_verification':'watch'}.get(message.get('operation'))
+    home = (home_key is not None and isinstance(response,dict) and set(response)=={'accepted',home_key}
+            and response['accepted'] is True and isinstance(response[home_key],dict))
+    if response not in allowed and not binding and not prior and not visual and not home: raise ValueError('Invalid response')
     return response
 
 

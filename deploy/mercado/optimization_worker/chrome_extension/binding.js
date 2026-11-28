@@ -3,6 +3,7 @@
 // This extension does not receive Odoo credentials. No binding is accepted
 // solely from page content or the Codex model's text.
 (() => {
+  const sameObservedQuery=(left,right)=>typeof left==='string' && typeof right==='string' && left.normalize('NFC').toLowerCase()===right.normalize('NFC').toLowerCase();
   const HOST='local.odoo.collector_binding';
   const target=Number(new URL(location.href).searchParams.get('tab'));
   if (!Number.isSafeInteger(target) || target<=0) return;
@@ -18,7 +19,7 @@
   const pollTraceLast={};
   async function trace(stage,code,error){
     if(typeof CollectorTrace==='undefined')return;
-    if(stage==='binding_status'||stage==='binding_identity'){
+    if(['binding_status','binding_identity','binding_wait'].includes(stage)){
       const value=error?CollectorTrace.errorCode(error):code;
       if(pollTraceLast[stage]===value)return;
       pollTraceLast[stage]=value;
@@ -27,13 +28,28 @@
     await CollectorTrace.render(document.getElementById('binding-trace'));
   }
   let anchorAttempts=0, landingStarted=0;
+  async function guardFailure(result) {
+    const allowed=['guard_pending_conflict','guard_tab_changed','guard_status_unavailable','guard_request_changed','guard_tab_unmatched','guard_not_required'];
+    if (allowed.includes(result?.diagnostic)) await trace('guard_check',result.diagnostic);
+    throw Error(result?.error || 'guard_ack_timeout');
+  }
+  const verificationWatch=document.getElementById('home-watch-verification');
+  if(typeof verificationWatch?.addEventListener === 'function')verificationWatch.addEventListener('click',async()=>{
+    try {
+      if(!selected || !enabled || !requestId)throw Error('请先连接当前任务');
+      const tab=await chrome.tabs.get(target),session=await sessionId();
+      const result=await chrome.runtime.sendMessage({type:'home_verification_watch_start',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session});
+      if(result?.ok!==true)throw Error('验证观察未准备好');
+      show('已开启验证观察，页面恢复后将自动继续任务');
+    } catch(error) { show(error?.message || '验证观察启动失败'); }
+  });
   async function restoreGuard(state,tab) {
     if (state?.anchor_required === true && state.anchor_active !== true) throw Error('anchor_rebind_pending');
     if (state?.ok === true && state.request_id === requestId && state.matches === true &&
         state.bound_tab_id === target && state.guard_required === true && state.guard_active !== true) {
       const result = await bounded(chrome.runtime.sendMessage({type:'ensure_collector_guard',
         request_id:requestId,tab_id:target,window_id:tab.windowId}), 'guard_ack_timeout');
-      if (result?.ok !== true) throw Error(result?.error || 'guard_ack_timeout');
+      if (result?.ok !== true) await guardFailure(result);
     }
   }
   function bounded(promise, code, timeout = code === 'anchor_recovery_timeout' ? 22000 : 12000) {
@@ -68,16 +84,18 @@
   }
   async function tick() {
     if (!enabled || busy || activationPending) return; busy=true;
-    let stage='binding_status';
+    let stage='binding_tab';
     try {
-        const tab=await chrome.tabs.get(target), session=await sessionId();
+        const tab=await chrome.tabs.get(target);
+        stage='binding_session';const session=await sessionId();
+        stage='binding_status';
         let state=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
         if (!state || typeof state.request_id !== 'string') throw new Error('broker_identity_unavailable');
         if (requestId && requestId !== state.request_id) { enabled=false; show('任务已切换，请关闭采集器并重新打开'); return; }
         requestId=state.request_id;
         if (state.anchor_required === true && (state.anchor_active !== true || state.matches !== true)) {
           if (state.matches !== true) selected=false;
-          state=await connectAnchor(state,tab,session);
+          stage='binding_anchor';state=await connectAnchor(state,tab,session);
           if (!state) return;
         }
         await trace('binding_identity',state.ok===true?'ok':'unverified');
@@ -85,7 +103,7 @@
         if(identity) identity.textContent=state?.ok ? `任务 ${requestId}；当前标签 ${target}；任务标签 ${state.bound_tab_id ?? "待绑定"}；${state.bound_tab_id == null ? "等待首组绑定" : state.matches ? "匹配" : "不匹配，请返回任务标签"}` : `当前标签 ${target}；后台身份待核验`;
       if (selected && state.ok !== true) throw new Error("binding_unavailable");
       if (selected) {
-        await restoreGuard(state,tab);
+        stage='binding_guard';await restoreGuard(state,tab);
         if(reconnecting){
           reconnecting=false;
           await trace('binding_reconnect',state.matches===true?'ok':'unverified');
@@ -97,12 +115,14 @@
             (!tab.url || tab.url==='about:blank' || tab.url.startsWith('chrome://newtab'))) {
           if (!landingStarted) landingStarted=Date.now();
           if (Date.now()-landingStarted<15000) {
+            await trace('binding_wait','task_tab_loading');
             show('任务标签已确认，正在等待目标平台页面载入');return;
           }
+          await trace('binding_wait','task_tab_landing_timeout');
           enabled=false;show('目标平台页面尚未载入（task_tab_landing_timeout），请在已绑定标签核对页面后重新连接');return;
         }
         landingStarted=0;
-        const url=new URL(tab.url);
+        stage='binding_select';const url=new URL(tab.url);
         if (url.protocol!=='https:' || !['www.mercadolibre.com.mx','listado.mercadolibre.com.mx','articulo.mercadolibre.com.mx'].includes(url.hostname) || url.port) throw new Error('Selected window is not on the authorized platform');
         const reply=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'select_window',request_id:requestId,tab_id:target,window_id:tab.windowId,session_id:session,observed_at:new Date().toISOString()}),'select_timeout');
         if (reply?.ok !== true) {
@@ -115,7 +135,7 @@
         }
         selected=true;anchorAttempts=0;
         await trace('binding_select','ok');
-        const confirmed=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
+        stage='binding_confirm';const confirmed=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:"binding_status",tab_id:target,window_id:tab.windowId,session_id:session}),'status_timeout');
         if (!confirmed || confirmed.request_id !== requestId || confirmed.ok !== true) {
           if(identity) identity.textContent=`当前标签 ${target}；后台身份待核验`;
           show('窗口已登记，等待后台确认身份'); return;
@@ -123,7 +143,7 @@
         if(identity) identity.textContent=`任务 ${requestId}；当前标签 ${target}；任务标签 ${confirmed.bound_tab_id ?? "待绑定"}；${confirmed.bound_tab_id == null ? "等待首组绑定" : confirmed.matches ? "匹配" : "不匹配，请返回任务标签"}`;
         state=confirmed;
         trackPopup?.(confirmed, session);
-        await restoreGuard(confirmed,tab);
+        stage='binding_guard';await restoreGuard(confirmed,tab);
         show('已登记窗口，可以新建标签');
       }
       if (state.gallery_phase === true) {
@@ -151,7 +171,7 @@
       await trace(stage,'failed',error);
       if (/^(?:anchor_|window_prepare_failed|session_unavailable)/.test(error?.message || '')) {
         selected=false;
-        const transient=['anchor_recovery_timeout','anchor_recovery_unavailable','anchor_challenge_failed','anchor_guard_ready_failed','anchor_rebind_pending','anchor_select_pending'].includes(error.message);
+        const transient=['anchor_recovery_timeout','anchor_recovery_unavailable','anchor_broker_rotating','anchor_challenge_failed','anchor_guard_ready_failed','anchor_rebind_pending','anchor_select_pending'].includes(error.message);
         enabled=transient && ++anchorAttempts<3;
         show('专用窗口恢复未完成（'+error.message+'）'+(enabled?'，正在等待后台重新确认':'，请核对锚点后重新连接当前任务'));return;
       }
@@ -179,7 +199,7 @@
     if (reply?.error === 'checkpoint_guard_pending' && (operation === 'collector_progress' || operation === 'checkpoint_detail' || operation === 'next_candidate')) {
       const ready = await bounded(chrome.runtime.sendMessage({type:'ensure_collector_guard',
         request_id:requestId,tab_id:target,window_id:tab.windowId}), 'guard_ack_timeout');
-      if (ready?.ok !== true) throw Error(ready?.error || 'guard_ack_timeout');
+      if (ready?.ok !== true) await guardFailure(ready);
       reply = await bounded(chrome.runtime.sendNativeMessage(HOST, message), 'checkpoint_timeout');
     }
     if (reply?.ok !== true) throw Error([reply?.error || 'checkpoint_unavailable', reply?.message].filter(Boolean).join('：'));
@@ -233,7 +253,7 @@
          challenge.tab_id!==target || challenge.window_id!==tab.windowId || challenge.session_id!==session || challenge.page_url!==tab.url)return false;
       const observed=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_BINDING'});
       const current=await chrome.tabs.get(target);
-      if(observed?.error || observed?.page_url!==challenge.page_url || observed?.search_query!==query || current.url!==challenge.page_url)return false;
+      if(observed?.error || observed?.page_url!==challenge.page_url || !sameObservedQuery(observed?.search_query,query) || current.url!==challenge.page_url)return false;
       const result=await bounded(chrome.runtime.sendNativeMessage(HOST,{operation:'card_v3_page_confirm',request_id:requestId,
         tab_id:target,window_id:tab.windowId,session_id:session,receipt:{...challenge,observed_at:new Date().toISOString()}}),'cards_timeout');
       return result?.ok===true;
@@ -264,17 +284,17 @@
       return reply?.ok===true;
     } catch (_) {return false;}
   };
-  globalThis.finishCardV3Page=async(queryIndex,query,page)=>{
+  globalThis.finishCardV3Page=async(queryIndex,query,page,home=false)=>{
     if(!selected || !enabled || !requestId || !Number.isInteger(queryIndex) || queryIndex<0 || queryIndex>8 ||
        typeof query!=='string' || !query.trim() || !Number.isInteger(page) || page<1 || page>3)return false;
     try {
       if(await globalThis.confirmCardV3Page(queryIndex,query,page)!==true)return false;
       const tab=await chrome.tabs.get(target),session=await sessionId(),observations=[];
       for(let i=0;i<3;i++){
-        const info=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_INFO',page});
+        const info=await chrome.tabs.sendMessage(target,{type:'MERCADO_COLLECTOR_PAGE_INFO',page,home});
         const current=await chrome.tabs.get(target);
         if(!info || info.error || info.at_end!==true || info.page_url!==tab.url || current.url!==tab.url ||
-           !['has_next','end_of_results','page_limit'].includes(info.status))return false;
+           !(home ? ['home_complete','end_of_results'] : ['has_next','end_of_results','page_limit']).includes(info.status))return false;
         observations.push(info);
       }
       const first=observations[0];
@@ -342,10 +362,13 @@
     } catch (error) { await trace('binding_activate','failed',error);show('任务标签核验或切换失败（'+(error.code||'binding_unavailable')+'）'); }
     finally {busy=false;activationPending=false;}
   });
-  if (connect) connect.addEventListener('click',()=>{
+  if (connect) connect.addEventListener('click',async()=>{
     if (busy) return;
-    void trace('binding_connect','clicked');
-    reconnecting=selected; anchorAttempts=0;landingStarted=0; enabled=true; show('正在连接当前任务'); tick();
+    show('正在连接当前任务');
+    if (typeof CollectorTrace !== 'undefined' && CollectorTrace.begin) await CollectorTrace.begin();
+    for (const key of Object.keys(pollTraceLast)) delete pollTraceLast[key];
+    await trace('binding_connect','clicked');
+    reconnecting=selected; anchorAttempts=0;landingStarted=0; enabled=true; tick();
   });
   if (dedicated && typeof dedicated.addEventListener === 'function') dedicated.addEventListener('click',async()=>{
     if (busy) return;
@@ -355,7 +378,7 @@
       const result=await bounded(chrome.runtime.sendMessage({type:'dedicated_window_register',request_id:requestId}),'window_timeout');
       if (!Number.isSafeInteger(result?.window_id) || result.window_id<=0) throw Error('window unavailable');
       show(`专用采集窗口已确认：${result.window_id}`);
-    } catch (_) {show('专用采集窗口未确认，请检查连接并保持任务暂停');}
+    } catch (error) {await trace('binding_window','failed',error);show('专用采集窗口未确认，请检查连接并保持任务暂停');}
     finally {busy=false;}
   });
   if (taskTab && typeof taskTab.addEventListener === 'function') taskTab.addEventListener('click',async()=>{
@@ -365,7 +388,7 @@
       const result=await bounded(chrome.runtime.sendMessage({type:'dedicated_task_tab_create',request_id:requestId}),'tab_timeout');
       if (!Number.isSafeInteger(result?.tab_id) || result.tab_id<=0) throw Error('tab unavailable');
       show(`已打开${result.reused?'原任务标签':'新任务标签'} ${result.tab_id}，请按当前采集阶段继续`);
-    } catch (_) {show('任务标签未确认，请检查连接并保持任务暂停');}
+    } catch (error) {await trace('binding_task_tab','failed',error);show('任务标签未确认，请检查连接并保持任务暂停');}
     finally {busy=false;}
   });
   const resumeRequest=new URL(location.href).searchParams.get('resume_request');

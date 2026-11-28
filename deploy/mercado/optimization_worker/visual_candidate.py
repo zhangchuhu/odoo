@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .collector_cli import collector_id
-from .collector_import import _DETAIL, _identity, _number, validate_evidence_prefix
+from .collector_import import _DETAIL, _identity, _number, validate_evidence_prefix, valid_detail_fields
 from .collector_progress import _candidate_order, CollectorProgressError
 from .domain import canonical_hash
 
@@ -43,7 +43,7 @@ class VisualCandidate:
         if db is None:
             with closing(self.open()) as existing:
                 return self.current(existing)
-        if self.plan.get('strategy') == 'card-visual-v3':
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
             rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',self.key)]
             eligible=[row for row in rows if row.get('status') in ('threshold_met','supplemental')]
             ordinal=db.execute('SELECT count(*) FROM card_v3_visual_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=?',self.key).fetchone()[0]
@@ -89,7 +89,7 @@ class VisualCandidate:
             ordinal, identity = self.current(db)
             if start:
                 detail, source, variant, photo = (event[k] for k in ('detail','source','variant','photo'))
-                if (not isinstance(detail,dict) or set(detail) != _DETAIL or not self.valid_detail(detail,identity)
+                if (not valid_detail_fields(detail) or not self.valid_detail(detail,identity)
                         or not supported_url(source,self.plan['platform'])):
                     fail('visual_photo_candidate_invalid','商品身份、销量或图片来源未通过核验')
                 if type(photo) is not int or not 1 <= photo <= 100 or not isinstance(variant,str) or not 1 <= len(variant) <= 3500:
@@ -139,9 +139,9 @@ class VisualCandidate:
     def valid_detail(self, detail, identity):
         try:
             product, _ = _identity(detail['detail_url'],self.plan['platform'])
-            if self.plan.get('strategy')=='card-visual-v3':
-                from .card_sales_v3 import parse_sales
-                sold=parse_sales(detail['sold_display']);threshold_ok=sold is not None and sold>100
+            if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
+                from .card_sales_v3 import parse_sales, classify_detail
+                sold=parse_sales(detail['sold_display']);threshold_ok=classify_detail(sold,self.config['min_sold'],sales_text=detail['sold_display'],include_plus_hundred=self.plan.get('strategy')=='card-home-v4')!='exclude'
             else:
                 sold=_number(detail['sold_display']);threshold_ok=sold and sold[0]>=self.config['min_sold']
             return (detail.get('identity') == identity == self.plan['platform'] + ':' + product and
@@ -161,7 +161,12 @@ class VisualCandidate:
 
     def status(self, store, directory):
         with closing(self.open()) as db:
-            ordinal, identity = self.current(db)
+            try:
+                ordinal, identity = self.current(db)
+            except ValueError as exc:
+                if str(exc) == 'No pending candidate' and self.plan.get('strategy') == 'card-home-v4':
+                    return {'state': 'no_pending_visual'}
+                raise
             rows = db.execute('SELECT id,metadata,sha,file FROM visual_photos WHERE scope=? AND ordinal=? AND sha IS NOT NULL ORDER BY photo',
                               (self.scope,ordinal)).fetchall()
         images = []
@@ -201,7 +206,7 @@ class VisualCandidate:
         return None
 
     def submit(self, data, store, fence):
-        if self.plan.get('strategy') == 'card-visual-v3':
+        if self.plan.get('strategy') in ('card-visual-v3','card-home-v4'):
             return self.submit_card_v3(data,store,fence)
         if self.plan.get('strategy') == 'visual-v2':
             return self.submit_visual_v2(data,store,fence)

@@ -41,7 +41,8 @@ class EndToEndTest(unittest.TestCase):
                     db.execute('INSERT INTO accepted_receipts(request_id,body) VALUES (?,?)',(rid,json.dumps(receipt)))
                 freeze_queue(db,key,plan_exhausted=True,fence=lambda:True)
                 record_detail(db,key,0,'MLM1','+150 vendidos',500,fence=lambda:True)
-                detail={'identity':'mercado-libre-mx:MLM1','status':'rejected','reason':'threshold_failure','detail_url':'https://articulo.mercadolibre.com.mx/MLM1','product_id':'MLM1','title':'Dress','category':None,'visual_category_code':None,'sold_display':'+150 vendidos','reviews_display':None,'rating_display':None,'match_level':None,'visual_features':None}
+                detail={'identity':'mercado-libre-mx:MLM1','status':'rejected','reason':'threshold_failure','detail_url':'https://articulo.mercadolibre.com.mx/MLM1','product_id':'MLM1','title':'Dress','category':None,'visual_category_code':None,'sold_display':'+150 vendidos','reviews_display':None,'rating_display':'4.7','match_level':None,'visual_features':None}
+                detail['price_observation']={'amount':'178.78','currency':'MXN','source':'product_detail'}
                 db.execute('INSERT INTO card_v3_detail_observations VALUES (?,?,?,?,?)',(*key,0,json.dumps(detail)))
             review=VisualCandidate(ledger,key,plan,config,claim);downloads=root/'Downloads';downloads.mkdir()
             broker=SimpleNamespace(watch_only=True,gallery_binding=None,conflict=False,rebind_requested=False,fence=lambda:True,anchor_guard_alive=lambda:True,guard_alive=lambda _:True,anchor_origin='anchor',tab=3,window=4,session='session')
@@ -59,4 +60,6 @@ class EndToEndTest(unittest.TestCase):
                 def artifact(self,identity):return {'case_id':4,'company_id':6,'mime_type':'application/json','digest':hashlib.sha256(self.raw).hexdigest(),'data':base64.b64encode(self.raw).decode()}
             self.assertEqual(import_evidence(store,rid,claim,evidence,stamp,Client(),lambda:None,tab_receipts=receipts),1)
             record=store.inspect(rid);self.assertEqual(record['state'],'candidate_images_pending')
+            self.assertEqual(record['collector_pending']['result']['supplemental_candidates'][0]['rating'],4.7)
+            self.assertEqual(record['collector_pending']['result']['supplemental_candidates'][0]['price_display'],'MXN 178.78')
             self.assertEqual(next_gallery_step(record)['identity'],'mercado-libre-mx:MLM1')

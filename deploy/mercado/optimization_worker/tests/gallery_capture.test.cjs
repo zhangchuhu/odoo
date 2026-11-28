@@ -2,6 +2,16 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+test('candidate viewer returns to first item without changing the verified variant', async () => {
+  const {returnToFirst} = require('../chrome_extension/gallery_capture.js');
+  let position=3;
+  const page=()=>({slidePosition:position,slideTotal:4,variant:'pink'});
+  const result=await returnToFirst(page(),{read:async()=>page(),move:async()=>{position--},variant:p=>p.variant,sleep:async()=>{}});
+  assert.equal(result.slidePosition,1);
+  position=2;
+  await assert.rejects(returnToFirst(page(),{read:async()=>({slidePosition:1,slideTotal:4,variant:'blue'}),move:async()=>{},variant:p=>p.variant,sleep:async()=>{}}),/规格/);
+});
+
 function signal() {
   const handlers = new Set();
   return {

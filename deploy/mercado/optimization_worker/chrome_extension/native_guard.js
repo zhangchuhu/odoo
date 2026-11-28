@@ -32,20 +32,23 @@ const NativeGuard = (() => {
  // Chrome keeps the service worker alive while its native port is connected.
  let owned = null;
  let pending = null;
+ function changed(reason) { const error=Error('guard_binding_changed'); error.diagnostic=reason; return error; }
  async function ensure(request, tab, window, session) {
    const key = JSON.stringify([request,tab,window,session]);
    if (pending) {
-     if (pending.key !== key) throw Error('guard_binding_changed');
+     if (pending.key !== key) throw changed('guard_pending_conflict');
      return pending.promise;
    }
    async function connect() {
      const observed = await chrome.tabs.get(tab);
-     if (observed.id !== tab || observed.windowId !== window) throw Error('guard_binding_changed');
+     if (observed.id !== tab || observed.windowId !== window) throw changed('guard_tab_changed');
      const identity = {operation:'binding_status',tab_id:tab,window_id:window,session_id:session};
      const host = 'local.odoo.collector_binding';
      const status = await chrome.runtime.sendNativeMessage(host, identity);
-     if (status?.ok !== true || status.request_id !== request || status.matches !== true ||
-         status.bound_tab_id !== tab || status.guard_required !== true) throw Error('guard_binding_changed');
+     if (status?.ok !== true) throw changed('guard_status_unavailable');
+     if (status.request_id !== request) throw changed('guard_request_changed');
+     if (status.matches !== true || status.bound_tab_id !== tab) throw changed('guard_tab_unmatched');
+     if (status.guard_required !== true) throw changed('guard_not_required');
      if (status.guard_active === true) return {ok:true};
      if (owned) owned.close();
      owned = create(tab,window,session,request);
@@ -70,7 +73,7 @@ const NativeGuard = (() => {
    if (page.href.split('?')[0] !== chrome.runtime.getURL('collector.html') ||
        page.searchParams.get('tab') !== String(message.tab_id)) return false;
    sessionId().then(session=>ensure(message.request_id,message.tab_id,message.window_id,session))
-     .then(respond,error=>respond({ok:false,error:error.message==='guard_binding_changed'?'guard_binding_changed':'guard_ack_timeout'}));
+     .then(respond,error=>respond({ok:false,error:error.message==='guard_binding_changed'?'guard_binding_changed':'guard_ack_timeout',...(error.diagnostic ? {diagnostic:error.diagnostic} : {})}));
    return true;
  }
  return {create,onMessage};

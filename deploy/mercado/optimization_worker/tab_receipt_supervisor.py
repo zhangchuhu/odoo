@@ -1,11 +1,16 @@
 """Bounded per-request broker lifecycle; exceptions stop future challenges."""
 import threading
 import time
+from .client import APIError
+
+def _record_api_failure(diagnostic, exc):
+    if isinstance(exc, APIError) and type(exc.status) is int and (exc.status == 0 or 100 <= exc.status <= 599):
+        diagnostic('supervisor', 'broker_api_status', exc.status)
 
 class NativeSupervisor:
     def __init__(self, factory, start_index=0, diagnostic=None, expansion_state=None, max_queries=6):
         if max_queries not in (6,9) or type(max_queries) is not int or type(start_index) is not int or not 0<=start_index<=max_queries: raise ValueError('Invalid resume index')
-        self.factory=factory;self.start_index=start_index;self.stop=threading.Event();self.thread=None;self.error=None;self.live_confirmed=False;self.confirmed_at=None;self.active_broker=None
+        self.factory=factory;self.start_index=start_index;self.stop=threading.Event();self.thread=None;self.error=None;self.failure_code=None;self.live_confirmed=False;self.confirmed_at=None;self.active_broker=None
         self.max_queries=max_queries
         self.diagnostic=diagnostic or (lambda *args: None)
         self.expansion_state=expansion_state
@@ -49,6 +54,7 @@ class NativeSupervisor:
             self.active_broker=None
             self.error=type(exc).__name__
             self.diagnostic('supervisor','broker_exception',self.error)
+            _record_api_failure(self.diagnostic, exc)
     def close(self):
         self.stop.set()
         if self.thread: self.thread.join(10)
@@ -76,34 +82,73 @@ class NativeSupervisor:
 
 class CardPageSupervisor(NativeSupervisor):
     """Choose the next durable page rather than advancing one whole query."""
-    def __init__(self,factory,page_state,diagnostic=None):
+    def __init__(self,factory,page_state,diagnostic=None,*,homepage=False,rebind_step=None,reserve_retry=None,clear_retry=None):
         super().__init__(factory,diagnostic=diagnostic,max_queries=9)
-        if not callable(page_state):raise ValueError('Page state required')
-        self.page_state=page_state
+        if (not callable(page_state) or type(homepage) is not bool or any(x is not None and not callable(x) for x in (rebind_step,reserve_retry,clear_retry))):raise ValueError('Page state required')
+        self.page_state=page_state;self.homepage=homepage;self.rebind_step=rebind_step
+        self.reserve_retry=reserve_retry;self.clear_retry=clear_retry
+
+    def _retry_delay(self,index,retries):
+        if self.reserve_retry:return self.reserve_retry(index)
+        from .home_retry_policy import next_retry
+        decision=next_retry('binding_lost',retries)
+        if decision['action']!='retry':raise ValueError('browser_unavailable')
+        return decision['delay_seconds']
 
     def run(self):
         try:
             self.diagnostic('supervisor','started',None)
-            rebind=False
+            rebind=False;retries=0
             while not self.stop.is_set():
-                step=(0,0) if rebind else self.page_state()
+                step=(0,0) if rebind and not self.homepage else self.page_state()
+                if rebind and self.homepage and step is None:
+                    if not callable(self.rebind_step):raise ValueError('browser_unavailable')
+                    step=self.rebind_step()
                 if step is not None:
                     if (not isinstance(step,tuple) or len(step)!=2 or type(step[0]) is not int or not 0<=step[0]<9
                             or type(step[1]) is not int or not -2<=step[1]<=3):raise ValueError('Invalid page state')
                     index,page=step
-                    with self.factory(index,rebind=rebind,watch_only=False) as broker:
-                        broker.requested_page=page;self.active_broker=broker
-                        self.diagnostic('supervisor','broker_ready',None)
-                        while not self.stop.is_set() and not broker.done and not getattr(broker,'rebind_requested',False):broker.serve_once()
+                    try:
+                        with self.factory(index,rebind=rebind,watch_only=False) as broker:
+                            broker.requested_page=page;self.active_broker=broker
+                            self.diagnostic('supervisor','broker_ready',None)
+                            while not self.stop.is_set() and not broker.done and not getattr(broker,'rebind_requested',False):broker.serve_once()
+                            self.active_broker=None
+                            if getattr(broker,'rebind_requested',False):
+                                if self.homepage:
+                                    delay=self._retry_delay(index,retries)
+                                    retries+=1
+                                    if self.stop.wait(delay):return
+                                rebind=True;continue
+                            if not self.stop.is_set() and (self.homepage or not rebind) and self.page_state()==step:raise ValueError('Page completion was not durable')
+                            if self.homepage and self.clear_retry and not self.stop.is_set():self.clear_retry(index)
+                            rebind=False;retries=0
+                    except OSError:
                         self.active_broker=None
-                        if getattr(broker,'rebind_requested',False):rebind=True;continue
-                        if not self.stop.is_set() and not rebind and self.page_state()==step:raise ValueError('Page completion was not durable')
-                        rebind=False
+                        if not self.homepage:raise
+                        delay=self._retry_delay(index,retries);retries+=1
+                        if self.stop.wait(delay):return
+                        continue
                 else:
-                    with self.factory(0,rebind=False,watch_only=True) as broker:
-                        self.active_broker=broker
-                        while not self.stop.is_set() and self.page_state() is None and not getattr(broker,'rebind_requested',False):broker.serve_once()
+                    try:
+                        with self.factory(0,rebind=False,watch_only=True) as broker:
+                            self.active_broker=broker
+                            while not self.stop.is_set() and self.page_state() is None and not getattr(broker,'rebind_requested',False):broker.serve_once()
+                            self.active_broker=None
+                            if getattr(broker,'rebind_requested',False):
+                                if self.homepage:
+                                    if not callable(self.rebind_step):raise ValueError('browser_unavailable')
+                                    delay=self._retry_delay(self.rebind_step()[0],retries)
+                                    retries+=1
+                                    if self.stop.wait(delay):return
+                                rebind=True
+                    except OSError:
                         self.active_broker=None
-                        if getattr(broker,'rebind_requested',False):rebind=True
+                        if not self.homepage or not callable(self.rebind_step):raise
+                        delay=self._retry_delay(self.rebind_step()[0],retries);retries+=1
+                        if self.stop.wait(delay):return
         except Exception as exc:
-            self.active_broker=None;self.error=type(exc).__name__;self.diagnostic('supervisor','broker_exception',self.error)
+            self.active_broker=None;self.error=type(exc).__name__
+            if self.homepage and str(exc)=='browser_unavailable':self.failure_code='browser_unavailable'
+            self.diagnostic('supervisor','broker_exception',self.error)
+            _record_api_failure(self.diagnostic, exc)

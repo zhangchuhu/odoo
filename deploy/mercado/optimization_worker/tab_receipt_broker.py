@@ -85,13 +85,21 @@ class Broker:
         return self.window == window and (self.challenge['platform'] == 'shein-us' or self.session == session)
 
     def open_anchor_guard(self,event):
-        if (not self.anchor_origin or set(event)!={'operation','request_id','session_id','window_id','marker','native_origin'}
-                or event.get('native_origin')!=self.anchor_origin or event.get('request_id')!=self.challenge['request_id']
-                or self.rebind_requested or not self._anchor_matches_binding(event.get('window_id'), event.get('session_id'))
-                or self.anchor_registry.current()!=(event.get('window_id'),event.get('session_id'),event.get('marker'))
-                or self.fence() is not True): return None
+        self.anchor_guard_failure=None
+        if (not isinstance(event,dict) or not self.anchor_origin or set(event)!={'operation','request_id','session_id','window_id','marker','native_origin'}
+                or event.get('native_origin')!=self.anchor_origin or event.get('request_id')!=self.challenge['request_id']):
+            self.anchor_guard_failure='request_invalid';return None
+        if self.rebind_requested:
+            self.anchor_guard_failure='rebind_pending';return None
+        if not self._anchor_matches_binding(event.get('window_id'),event.get('session_id')):
+            self.anchor_guard_failure='binding_mismatch';return None
+        if self.anchor_registry.current()!=(event.get('window_id'),event.get('session_id'),event.get('marker')):
+            self.anchor_guard_failure='anchor_mismatch';return None
+        if self.fence() is not True:
+            self.anchor_guard_failure='lease_invalid';return None
         with self._anchor_lock:
-            if self._live_anchor_connection(): return None
+            if self._live_anchor_connection():
+                self.anchor_guard_failure='guard_already_active';return None
             token=(event['window_id'],event['session_id'],event['marker'])
             self._anchor_guard=token;self._anchor_seen=time.monotonic();return token
 
@@ -249,7 +257,19 @@ class Broker:
             self._activation_started_at=time.time()
             return dict(selected, detail_identity=identity, detail_url=event['detail_url'])
         index=self.challenge['query_index']
-        if self.watch_only or (index>0 and not self.query_verified):
+        if self.watch_only and self.challenge.get('version')==5:
+            scope=tuple(self.challenge[k] for k in ('request_id','plan_digest','lease_epoch'))
+            with closing(sqlite3.connect(self.store.path)) as db:
+                rows=[json.loads(row[0]) for row in db.execute('SELECT body FROM accepted_receipts WHERE request_id=? ORDER BY id DESC',(scope[0],))]
+                current=[r for r in rows if r.get('version')==5 and all(r.get(k)==self.challenge.get(k) for k in ('request_id','lease_epoch','plan_digest','platform'))
+                         and r.get('tab_id')==self.tab and r.get('window_id')==self.window and r.get('session_id')==self.session]
+                receipt=next((r for r in current if db.execute('''SELECT 1 FROM card_v3_pages p JOIN card_v3_queries q
+                    USING(request_id,plan_digest,lease_epoch,query_index) JOIN card_v3_page_evidence e
+                    USING(request_id,plan_digest,lease_epoch,query_index,page) WHERE p.request_id=? AND p.plan_digest=? AND p.lease_epoch=?
+                    AND p.query_index=? AND p.page=1 AND p.status='home_complete' AND q.query=?''',(*scope,r.get('query_index'),r.get('query'))).fetchone()),None)
+            if receipt is None:return None
+            selected['query']=receipt['query'];selected['query_index']=receipt['query_index']
+        elif self.watch_only or (index>0 and not self.query_verified):
             prior_index=2 if self.watch_only else index-1
             with closing(sqlite3.connect(self.store.path)) as db:
                 if self.challenge.get('version') == 3:
@@ -310,8 +330,8 @@ class Broker:
                 or event['window_id']!=self.window or event['session_id']!=self.session or self.fence() is not True
                 or not self.guard_alive(self.session) or not isinstance(event['evidence'],dict)
                 or event['evidence'].get('task_record_id')!=collector_id(event['request_id'])): return False
-        if self.progress_plan is not None and self.progress_plan[0].get('strategy') in ('visual-v2','card-visual-v3'):
-            plan,config=self.progress_plan;v3=plan.get('strategy')=='card-visual-v3'
+        if self.progress_plan is not None and self.progress_plan[0].get('strategy') in ('visual-v2','card-visual-v3','card-home-v4'):
+            plan,config=self.progress_plan;v3=plan.get('strategy') in ('card-visual-v3','card-home-v4')
             if v3:from .visual_v3_finalize import prepare_stage
             else:from .visual_v2_finalize import prepare_stage
             scope=getattr(self,'visual_v3_scope' if v3 else 'visual_v2_scope',None)
@@ -429,10 +449,29 @@ class Broker:
         return self.challenge if tab_id==self.tab else None
 
     def _card_v3_identity(self,event):
-        return (self.challenge.get('version')==4 and self.anchor_origin and event.get('native_origin')==self.anchor_origin
+        return (self.challenge.get('version') in (4,5) and self.anchor_origin and event.get('native_origin')==self.anchor_origin
                 and event.get('request_id')==self.challenge['request_id'] and event.get('tab_id')==self.tab
                 and event.get('window_id')==self.window and event.get('session_id')==self.session
                 and self.query_verified and self.anchor_guard_alive() and self.fence() is True)
+
+    def home_tab_missing(self,event):
+        fields={'operation','request_id','tab_id','window_id','session_id','native_origin'}
+        if (not isinstance(event,dict) or set(event)!=fields or event.get('operation')!='home_tab_missing'
+                or self.challenge.get('version')!=5 or not self.progress_plan or self.progress_plan[0].get('strategy')!='card-home-v4'
+                or self.gallery_binding or event.get('native_origin')!=self.anchor_origin
+                or event.get('request_id')!=self.challenge['request_id'] or event.get('tab_id')!=self.tab
+                or event.get('window_id')!=self.window or event.get('session_id')!=self.session
+                or not self.anchor_guard_alive() or not callable(self.rebind_check) or self.rebind_check() is not True
+                or self.fence() is not True):return False
+        try:
+            with closing(sqlite3.connect(self.store.path)) as db,db:
+                db.execute('BEGIN IMMEDIATE')
+                db.execute('DELETE FROM confirmed_task_tabs WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND tab_id=?',
+                           (self.challenge['request_id'],self.challenge['plan_digest'],self.challenge['lease_epoch'],self.tab))
+                if self.fence() is not True:raise ValueError('Active lease required')
+            self.rebind_requested=True
+            return True
+        except (ValueError,sqlite3.Error):return False
 
     def card_v3_progress(self,event):
         fields={'operation','request_id','tab_id','window_id','session_id','native_origin'}
@@ -463,6 +502,7 @@ class Broker:
                 or not self._card_v3_identity(event) or event['query_index']!=self.challenge['query_index']
                 or event['query']!=self.challenge['query'] or type(event['page']) is not int
                 or event['page']!=abs(getattr(self,'requested_page',event['page']))):return None
+        if self.progress_plan and self.progress_plan[0].get('strategy')=='card-home-v4' and event['page']!=1:return None
         try:
             from .card_sales_v3_receipts import PageReceiptGuard
             with closing(sqlite3.connect(self.store.path)) as db,db:
@@ -471,9 +511,9 @@ class Broker:
                 keys=('request_id','plan_digest','lease_epoch','query_index','query','tab_id','window_id','session_id')
                 expected=dict(request_id=event['request_id'],plan_digest=self.challenge['plan_digest'],lease_epoch=self.challenge['lease_epoch'],
                               query_index=event['query_index'],query=event['query'],tab_id=self.tab,window_id=self.window,session_id=self.session)
-                matches=[row for row in rows if row.get('version')==4 and row.get('platform')=='mercado-libre-mx' and all(row.get(k)==expected[k] for k in keys)]
-                if len(matches)!=1:return None
-                return PageReceiptGuard(db).issue_for_page(matches[0],event['page'],fence=self.fence)
+                matches=[row for row in rows if row.get('version')==self.challenge['version'] and row.get('platform')=='mercado-libre-mx' and all(row.get(k)==expected[k] for k in keys)]
+                if not matches or (self.challenge['version']==4 and len(matches)!=1):return None
+                return PageReceiptGuard(db).issue_for_page(matches[-1],event['page'],fence=self.fence)
         except (ValueError,TypeError,KeyError,sqlite3.Error):return None
 
     def confirm_card_v3_page(self,event):
@@ -495,13 +535,14 @@ class Broker:
     def save_card_v3_batch(self,event):
         fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','page','page_url','batch_index','cards','screenshot','native_origin'}
         if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_batch'
-                or self.challenge.get('version')!=4 or not self.anchor_origin or event['native_origin']!=self.anchor_origin
+                or self.challenge.get('version') not in (4,5) or not self.anchor_origin or event['native_origin']!=self.anchor_origin
                 or event['request_id']!=self.challenge['request_id'] or event['tab_id']!=self.tab
                 or event['window_id']!=self.window or event['session_id']!=self.session
                 or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
                 or type(event['page']) is not int or not 1<=event['page']<=3 or event['page']!=getattr(self,'requested_page',event['page']) or not isinstance(event['cards'],list)
                 or not 1<=len(event['cards'])<=100 or not self.query_verified or not self.anchor_guard_alive() or self.fence() is not True):
             return False
+        if self.progress_plan and self.progress_plan[0].get('strategy')=='card-home-v4' and event['page']!=1:return False
         try:
             import base64,hashlib,io
             from PIL import Image
@@ -537,10 +578,13 @@ class Broker:
 
     def finish_card_v3_page(self,event):
         fields={'operation','request_id','tab_id','window_id','session_id','query_index','query','page','page_url','status','next_url','end_checks','end_evidence','native_origin'}
+        home=bool(self.progress_plan and self.progress_plan[0].get('strategy')=='card-home-v4')
         if (not isinstance(event,dict) or set(event)!=fields or event['operation']!='card_v3_page_finish'
                 or not self._card_v3_identity(event) or event['query_index']!=self.challenge['query_index'] or event['query']!=self.challenge['query']
-                or type(event['page']) is not int or not 1<=event['page']<=3 or event['page']!=getattr(self,'requested_page',event['page']) or type(event['end_checks']) is not int or event['end_checks']<3
-                or event['status'] not in ('has_next','end_of_results','page_limit') or
+                or type(event['page']) is not int or not 1<=event['page']<=3 or event['page']!=getattr(self,'requested_page',event['page']) or type(event['end_checks']) is not int or event['end_checks']<3):return False
+        if home:
+            if event['page']!=1 or event['next_url'] is not None or (event['status'],event['end_evidence']) not in (('home_complete','scroll_end'),('end_of_results','empty_results')):return False
+        elif (event['status'] not in ('has_next','end_of_results','page_limit') or
                 (event['status']=='has_next' and event['end_evidence']!='next_link') or
                 (event['status']=='end_of_results' and event['end_evidence'] not in ('disabled_next','empty_results')) or
                 (event['status']=='page_limit' and event['end_evidence'] not in ('page_limit','empty_results'))):return False
@@ -556,15 +600,20 @@ class Broker:
                 count=db.execute('SELECT count(*) FROM card_v3_batches WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,event['query_index'],event['page'])).fetchone()[0]
                 if not count and event['end_evidence']!='empty_results':return False
                 if count and event['end_evidence']=='empty_results':return False
-                finish_page(db,scope,event['query_index'],event['page'],event['status'],next_url=event['next_url'],fence=self.fence)
-                key=(*scope,event['query_index'],event['page'])
-                saved=db.execute('SELECT page_url,end_evidence,end_checks FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',key).fetchone()
-                expected_evidence=(event['page_url'],event['end_evidence'],event['end_checks'])
-                if saved and saved!=expected_evidence:raise ValueError('Page evidence changed')
-                if not saved:
-                    db.execute('INSERT INTO card_v3_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',(*key,event['page_url'],matches[-1]['nonce'],event['end_evidence'],event['end_checks']))
+                if home:
+                    from .home_collection_checkpoint import finish_homepage
+                    data=dict(url=event['page_url'],receipt_nonce=matches[-1]['nonce'],end_checks=event['end_checks'],no_results=not count)
+                    finish_homepage(db,scope,event['query_index'],data,fence=self.fence,verify=lambda _:bool(matches) and self.anchor_guard_alive())
+                else:
+                    finish_page(db,scope,event['query_index'],event['page'],event['status'],next_url=event['next_url'],fence=self.fence)
+                    key=(*scope,event['query_index'],event['page'])
+                    saved=db.execute('SELECT page_url,end_evidence,end_checks FROM card_v3_page_evidence WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',key).fetchone()
+                    expected_evidence=(event['page_url'],event['end_evidence'],event['end_checks'])
+                    if saved and saved!=expected_evidence:raise ValueError('Page evidence changed')
+                    if not saved:
+                        db.execute('INSERT INTO card_v3_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',(*key,event['page_url'],matches[-1]['nonce'],event['end_evidence'],event['end_checks']))
                 if not self.anchor_guard_alive() or self.fence() is not True:raise ValueError('Lost browser guard')
-            if getattr(self,'requested_page',None) is not None or event['status'] in ('end_of_results','page_limit'):self.done=True
+            if home or getattr(self,'requested_page',None) is not None or event['status'] in ('end_of_results','page_limit'):self.done=True
             return True
         except (ValueError,TypeError,sqlite3.Error):return False
 
@@ -747,7 +796,7 @@ class Broker:
                         return True
                     elif isinstance(message,dict) and message.get('operation')=='anchor_guard_open':
                         token=self.open_anchor_guard(message)
-                        trace_native(self.path.parent/'collector-window-trace.jsonl',op,'broker_result',self.challenge.get('request_id'),code='ok' if token else 'rejected')
+                        trace_native(self.path.parent/'collector-window-trace.jsonl',op,'broker_result',self.challenge.get('request_id'),code='ok' if token else self.anchor_guard_failure or 'rejected')
                         try:
                             write_message(stream,{'ok':bool(token)})
                         except OSError:
@@ -834,6 +883,8 @@ class Broker:
                     elif self.gallery_binding and op in ('stage_evidence','submit','poll','watch','observe_tab','recover_receipt',
                                                         'query_cards_complete','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','collector_progress','checkpoint_detail','next_candidate','seal_expansion'):
                         result={'ok':False,'error':'gallery_phase_invalid'}
+                    elif op == 'home_tab_missing':
+                        result={'ok':self.home_tab_missing(message)}
                     elif op in ('collector_progress', 'checkpoint_detail', 'next_candidate', 'gallery_capture', 'seal_expansion'):
                         result = handle_progress(self, message)
                     elif op == 'card_v3_page_challenge':
@@ -864,7 +915,7 @@ class Broker:
                     elif isinstance(message,dict) and message.get('operation')=='observe_tab': result={'ok':self.observe(message)}
                     elif isinstance(message,dict) and set(message)=={'operation','receipt'} and message['operation']=='submit' and not self.conflict and message['receipt'].get('tab_id')==self.tab and (self.session is None or message['receipt'].get('session_id')==self.session) and (self.initial_tab is not None or (message['receipt'].get('tab_id'),message['receipt'].get('session_id')) in self.candidates):
                         self.store.accept(message['receipt'],self.fence,reconcile=self.reconcile);self.query_verified=True;result={'ok':True}
-                        if self.challenge.get('version')==4 and getattr(self,'requested_page',1)==0:self.done=True
+                        if self.challenge.get('version') in (4,5) and getattr(self,'requested_page',1)==0:self.done=True
                     else: result={'ok':False}
                 except CollectorProgressError as error:
                     result = {'ok': False, 'error': error.code, 'message': str(error)}

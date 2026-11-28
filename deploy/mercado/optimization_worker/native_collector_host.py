@@ -35,6 +35,12 @@ def trace_native(path, operation, stage, request_id=None, unused=None, *, code='
         message = type(transport_error).__name__
         if error_name:
             message += f' ({error_name})'
+        elif isinstance(transport_error, ValueError):
+            reason = {'Broker disconnected':'broker_disconnected', 'Unsafe broker socket':'unsafe_broker_socket',
+                      'Truncated frame':'truncated_frame', 'Invalid frame size':'invalid_frame_size',
+                      'Invalid message':'invalid_message', 'Unknown operation':'unknown_operation',
+                      'Native origin required':'native_origin_required', 'Unsafe configuration':'unsafe_configuration'}.get(str(transport_error))
+            if reason: message += f' ({reason})'
     request_id=request_id if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',request_id) else None
     row={'timestamp':datetime.now(timezone.utc).isoformat(),'stage':('broker.' if stage.startswith('broker_') else 'native.')+stage.removeprefix('broker_'),'operation':operation,'request_id':request_id,'code':code,'message':message}
     try:
@@ -45,11 +51,14 @@ def trace_native(path, operation, stage, request_id=None, unused=None, *, code='
 MAX_FRAME=1024*1024
 
 def trace_supervisor(path, request_id, phase, code, exception_type=None):
-    if phase != 'supervisor' or code not in {'started','broker_ready','broker_exception'}: return
+    if phase != 'supervisor' or code not in {'started','broker_ready','broker_exception','broker_api_status'}: return
+    status = exception_type if code == 'broker_api_status' and type(exception_type) is int and (exception_type == 0 or 100 <= exception_type <= 599) else None
+    if code == 'broker_api_status' and status is None: return
     exception_type = exception_type if isinstance(exception_type,str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,79}',exception_type) else None
     row={'timestamp':datetime.now(timezone.utc).isoformat(),'stage':phase,'code':code,
          'request_id':request_id if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',request_id) else None,
          'exception_type':exception_type,'message':'Broker supervisor stopped after an exception' if code=='broker_exception' else ''}
+    if status is not None: row['http_status'] = status
     try:
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'a') as out: out.write(json.dumps(row,separators=(',',':'))+'\n')
@@ -99,8 +108,8 @@ def private_config(path):
         if fd is not None: os.close(fd)
 
 def forward(sock_path, value, *, origin=None):
-    if value.get('operation') not in ('binding_status','poll','submit','watch','observe_tab','select_window','recover_receipt','stage_evidence','seal_expansion','gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','query_cards_complete','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','collector_progress','checkpoint_detail','next_candidate','activation_challenge','activation_confirm','anchor_challenge','anchor_confirm','task_tab_challenge','task_tab_confirm','peer_challenge','peer_confirm'): raise ValueError('Unknown operation')
-    if value.get('operation') in ('gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','collector_progress','checkpoint_detail','next_candidate','seal_expansion','anchor_challenge','anchor_confirm','task_tab_challenge','task_tab_confirm','peer_challenge','peer_confirm') or (value.get('operation')=='query_cards_complete' and value.get('exhausted') is True):
+    if value.get('operation') not in ('binding_status','poll','submit','watch','observe_tab','select_window','recover_receipt','stage_evidence','seal_expansion','gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','query_cards_complete','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','home_tab_missing','collector_progress','checkpoint_detail','next_candidate','activation_challenge','activation_confirm','anchor_challenge','anchor_confirm','task_tab_challenge','task_tab_confirm','peer_challenge','peer_confirm'): raise ValueError('Unknown operation')
+    if value.get('operation') in ('gallery_binding_challenge','gallery_binding_confirm','gallery_download_next','gallery_download_saved','visual_photo_start','visual_photo_saved','gallery_capture','visual_v2_batch','visual_v2_finish','card_v3_page_challenge','card_v3_page_confirm','card_v3_batch','card_v3_page_finish','card_v3_progress','home_tab_missing','collector_progress','checkpoint_detail','next_candidate','seal_expansion','anchor_challenge','anchor_confirm','task_tab_challenge','task_tab_confirm','peer_challenge','peer_confirm') or (value.get('operation')=='query_cards_complete' and value.get('exhausted') is True):
         if not isinstance(origin,str) or 'native_origin' in value: raise ValueError('Native origin required')
         value=dict(value,native_origin=origin)
     s=os.lstat(sock_path)
@@ -165,12 +174,52 @@ def collector_completion(private, message):
             continue
     return result
 
+
+def verification_watch(private,message,*,origin,allowed_origin):
+    """Accept a trusted extension's readable-page signal for an existing wait."""
+    from .home_verification_watch import armed_info,observe
+    base={'operation','request_id','tab_id','window_id','session_id'}
+    op=message.get('operation') if isinstance(message,dict) else None
+    fields=base if op=='home_verification_info' else base|{'page'} if op=='home_verification_observed' else set()
+    if (not fields or set(message)!=fields or not isinstance(origin,str) or origin!=allowed_origin
+            or not isinstance(message.get('request_id'),str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',message['request_id'])):
+        return {'ok':False}
+    try:
+        paths=[private/'collector-bindings.sqlite',private/'research-scoped-host.sqlite',private/'research-scoped-worker.sqlite']
+        for path in paths:
+            info=path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o600:return {'ok':False}
+        binding={k:message[k] for k in ('tab_id','window_id','session_id')};request=message['request_id']
+        with closing(sqlite3.connect(paths[0],timeout=.5)) as db,db:
+            db.execute('BEGIN IMMEDIATE');watch=armed_info(db,request,binding);task=watch['task']
+            def authorized():
+                with closing(sqlite3.connect(paths[1].as_uri()+'?mode=ro',uri=True,timeout=.5)) as host,closing(sqlite3.connect(paths[2].as_uri()+'?mode=ro',uri=True,timeout=.5)) as journal:
+                    row=host.execute('SELECT record FROM requests WHERE id=?',(request,)).fetchone()
+                    runs=[json.loads(r[0]) for r in journal.execute("SELECT record FROM runs WHERE json_extract(record,'$.request_id')=?",(request,))]
+                if not row or len(runs)!=1:return False
+                record=json.loads(row[0]);run=runs[0];claim=run.get('claim') or {}
+                matching=(record.get('request_id')==request and record.get('task_type')=='research.bestseller'
+                          and tuple(claim.get(k) for k in ('company_id','id','snapshot_id','lease_epoch'))==task
+                          and claim.get('task_type')=='research.bestseller')
+                if op=='home_verification_info':
+                    return matching and (record.get('state') in ('prepared','candidate_images_pending') or (record.get('state')=='waiting' and record.get('reason')=='captcha_required'))
+                return matching and record.get('state')=='waiting' and record.get('reason')=='captcha_required' and run.get('done') is True and run.get('outcome')=='waiting'
+            if not authorized():return {'ok':False}
+            if op=='home_verification_info':return {'ok':True,'stage':watch['stage'],'expected':watch['expected']}
+            observe(db,request,task,binding,message['page'],authorize=authorized)
+            return {'ok':True}
+    except (OSError,ValueError,TypeError,KeyError,sqlite3.Error):return {'ok':False}
+
 def main():
     private=Path(__file__).resolve().parents[3]/'.local/optimization-codex-worker'
     config=private_config(private/'collector-native.json')
     if len(sys.argv)<2 or not validate_origin(sys.argv[1],config.get('extension_ids',config.get('extension_id'))): raise ValueError('Unauthorized extension origin')
     while (value:=read_message(sys.stdin.buffer)) is not None:
         op=value.get('operation'); req=value.get('request_id'); trace=private/'collector-window-trace.jsonl'
+        if op in ('home_verification_info','home_verification_observed'):
+            anchor=config.get('anchor_extension_id');allowed='chrome-extension://'+anchor+'/' if isinstance(anchor,str) else None
+            write_message(sys.stdout.buffer,verification_watch(private,value,origin=sys.argv[1],allowed_origin=allowed))
+            continue
         if op == 'collector_completion':
             completion = collector_completion(private, value)
             write_message(sys.stdout.buffer, completion)

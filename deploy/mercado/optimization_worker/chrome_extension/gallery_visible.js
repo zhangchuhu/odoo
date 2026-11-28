@@ -15,6 +15,14 @@ function galleryError(code, message) {
   throw Error(code + '：' + message);
 }
 
+function singleViewerPosition(viewer, doc, isVisible) {
+  const counters=[...viewer.querySelectorAll('.pswp__counter')];
+  const figures=[...doc.querySelectorAll('.ui-pdp-gallery__figure')];
+  const arrows=[...viewer.querySelectorAll('button.pswp__button--arrow--left,button.pswp__button--arrow--right,button.pswp__button--arrow--prev,button.pswp__button--arrow--next')];
+  return counters.length===1 && /^1\s*\/\s*1$/.test(counters[0].textContent.trim()) &&
+    figures.length===1 && !arrows.some(isVisible) ? [1,1] : null;
+}
+
 // Only use loaded image URLs from the visible main gallery, including its opened viewer.
 function readVisibleGallery(platform, doc, isVisible, {includeVideo = false} = {}) {
   const mercado = platform === 'mercado-libre-mx';
@@ -48,6 +56,7 @@ function readVisibleGallery(platform, doc, isVisible, {includeVideo = false} = {
     const counter = [...viewer.querySelectorAll('.pswp__counter')].find(isVisible);
     const match = /^(\d+)\s*\/\s*(\d+)$/.exec(counter?.textContent.trim() || '');
     if (match) [slidePosition, slideTotal] = match.slice(1).map(Number);
+    else if (mercado) [slidePosition,slideTotal] = singleViewerPosition(viewer,doc,isVisible) || [null,null];
   } else {
     images = [...gallery.querySelectorAll('img')].filter(img => !img.closest('button[aria-label^="Imagen"], [class*="thumbnail" i], [class*="__thumb" i]'));
   }
@@ -98,4 +107,4 @@ function moveVisibleGallery(doc, isVisible, page, expected, direction) {
   if (controls.length !== 1) galleryError('gallery_walk_control_missing','无法唯一确认当前查看器的翻页按钮，可使用逐张操作');
   controls[0].click();
 }
-if (typeof module !== 'undefined') module.exports = {readVisibleGallery,moveVisibleGallery};
+if (typeof module !== 'undefined') module.exports = {readVisibleGallery,moveVisibleGallery,singleViewerPosition};

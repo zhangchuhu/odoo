@@ -16,10 +16,10 @@ def collector_id(request_id):
 
 
 def protocol_matches(version,plan):
-    if version not in (1,2,3,4,5) or not isinstance(plan,dict):return False
+    if version not in (1,2,3,4,5,6) or not isinstance(plan,dict):return False
     strategy=plan.get('strategy')
     return ((version==3)==(strategy=='staged-v1') and (version==4)==(strategy=='visual-v2')
-            and (version==5)==(strategy=='card-visual-v3'))
+            and (version==5)==(strategy=='card-visual-v3') and (version==6)==(strategy=='card-home-v4'))
 
 
 def read_file(path, cap):
@@ -68,11 +68,12 @@ def task_config(snapshot, plan):
                 or type(config['max_cards_per_query']) is not int):
             raise ValueError('Invalid visual-v2 task collection config')
     elif set(config) == v3_fields:
-        expected={'initial_query_count':3,'max_expansion_queries':6,'max_pages_per_query':3,'sales_known_target':100,'top_per_query':30,'visual_limit':30}
-        if (config['platform']!='mercado-libre-mx' or config['strategy']!='card-visual-v3' or plan.get('strategy')!='card-visual-v3'
+        strategy=config.get('strategy')
+        expected={'initial_query_count':3,'max_expansion_queries':6,'max_pages_per_query':1 if strategy=='card-home-v4' else 3,'sales_known_target':100,'top_per_query':30,'visual_limit':30}
+        if (config['platform']!='mercado-libre-mx' or strategy not in ('card-visual-v3','card-home-v4') or plan.get('strategy')!=strategy
                 or any(type(config[k]) is not int or config[k]!=v for k,v in expected.items())):
-            raise ValueError('Invalid card-visual-v3 task collection config')
-    elif plan.get('strategy') in ('visual-v2','card-visual-v3'):
+            raise ValueError('Invalid card collection config')
+    elif plan.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4'):
         raise ValueError('Visual-v2 task config required')
     if config['platform'] != plan['platform'] or config['result_limit'] != plan['result_limit']:
         raise ValueError('Collector plan conflicts with task config')
@@ -107,16 +108,25 @@ def validate_bound_profile(snapshot, plan, historical=False):
         profile = validate_profile(plan.get('visual_profile'), plan['platform'])
     except (TypeError, ValueError, KeyError) as exc:
         raise ValueError('Invalid source visual profile') from exc
-    if profile != plan['visual_profile'] or profile['category_code'] != plan['category'] or profile['query_seeds'] != plan['queries']:
+    if (profile != plan['visual_profile'] or profile['category_code'] != plan['category']
+            or (plan.get('strategy')!='card-home-v4' and profile['query_seeds'] != plan['queries'])
+            or (plan.get('strategy')=='card-home-v4' and profile['query_seeds'][0]!=plan['queries'][0])):
         raise ValueError('Plan must use exact visual profile category and queries')
-    if plan.get('strategy') in ('visual-v2','card-visual-v3'):
+    if plan.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4'):
         from .visual_v2_rules import validate_design_profile
         validate_design_profile(plan.get('design_profile'), plan['category'])
 
 
-def bind_plan(store, request_id, claim, plan):
+def validate_new_query_anchor(plan):
+    if (plan.get('platform')=='mercado-libre-mx' and plan.get('strategy')=='card-visual-v3'
+            and plan.get('category')=='womens_skirt_set'):
+        if ' '.join(plan['queries'][0].casefold().split()) != 'conjunto mujer falda':
+            raise ValueError('女装裙装套装首个搜索词应为 conjunto mujer falda')
+
+
+def bind_plan(store, request_id, claim, plan, *, recovery=False):
     required={'platform','queries','category','result_limit','source_artifact_id','viewed_source_sha256'}
-    if not isinstance(plan,dict) or set(plan) not in (required, required | {'visual_profile'},required | {'visual_profile','strategy'},required | {'visual_profile','strategy','design_profile'}) or plan['platform'] not in ('shein-us','mercado-libre-mx') or ('strategy' in plan and (plan['strategy'] not in ('staged-v1','visual-v2','card-visual-v3') or plan['platform']!='mercado-libre-mx')) or (('design_profile' in plan) != (plan.get('strategy') in ('visual-v2','card-visual-v3'))) or not isinstance(plan['queries'],list) or len(plan['queries'])!=3 or any(not isinstance(x,str) or not x.strip() or len(x)>200 or disallowed_term(x) for x in plan['queries']) or len(set(plan['queries']))!=3 or plan['category'] not in _CATEGORIES or type(plan['result_limit'])!=int or plan['result_limit']<1:
+    if not isinstance(plan,dict) or set(plan) not in (required, required | {'visual_profile'},required | {'visual_profile','strategy'},required | {'visual_profile','strategy','design_profile'}) or plan['platform'] not in ('shein-us','mercado-libre-mx') or ('strategy' in plan and (plan['strategy'] not in ('staged-v1','visual-v2','card-visual-v3','card-home-v4') or plan['platform']!='mercado-libre-mx')) or (('design_profile' in plan) != (plan.get('strategy') in ('visual-v2','card-visual-v3','card-home-v4'))) or not isinstance(plan['queries'],list) or len(plan['queries'])!=3 or any(not isinstance(x,str) or not x.strip() or len(x)>200 or disallowed_term(x) for x in plan['queries']) or len(set(plan['queries']))!=3 or plan['category'] not in _CATEGORIES or type(plan['result_limit'])!=int or plan['result_limit']<1:
         raise ValueError('Invalid collector plan')
     if claim['task_type']!='research.bestseller':raise ValueError('Research task required')
     with store._db() as db:
@@ -127,10 +137,11 @@ def bind_plan(store, request_id, claim, plan):
         existing = record.get('collector_plan')
         if existing:
             signed = dict(existing); digest = signed.pop('digest', None)
-            if (canonical_hash(signed) != digest or existing.get('protocol_version', 1) not in (1, 2, 3, 4, 5)
+            if (canonical_hash(signed) != digest or existing.get('protocol_version', 1) not in (1, 2, 3, 4, 5, 6)
                     or (existing.get('protocol_version')==3) != (plan.get('strategy')=='staged-v1')
                     or (existing.get('protocol_version')==4) != (plan.get('strategy')=='visual-v2')
                     or (existing.get('protocol_version')==5) != (plan.get('strategy')=='card-visual-v3')
+                    or (existing.get('protocol_version')==6) != (plan.get('strategy')=='card-home-v4')
                     or existing.get('request_id') != request_id or existing.get('company_id') != claim['company_id']
                     or existing.get('case_id') != snap['case_id'] or existing.get('snapshot_id') != claim['snapshot_id']
                     or existing.get('input_hash') != claim['input_hash'] or existing.get('collector_id') != collector_id(request_id)
@@ -144,11 +155,20 @@ def bind_plan(store, request_id, claim, plan):
                 raise ValueError('Task collection config changed')
             validate_platform_site(snap, config['platform'], claim['payload'].get('site_id'))
             return digest
+        if plan.get('strategy')=='card-home-v4':
+            selection=record.get('suggestion_selection')
+            if (not isinstance(selection,dict) or selection.get('profile')!=plan.get('visual_profile')
+                    or not isinstance(selection.get('queries'),list)
+                    or any(not isinstance(r,dict) for r in selection['queries'])
+                    or [r.get('text') for r in selection['queries']]!=plan['queries']):
+                raise ValueError('Verified suggestion selection required')
+        if not recovery:
+            validate_new_query_anchor(plan)
         validate_source(record,claim,plan)
         validate_bound_profile(snap, plan)
         config=task_config(snap,plan)
         validate_platform_site(snap, config['platform'], claim['payload'].get('site_id'))
-        binding={'protocol_version':5 if plan.get('strategy')=='card-visual-v3' else 4 if plan.get('strategy')=='visual-v2' else 3 if plan.get('strategy')=='staged-v1' else 2,'collection_config':config,'company_id':claim['company_id'],'case_id':snap['case_id'],'snapshot_id':claim['snapshot_id'],'request_id':request_id,'collector_id':collector_id(request_id),'input_hash':claim['input_hash'],'plan':copy.deepcopy(plan)}
+        binding={'protocol_version':6 if plan.get('strategy')=='card-home-v4' else 5 if plan.get('strategy')=='card-visual-v3' else 4 if plan.get('strategy')=='visual-v2' else 3 if plan.get('strategy')=='staged-v1' else 2,'collection_config':config,'company_id':claim['company_id'],'case_id':snap['case_id'],'snapshot_id':claim['snapshot_id'],'request_id':request_id,'collector_id':collector_id(request_id),'input_hash':claim['input_hash'],'plan':copy.deepcopy(plan)}
         if record.get('collector_plan') and 'collection_config' not in record['collector_plan'] and 'collection_config' not in snap.get('payload', {}):
             binding.pop('collection_config')
         binding['digest']=canonical_hash(binding)
@@ -176,7 +196,8 @@ def import_evidence(store, request_id, claim, data, observed_at, client=None, fe
         if ('collection_config' not in binding and 'collection_config' in record['context']['snapshot'].get('payload', {})) or config != binding.get('collection_config', config): raise ValueError('Task collection config changed')
         staged=plan.get('strategy')=='staged-v1'
         visual=plan.get('strategy')=='visual-v2'
-        card_v3=plan.get('strategy')=='card-visual-v3'
+        card_home=plan.get('strategy')=='card-home-v4'
+        card_v3=plan.get('strategy') in ('card-visual-v3','card-home-v4')
         sealed=(tab_receipts.sealed_queries(request_id,digest,claim['lease_epoch'],lambda: (fence_request() or True))
                 if staged and tab_receipts and len(data.get('queries',[]))>3 else [])
         extra=sealed[:max(0,len(data.get('queries',[]))-3)]
@@ -199,9 +220,19 @@ def import_evidence(store, request_id, claim, data, observed_at, client=None, fe
                 result=build_result(ledger,(request_id,digest,claim['lease_epoch']),scope,plan,config,observed_at)
         if card_v3:
             if not tab_receipts:raise ValueError('Verified page receipts required')
-            state=tab_receipts.card_v3_state(request_id,digest,claim['lease_epoch'],plan['queries'],lambda:(fence_request() or True))
-            if state['next_page'] is not None or tab_receipts.resume_index(request_id,digest,state['queries'],claim['lease_epoch'],card_v3=True)!=len(state['queries']):
-                raise ValueError('Verified page receipts required')
+            if card_home:
+                state=tab_receipts.card_home_state(request_id,digest,claim['lease_epoch'],plan['queries'],lambda:(fence_request() or True))
+                from contextlib import closing
+                import sqlite3
+                with closing(sqlite3.connect(tab_receipts.path)) as ledger:
+                    count=ledger.execute('''SELECT count(*) FROM card_v3_pages p JOIN card_v3_page_evidence e
+                        USING (request_id,plan_digest,lease_epoch,query_index,page)
+                        WHERE p.request_id=? AND p.plan_digest=? AND p.lease_epoch=? AND p.page=1 AND p.status='home_complete' ''',(request_id,digest,claim['lease_epoch'])).fetchone()[0]
+                if state['next_page'] is not None or count!=len(state['queries']):raise ValueError('Verified homepage evidence required')
+            else:
+                state=tab_receipts.card_v3_state(request_id,digest,claim['lease_epoch'],plan['queries'],lambda:(fence_request() or True))
+                if state['next_page'] is not None or tab_receipts.resume_index(request_id,digest,state['queries'],claim['lease_epoch'],card_v3=True)!=len(state['queries']):
+                    raise ValueError('Verified page receipts required')
             from .visual_candidate import VisualCandidate
             from .visual_v3_finalize import snapshot_evidence,build_result
             from contextlib import closing

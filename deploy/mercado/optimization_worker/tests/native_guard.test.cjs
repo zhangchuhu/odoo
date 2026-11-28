@@ -1,4 +1,14 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+for (const platform of ['chrome_extension','shein_extension']) test(platform+' reports the specific failed guard check without exposing session values',async()=>{
+ const id='e'.repeat(32), prefix='chrome-extension://'+id+'/';
+ const chrome={tabs:{get:async()=>({id:7,windowId:4})},runtime:{id,getURL:p=>prefix+p,
+  sendNativeMessage:async()=>({ok:true,request_id:'r',matches:true,bound_tab_id:7,guard_required:false})}};
+ const ctx=vm.createContext({chrome,URL,sessionId:async()=>('b'.repeat(32)),setTimeout,clearInterval,setInterval});
+ vm.runInContext(fs.readFileSync('deploy/mercado/optimization_worker/'+platform+'/native_guard.js','utf8'),ctx);
+ const result=await new Promise(resolve=>vm.runInContext('NativeGuard.onMessage',ctx)(
+  {type:'ensure_collector_guard',request_id:'r',tab_id:7,window_id:4},{id,url:prefix+'collector.html?tab=7'},resolve));
+ assert.equal(result.error,'guard_binding_changed');assert.equal(result.diagnostic,'guard_not_required');
+});
 for(const platform of ['chrome_extension','shein_extension']) test(platform+' guard opens and disconnect revokes',async()=>{
  let receive,disconnect,sent=[],closed=false;
  const port={onMessage:{addListener:f=>receive=f},onDisconnect:{addListener:f=>disconnect=f},postMessage:m=>sent.push(m),disconnect:()=>{closed=true;disconnect()}};

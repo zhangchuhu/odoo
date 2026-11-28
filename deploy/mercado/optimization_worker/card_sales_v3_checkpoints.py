@@ -126,10 +126,10 @@ def query_candidates(db,scope,index):
     return rank_per_query([c for c in _observations(db,scope,index) if c['product_id'] not in conflicts])
 
 
-def known_count(db,scope):
+def known_count(db,scope,*,include_plus_hundred=False):
     grouped={}
     for card in _observations(db,scope):grouped.setdefault(card['product_id'],[]).append(card.get('sales_text') if card['sales_status']=='known' else None)
-    return sum(resolve_sales(labels)['status']=='known' for labels in grouped.values())
+    return sum(resolve_sales(labels,include_plus_hundred=include_plus_hundred)['status']=='known' for labels in grouped.values())
 
 
 def next_page(db,scope):

@@ -7,6 +7,7 @@ from contextlib import closing
 import fcntl
 import hashlib
 import json
+import re
 import os
 from pathlib import Path
 import sqlite3
@@ -77,6 +78,12 @@ def gallery_prompt(action):
         '每个操作确认后重读 gallery_step，继续到下一张或下一候选。结果已对账且步骤为 finish 时，'
         '确认当前标签守护可用，调用 finish（data 为空）并确认完成。candidates 为空且已显示完成时直接结束。'
         '若看到验证码、登录失效或页面无法读取，用 page_blocked 返回 captcha_required、login_required 或 page_unreadable，'
+        '并附 diagnostic 的 stage、symptom、page_type、tab_match：stage 为 gallery、binding 或 unknown；'
+        'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
+        'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+        '如为扩展错误，展开“采集器连接诊断记录”，只读取本次连接后产生的最新失败；'
+        'diagnostic 可同时附 extension_stage 和 extension_code，两者只能取受控桥文档中的枚举，无法确认填 unknown，绝不复制原始消息。'
+        '只记录实际观察，不写入网址、页面内容或猜测。扩展尚未连接时先连接当前任务，不能当作平台页面不可读。'
         '保留原请求及已确认进度。禁止编造原图、截图和回执。不得扫描 Downloads 或直接请求平台、图片网址。任务数据：\n'
         + json.dumps(action, ensure_ascii=False))
 
@@ -87,11 +94,63 @@ def research_prompt(action):
     supplied=action.get('collector_plan') or {}
     snapshot=action.get('context',{}).get('snapshot',{})
     config=snapshot.get('payload',{}).get('collection_config',{}) if isinstance(snapshot,dict) else {}
+    if supplied.get('strategy')=='card-home-v4' or (isinstance(config,dict) and config.get('strategy')=='card-home-v4'):
+        bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        return ('执行墨西哥站 card-home-v4 采集，仅记录实际观察。先阅读 '+str(bridge)+'。先读取源图并分析类别，'
+                '女装裙装套装的核心词为 conjunto mujer falda。'
+                '调用 prepare_suggestions 登记当前任务源图和品类；读取联想词无需正式采集标签绑定，'
+                '可用墨西哥站的可访问浏览器，核对搜索输入与可见建议，使用 record_suggestions 记录观察和页面证据。'
+                '若电脑操作工具的全局应用枚举失败，先使用 cua.getApp("com.google.Chrome") 直接检查 Chrome；'
+                '全局枚举失败不等于页面不可读取，只有直接检查也无法读取时才能报告浏览器或页面不可用。'
+                '若 cua.listTabs 返回浏览器访问宿主不可用，记录 computer_browser_enumeration_unavailable，'
+                '该错误不等于采集扩展或平台故障；可用 Chrome 窗口直接核验时继续，否则保留进度并报告。'
+                '如确实无法读取联想词，调用 suggestions_unavailable 记录实际原因，再使用源图回退词；验证码不能作为不可读取的理由。'
+                '不可把加载失败、验证页面或不可核验页面当作空结果；禁止保存验证码截图或输入短信验证码。'
+                '调用 seal_suggestions 生成初始词并锁定来源，然后使用这些词绑定正式计划；'
+                '通过 binding_status 查看 card_v3.next_page、card_v3.resume_step 和 queries，自动打开当前词的首页；'
+                '若 next_page 为空但 resume_step 非空，必须用 resume_step 的索引选择 queries 中的词，'
+                '在任务标签打开该词首页并完成绑定，不能默认使用第一个词，也不重采已保存的首页。'
+                '确认墨西哥站和搜索框实际内容后连接采集器并执行采集。每次采集结束重新读取状态。'
+                '完成已签封的首页后，若需要扩词，调用 home_expansion_options 获取有平台观察依据的后续词，'
+                '用 seal_expansion 提交返回的完整列表；返回空列表时提交空数组结束扩词。'
+                '只采集首页，逐批保存，按商品 ID 去重，已完成的首页不重跑。'
+                '只选择卡片明确销量大于 100 的商品，每词最多 30 个；按任务设置的门槛区分达标和补充。'
+                '恢复后先读取 visual_candidate_status；已有视觉待办时不要再次核验销量，'
+                '打开该候选详情与图库、下载候选首图并提交视觉判断；只有后台指示 detail 阶段时才点击核验销量。'
+                '操作采集器前点击“连接当前任务”，等待状态确认当前任务与任务标签匹配。'
+                'checkpoint_disconnected 不是页面不可读：重新点击“连接当前任务”，等待连接完成后重试原步骤；'
+                '若连接无法恢复，报告 browser_unavailable 并附 binding 阶段诊断，不要报告 page_unreadable。'
+                '若 visual_candidate_status 返回 state=no_pending_visual，表示当前没有视觉待办，'
+                '应连接任务采集器并根据 next_candidate 继续下一件详情或完成任务，不能作为页面不可读。'
+                '最多 30 个详情合格商品完成视觉判断后排序；图库回传完成后结束。'
+                '任务标签关闭时重新打开并核对任务、站点和搜索词，技术性重连最多 3 次。'
+                '若 binding_status 返回 failure_code=browser_unavailable，调用 page_blocked 返回该代码并停止，保留检查点。'
+                '遇到验证码先保存进度；平台自动放行时核对页面后继续。'
+                '确认是可由浏览器交互的验证码后，每次交互前先调用 reserve_captcha_attempt，'
+                '提供当前 stage 和本次唯一 action_id，取得 accepted 与 attempt 后才能进行一次交互；'
+                '需短信或邮箱信息、能力不可用或两次失败时，在已核验的搜索或详情阶段先调用 arm_home_verification，'
+                '随后在绑定采集器点击“验证完成后自动恢复任务”，再调用 page_blocked 返回 captcha_required 并停止。'
+                '若观察启动失败，仍调用 page_blocked 保留检查点，由用户手动恢复。'
+                '视觉候选接口没有待办不代表页面不可读，应按后台进度继续详情或完成。'
+                '仅在实际观察到页面无法读取时才回传 page_blocked，必须附 diagnostic：'
+                'stage、symptom、page_type、tab_match 四项分别使用固定枚举；'
+                'stage 为 search、pagination、detail、visual、gallery、binding 或 unknown；'
+                'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed、computer_browser_enumeration_unavailable 或 unknown；'
+                'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。'
+                '如为扩展错误，展开采集器连接诊断记录，查看本次连接后的最新失败；'
+                '可同时附 extension_stage 和 extension_code，只能使用受控桥文档中的固定枚举，无法确认填 unknown，禁止复制原始错误内容。'
+                '先检查扩展页面错误和实际目标标签；无法确认的字段填 unknown，禁止猜测和传入页面内容。'
+                '不得记录验证码图片、验证码内容、cookie 或令牌。'
+                '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='card-visual-v3' or (isinstance(config,dict) and config.get('strategy')=='card-visual-v3'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
         return ('使用已授权的原生 Chrome 和运营中心绑定版采集器执行 card-visual-v3，仅记录真实观察。先阅读 '+str(bridge)+'。'
           '源图及研究计划必须绑定当前任务；plan 使用 strategy=card-visual-v3，visual_profile、design_profile 和快照阈值。'
+          '墨西哥女装裙装套装（womens_skirt_set）的商品类别和首条搜索词使用 conjunto mujer falda；'
+          '其余搜索词结合可见的构造、款式或场合扩展，不将长裙、蕾丝等非必然特征写入品类核心词。'
           '用 binding_status 确认任务专用窗口、标签和 card_v3.resume_step；按后台页码使用同一任务标签打开相应搜索词与实际下一页，'
+          '新建任务标签通常先显示平台首页，尚未绑定搜索结果是正常状态；页码为 0 时在确认的任务标签输入后台指定的搜索词并核验搜索结果，再连接采集器。'
+          '不得仅因尚未打开搜索页而报告 page_unreadable；标签不匹配时先通过任务窗口控制页重新核对任务与标签，不能假称平台页面不可读。'
           '恢复步骤页码为 0 时重新搜索并核验该词；页码为负数时打开对应正数页并在采集器确认该历史页；正数表示采集该页。'
           '在绑定版采集器恢复本任务并点击采集。先完成三组首页，随后按后台顺序轮换各词的前三页；'
           '只使用卡片明确属于该商品的销量，销售量不明确的卡片不能入选。每词按卡片销量严格大于 100 排序取最多 30 个。'
@@ -101,6 +160,9 @@ def research_prompt(action):
           '按后台顺序下载并核验候选原图，提交 candidate_primary、secondary、styles、occasions 和实际视觉证据；'
           '最多 30 个详情通过的商品进行视觉判断，必须完成整个集合后再按相似度排序，不因达到目标数量提前停止。'
           '只将销量达标结果计入任务目标，补充候选单独保存。完成图库回执后才能结束；验证码、身份不符或页面不可核验时保留检查点。'
+          '回传 page_blocked 时附 diagnostic，必须根据实际观察填写：stage 为 search、pagination、detail、visual、gallery、binding 或 unknown；'
+          'symptom 为 results_not_visible、search_input_missing、page_loading、page_error、access_blocked、captcha、login、tab_mismatch、extension_error、navigation_failed 或 unknown；'
+          'page_type 为 search、detail、extension、other 或 unknown；tab_match 为 yes、no 或 unknown。不得附网址、正文、截图或猜测。'
           '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='visual-v2' or (isinstance(config,dict) and config.get('strategy')=='visual-v2'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
@@ -311,6 +373,35 @@ class Dispatcher:
             db.execute('CREATE TABLE IF NOT EXISTS invocations (request_id TEXT, checkpoint TEXT, status TEXT, PRIMARY KEY(request_id, checkpoint))')
             db.execute('CREATE TABLE IF NOT EXISTS invocation_diagnostics (request_id TEXT, checkpoint TEXT, category TEXT, exit_code INTEGER, PRIMARY KEY(request_id, checkpoint))')
             db.execute('CREATE TABLE IF NOT EXISTS invocation_telemetry (id INTEGER PRIMARY KEY, request_id TEXT, checkpoint TEXT, timestamp TEXT, stage TEXT, code TEXT, elapsed_ms INTEGER, stderr_present INTEGER)')
+            db.execute('CREATE TABLE IF NOT EXISTS invocation_tool_failures (id INTEGER PRIMARY KEY, request_id TEXT, checkpoint TEXT, timestamp TEXT, elapsed_ms INTEGER, server TEXT, tool TEXT, error_class TEXT, http_status INTEGER)')
+
+    def _tool_failure(self, request, checkpoint, item, started):
+        # Record an allowlisted identity and classified error, never tool input/output.
+        from datetime import datetime, timezone
+        allowed={'node_repl': {'js', 'js_reset', 'js_add_node_module_dir'},
+                 'computer': {'screenshot', 'click', 'scroll', 'type', 'get_state'},
+                 'web': {'run'}, 'functions': {'exec'}}
+        server=item.get('server'); tool=item.get('tool')
+        if not isinstance(server,str) or server not in allowed: server,tool='other','other'
+        elif not isinstance(tool,str) or tool not in allowed[server]: tool='other'
+        error=item.get('error'); message=error.get('message','') if isinstance(error,dict) else error
+        message=message[:4096].lower() if isinstance(message,str) else ''
+        match=re.search(r'\b(?:http\s*)?(403|429|500|502|503|504)\b',message)
+        status=int(match.group(1)) if match else None
+        if status==403: category='http_forbidden'
+        elif status==429: category='http_rate_limited'
+        elif status: category='http_server_error'
+        elif 'timeout' in message or 'timed out' in message: category='timeout'
+        elif 'permission denied' in message or 'access denied' in message: category='permission_denied'
+        elif 'connection' in message or 'econn' in message: category='connection_error'
+        elif 'not found' in message or 'unavailable' in message: category='unavailable'
+        elif 'invalid' in message: category='invalid_input'
+        else: category='unknown'
+        with closing(sqlite3.connect(self.journal,timeout=5)) as db, db:
+            count=db.execute('SELECT count(*) FROM invocation_tool_failures WHERE request_id=? AND checkpoint=?',(request,checkpoint)).fetchone()[0]
+            if count < 32:
+                db.execute('INSERT INTO invocation_tool_failures(request_id,checkpoint,timestamp,elapsed_ms,server,tool,error_class,http_status) VALUES (?,?,?,?,?,?,?,?)',
+                           (request,checkpoint,datetime.now(timezone.utc).isoformat(),int((time.monotonic()-started)*1000),server,tool,category,status))
 
     def _telemetry(self, request, checkpoint, stage, code, started, stderr_present=0):
         from datetime import datetime, timezone
@@ -437,7 +528,10 @@ class Dispatcher:
                             message = item.get('text')
                             if isinstance(message,str) and '连接当前任务' in message and any(word in message for word in ('缺少','没有','不可用','无法')):
                                 events['binding_unavailable'] = True
-                        if isinstance(item,dict) and item.get('type') in ('mcp_tool_call','tool_call') and (item.get('status') in ('failed','error') or item.get('error') is not None): events['tool_failure']=True
+                        if isinstance(item,dict) and item.get('type') in ('mcp_tool_call','tool_call') and (item.get('status') in ('failed','error') or item.get('error') is not None):
+                            events['tool_failure']=True
+                            try: self._tool_failure(request,checkpoint,item,started)
+                            except sqlite3.Error: pass
             thread=threading.Thread(target=drain,daemon=True);thread.start()
             try:
                 with os.fdopen(write_fd,'wb') as output, os.fdopen(err_write,'wb') as errors:
@@ -463,7 +557,11 @@ class Dispatcher:
                     bridge = self.bridge_factory(request)
                     if bridge.request_id != request:
                         raise ValueError('Bridge request mismatch')
-                    with Server(Path(directory)/'socket', bridge) as server:
+                    bridge_started=time.monotonic()
+                    def trace_bridge(operation,accepted):
+                        try:self._telemetry(request,checkpoint,'bridge',operation+(':'+'ok' if accepted else ':'+'rejected'),bridge_started)
+                        except sqlite3.Error:pass
+                    with Server(Path(directory)/'socket', bridge,on_event=trace_bridge) as server:
                         bridge.save_directory = directory
                         env['OPTIMIZATION_RETURN_SOCKET'] = str(server.path)
                         env['TMPDIR'] = directory

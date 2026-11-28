@@ -146,7 +146,7 @@
     const found=[];
     for (const element of card.querySelectorAll('span, p, div')) {
       if (!isVisible(element) || element.children?.length || element.closest('[class*="seller" i], [class*="vendedor" i]')) continue;
-      const text=visibleText(element).replace(/\s+/g,' ').trim();
+      const text=visibleText(element).replace(/\s+/g,' ').trim().replace(/^\|\s*/, '');
       if (/^\+?\s*(?:\d{1,3}(?:\.\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(?:mil\s+)?vendidos?$/i.test(text)) found.push(text);
     }
     const unique=[...new Set(found)];
@@ -278,6 +278,12 @@
     return [left, top, right - left, bottom - top];
   }
 
+  function parseCurrentPrice(values) {
+    if (!values.length || values.some(v => typeof v !== 'string' || !/^\d{1,10}(?:\.\d{1,2})?$/.test(v))) return null;
+    const found = [...new Set(values.map(Number))];
+    return found.length === 1 && Number.isFinite(found[0]) ? found[0] : null;
+  }
+
   function extractVisibleMetrics(entries) {
     const found = {sold: new Set(), reviews: new Set(), rating: new Set()};
     for (const entry of entries) {
@@ -322,6 +328,10 @@
       }
     }
     const metrics = extractVisibleMetrics(metricEntries);
+    const offerPrices = [...document.querySelectorAll('.ui-pdp-price__second-line [itemprop="offers"]')]
+      .filter(isVisible).map(offer => /\bpesos?\b/i.test(offer.getAttribute('aria-label') || '')
+        ? offer.querySelector('meta[itemprop="price"]')?.getAttribute('content') : null);
+    const amount = parseCurrentPrice(offerPrices);
     const visualBox = imageElement ? normalizeBox(imageElement.getBoundingClientRect(), viewport) : null;
     const accessBox = titleElement
       ? normalizeBox(titleElement.getBoundingClientRect(), viewport)
@@ -336,6 +346,7 @@
       sold_display: metrics.sold_display,
       reviews_display: metrics.reviews_display,
       rating_display: metrics.rating_display,
+      price_observation: amount === null ? null : {amount: amount.toFixed(2), currency: 'MXN', source: 'product_detail'},
       visual_bbox: visualBox,
       metrics_bbox: metrics.metrics_bbox,
       access_bbox: accessBox,
@@ -394,6 +405,7 @@
       classifyVisibleAd,
       mergeFirstVisible,
       extractVisibleMetrics,
+      parseCurrentPrice,
       extractSearch,
       cardSales,
       observedNextPage,
@@ -417,9 +429,20 @@
         else {window.scrollTo({top:0,left:0,behavior:'instant'});sendResponse({ok:true});}
       } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_SEARCH") {
         sendResponse(extractSearch(message.query, message.prior || [], message.limit, message.strict_scope === true, message.with_sales === true));
+      } else if (message?.type === "MERCADO_COLLECTOR_EXTRACT_SUGGESTIONS") {
+        const blocked=detectBlockingWall();
+        const input=document.querySelector('input[name="as_word"], input[name="q"], input.nav-search-input');
+        sendResponse(blocked ? {state:'blocked',suggestions:[]} :
+          globalThis.HomeSuggestions.extractSuggestions(document,input,message.prefix,isVisible));
       } else if (message?.type === "MERCADO_COLLECTOR_PAGE_INFO") {
         const blockingError=detectBlockingWall();
-        sendResponse(blockingError ? {error:blockingError} : {...cardPageInfo(document,message.page),page_url:location.href,
+        const scopes=document.querySelectorAll('.ui-search-layout');
+        const empty=cardPageInfo(document,message.page).end_evidence==='empty_results';
+        const pageInfo=message.home===true && message.page===1
+          ? empty ? {status:'end_of_results',end_evidence:'empty_results'}
+            : scopes.length===1 ? {status:'home_complete',end_evidence:'scroll_end'} : {status:'unverified'}
+          : cardPageInfo(document,message.page);
+        sendResponse(blockingError ? {error:blockingError} : {...pageInfo,page_url:location.href,
           at_end:Math.ceil(scrollY+innerHeight)>=document.documentElement.scrollHeight});
       } else if (message?.type === "MERCADO_COLLECTOR_SCROLL") {
         sendResponse(scrollPage());

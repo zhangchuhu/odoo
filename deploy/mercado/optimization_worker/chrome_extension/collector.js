@@ -363,6 +363,7 @@
   function setStatus(message) { element("status").textContent = message; }
   function clearError() { element("error").textContent = ""; }
   function stopWithError(error) {
+    if (globalThis.CollectorTrace) void globalThis.CollectorTrace.appendError('collector_action', error);
     const message = error instanceof Error ? error.message : String(error);
     element("error").textContent = message.startsWith("Collection stopped:") ? message : `Collection stopped: ${message}`;
     // Intermediate business writes are idempotent. Keep the current step and
@@ -439,11 +440,11 @@
       try {
         clearError();
         const groups = [await globalThis.collectorCheckpoint('collector_progress', {query_index: 0})];
-        if(groups[0].strategy==='card-visual-v3'){
+        if(['card-visual-v3','card-home-v4'].includes(groups[0].strategy)){
           const plan=groups[0],requested=element('record-id').value.trim();
           if(requested && requested!==plan.task)throw Error('checkpoint_task_mismatch：任务已变化，请核对任务绑定');
           session={taskRecordId:plan.task,platform:plan.platform,queries:plan.queries,resultLimit:plan.result_limit,
-                   strategy:'card-visual-v3',stopped:false,nextPage:plan.next_page,details:[]};
+                   strategy:plan.strategy,stopped:false,nextPage:plan.next_page,details:[]};
           element('setup').hidden=true;element('controls').hidden=false;
           element('open-next-candidate').hidden=!!plan.next_page;
           setStatus(plan.next_page ? (plan.next_page[1]===0 ? `请重新核验搜索词 ${plan.next_page[0]+1}。` : `已恢复采集：搜索词 ${plan.next_page[0]+1}，第 ${Math.abs(plan.next_page[1])} 页。`) : '已完成当前搜索词，等待后台安排下一步。');
@@ -501,11 +502,12 @@
       try {
         clearError();
         if (!session || session.stopped) throw new Error("start a new collector session");
-        if(session.strategy==='card-visual-v3'){
+        if(['card-visual-v3','card-home-v4'].includes(session.strategy)){
           const state=await globalThis.collectorCheckpoint('collector_progress',{query_index:0});
           const step=state.next_page;
           if(!Array.isArray(step)||step.length!==2){setStatus('当前搜索词已采集完成，等待后台安排下一步。');return;}
           const [index,page]=step,query=state.queries[index];
+          if(session.strategy==='card-home-v4' && page!==0 && page!==1)throw Error('首页策略不允许访问后续页');
           if(page===0){setStatus(`请在任务标签搜索并核验第 ${index+1} 组原搜索词。`);return;}
           if(page<0){
             if(await globalThis.confirmCardV3Page(index,query,-page)!==true)throw Error('历史页面重新核验未完成，请打开原搜索词的对应页');
@@ -515,7 +517,7 @@
           if(progress.task!==session.taskRecordId || progress.page!==page || progress.queries[index]!==query || !Array.isArray(progress.cards))
             throw Error('page_checkpoint_unavailable：请在当前任务标签核验对应搜索词和页码');
           await CardV3Collector.collectPage({queryIndex:index,query,page,prior:progress.cards,nextBatch:progress.next_batch_index,
-            send:sendToPage,save:globalThis.saveCardV3Batch,finish:globalThis.finishCardV3Page,delay,
+            send:sendToPage,save:globalThis.saveCardV3Batch,finish:(i,q,p)=>globalThis.finishCardV3Page(i,q,p,session.strategy==='card-home-v4'),delay,
             onProgress:count=>setStatus(`搜索词 ${index+1} · 第 ${page} 页：已保存 ${count} 条卡片。`)});
           setStatus(`搜索词 ${index+1} · 第 ${page} 页已确认，请等待后台安排下一页。`);
           return;
@@ -599,7 +601,7 @@
       button.disabled = true;
       try {
         clearError();
-        if(session?.strategy==='card-visual-v3'){
+        if(['card-visual-v3','card-home-v4'].includes(session?.strategy)){
           const next=await globalThis.collectorCheckpoint('next_candidate',{});
           if(!next.candidate)throw Error('当前没有待核验商品，请先完成搜索或扩展');
           await globalThis.openCollectorCandidate(next.candidate.identity,session.taskRecordId);return;
@@ -612,7 +614,7 @@
     element("capture-review-photo").addEventListener("click",collectOnce(async()=>{
       try {
         clearError();
-        if(session?.strategy==='card-visual-v3'){
+        if(['card-visual-v3','card-home-v4'].includes(session?.strategy)){
           const next=await globalThis.collectorCheckpoint('next_candidate',{});
           if(next.stage!=='visual' || !next.candidate || !next.detail)throw Error('当前没有待核验原图的商品');
           const identity=next.candidate.identity,binding=await globalThis.currentGalleryBinding();
@@ -620,8 +622,8 @@
           if(!Number.isInteger(photo)||photo<1||photo>100)throw Error('图片位置无效');
           const observed=await globalThis.readCandidatePhoto(chrome,binding,identity,photo);
           const page=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
-          if(page.blocked || page.identity_matches!==true || page.identity!==identity || page.sold_display!==next.detail.sold_display || page.page_url!==next.detail.detail_url)
-            throw Error('下载时商品身份或销量已变化');
+          const mismatch=CardV3Collector.detailMismatch(page,next.detail,identity);
+          if(mismatch){if(globalThis.CollectorTrace)await CollectorTrace.append('visual_detail_check',mismatch);throw Error('下载时商品身份或销量已变化（'+mismatch+'）');}
           await observed.recheck();
           const result=await globalThis.downloadVisualCandidatePhoto({api:chrome,requestId:binding.request_id,checkpoint:globalThis.collectorCheckpoint,
             observation:{detail:next.detail,photo,source:observed.source,variant:observed.variant},recheck:observed.recheck});
@@ -651,13 +653,14 @@
         try {
           clearError();
           if (!session || session.stopped) throw new Error("start a new collector session");
-          if(session.strategy==='card-visual-v3'){
+          if(['card-visual-v3','card-home-v4'].includes(session.strategy)){
             if(!salesOnly)throw Error('请通过原图回传通道提交视觉判断');
             const next=await globalThis.collectorCheckpoint('next_candidate',{});
             if(next.stage!=='detail' || !next.candidate || !Number.isInteger(next.detail_index))throw Error('当前没有待核验销量的商品');
             const identity=next.candidate.identity,visible=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
             if(visible.blocked || visible.identity_matches!==true || visible.identity!==identity)throw Error('商品详情身份无法核验');
             const detail=detailOutcomePlan(identity,visible,{status:'rejected',reason:'threshold_failure'});
+            detail.price_observation=visible.price_observation || null;
             const receipt=await globalThis.collectorCheckpoint('checkpoint_detail',{detail_index:next.detail_index,detail,sales_only:true});
             if(!['threshold_met','supplemental','exclude'].includes(receipt.sales_screen))throw Error('销量筛选回执未确认');
             setStatus(receipt.sales_screen==='exclude'?'销量不足或不明确，已排除该商品。':receipt.sales_screen==='supplemental'?'已记录补充候选，请核验原图。':'销量达标，请核验原图。');return;
@@ -719,7 +722,7 @@
           const progress=await globalThis.collectorCheckpoint('next_candidate',{});
           timedOut=progress.action==='finish' && progress.reason==='time_budget_exhausted';
         }
-        const evidence=['visual-v2','card-visual-v3'].includes(session.strategy) ? {task_record_id:session.taskRecordId} : buildEvidence(session,{timeBudgetReached:timedOut});
+        const evidence=['visual-v2','card-visual-v3','card-home-v4'].includes(session.strategy) ? {task_record_id:session.taskRecordId} : buildEvidence(session,{timeBudgetReached:timedOut});
         if (!await globalThis.stageCollectorEvidence(evidence)) throw new Error("任务证据未暂存，请核验任务绑定和守护连接");
         setStatus("任务证据已安全暂存，可通过 submit_staged 提交。");
       } catch(error) { element("error").textContent=String(error.message || error); }

@@ -8,6 +8,15 @@ def profile():
 
 
 class ProfileTests(unittest.TestCase):
+    def test_mexico_skirt_set_uses_category_anchor_for_new_v3_plan(self):
+        from optimization_worker.collector_cli import validate_new_query_anchor
+        validate_new_query_anchor({'platform':'mercado-libre-mx','strategy':'card-visual-v3',
+                                   'category':'womens_skirt_set','queries':['conjunto mujer falda','conjunto mujer falda calado','conjunto mujer falda boho']})
+        with self.assertRaises(ValueError):
+            validate_new_query_anchor({'platform':'mercado-libre-mx','strategy':'card-visual-v3',
+                                       'category':'womens_skirt_set','queries':['conjunto de top y falda larga','b','c']})
+        validate_new_query_anchor({'platform':'mercado-libre-mx','strategy':'visual-v2',
+                                   'category':'womens_skirt_set','queries':['conjunto de top y falda larga','b','c']})
     def test_profile_rejects_wrong_language_mapping_and_category(self):
         p=profile(); self.assertEqual(validate_profile(p,'shein-us')['query_seeds'],p['query_seeds'])
         for changes in ({'query_language':'es-MX'},{'category_code':'pants'},{'style':['formal']},{'query_seeds':['dress','red dress','casual dress']},{'query_seeds':['dress','dress flowy hem','ropa mujer']}):

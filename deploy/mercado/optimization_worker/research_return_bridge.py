@@ -15,9 +15,19 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-_FIELDS = {'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'seal_expansion': {'queries'}, 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
+_FIELDS = {'prepare_suggestions': {'source_artifact_id','viewed_source_sha256','category','anchor'}, 'record_suggestions': {'page_url','prefix','visible_input','state','suggestions','screenshot'}, 'suggestions_unavailable': {'reason'}, 'seal_suggestions': {'profile'}, 'home_expansion_options': set(), 'reserve_captcha_attempt': {'stage','action_id'}, 'arm_home_verification': {'stage'}, 'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'seal_expansion': {'queries'}, 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
            'image_saved': {'identity','order'}, 'image': {'identity','file','screenshot','source','order'}, 'finish': set(),
            'reconcile_image': {'identity','artifact_id','order'}, 'reconcile_evidence': {'artifact_id'}}
+_PAGE_DIAGNOSTIC = {
+    'stage': {'search','pagination','detail','visual','gallery','binding','unknown'},
+    'symptom': {'results_not_visible','search_input_missing','page_loading','page_error','access_blocked','captcha','login','tab_mismatch','extension_error','navigation_failed','computer_browser_enumeration_unavailable','unknown'},
+    'page_type': {'search','detail','extension','other','unknown'},
+    'tab_match': {'yes','no','unknown'},
+}
+_EXTENSION_DIAGNOSTIC = {
+    'extension_stage': {'binding_tab','binding_session','binding_status','binding_anchor','binding_select','binding_confirm','binding_guard','binding_wait','binding_activate','binding_window','binding_task_tab','query_challenge','query_tab_get','query_page_extract','query_receipt','query_submit','collector_action','unknown'},
+    'extension_code': {'session_timeout','status_timeout','select_timeout','anchor_recovery_timeout','anchor_recovery_unavailable','anchor_rebind_pending','anchor_select_pending','broker_identity_unavailable','window_timeout','tab_timeout','session_changed_reopen','task_tab_landing_timeout','guard_ack_timeout','guard_binding_changed','receipt_query_mismatch','receipt_page_url_mismatch','receipt_page_extract_error','content_receiver_missing','evidence_not_staged','error','type_error','other_error','unknown'},
+}
 
 def window_blocker_safe(supervisor, broker=None):
     """Permit a known pause only before any target tab has been observed."""
@@ -116,11 +126,17 @@ class ReturnBridge:
         fields=_FIELDS[operation]
         visual_v2_fields={'submission_id','receipts','candidate_primary','secondary','styles','occasions','critical_conflict','features'}
         visual_v3_fields=visual_v2_fields-{'critical_conflict'}
-        if fields is not None and set(data)!=fields and not (operation=='submit_visual_verdict' and set(data) in (visual_v2_fields,visual_v3_fields)):
+        if fields is not None and set(data)!=fields and not (operation=='submit_visual_verdict' and set(data) in (visual_v2_fields,visual_v3_fields)) and not (operation=='page_blocked' and set(data)=={'code','diagnostic'}):
             raise ValueError('Invalid fields')
         if operation == 'window_blocked' and data.get('code') != 'window_registration_failed': raise ValueError('Invalid blocker')
-        if operation == 'page_blocked' and data['code'] not in ('captcha_required', 'login_required', 'page_unreadable'):
+        if operation == 'page_blocked' and data['code'] not in ('captcha_required', 'login_required', 'page_unreadable', 'browser_unavailable'):
             raise ValueError('Invalid page blocker')
+        if operation == 'page_blocked' and 'diagnostic' in data:
+            diag=data['diagnostic']
+            if (not isinstance(diag,dict) or set(diag) not in (set(_PAGE_DIAGNOSTIC), set(_PAGE_DIAGNOSTIC)|set(_EXTENSION_DIAGNOSTIC))
+                    or any(not isinstance(diag[k],str) or diag[k] not in choices for k,choices in _PAGE_DIAGNOSTIC.items())
+                    or any(k in diag and (not isinstance(diag[k],str) or diag[k] not in choices) for k,choices in _EXTENSION_DIAGNOSTIC.items())):
+                raise ValueError('Invalid page diagnostic')
         if 'artifact_id' in data and not (operation in ('reconcile_image', 'reconcile_evidence') and data['artifact_id'] is None) and (not isinstance(data['artifact_id'],str) or not data['artifact_id'].isdigit()):
             raise ValueError('Invalid artifact identifier')
         if operation=='prior_lease_status' and (not isinstance(data['request_id'],str) or not _UUID.fullmatch(data['request_id']) or data['request_id']==self.request_id):
@@ -147,6 +163,20 @@ class ReturnBridge:
         if operation in ('visual_candidate_status','submit_visual_verdict'):
             if not isinstance(result,dict): raise ValueError('Invalid visual response')
             return {'accepted':True,'visual':result}
+        if operation=='seal_suggestions':
+            if not isinstance(result,dict) or set(result)!={'queries'} or not isinstance(result['queries'],list) or len(result['queries'])!=3:
+                raise ValueError('Invalid suggestion selection')
+            return {'accepted':True,'selection':result}
+        if operation=='home_expansion_options':
+            if not isinstance(result,dict) or set(result)!={'queries'} or not isinstance(result['queries'],list) or len(result['queries'])>3 or any(not isinstance(q,str) or not q.strip() for q in result['queries']):
+                raise ValueError('Invalid expansion options')
+            return {'accepted':True,'expansion':result}
+        if operation=='reserve_captcha_attempt':
+            if not isinstance(result,dict) or set(result)!={'attempt'} or type(result['attempt']) is not int or result['attempt'] not in (1,2):raise ValueError('Invalid verification reservation')
+            return {'accepted':True,'captcha':result}
+        if operation=='arm_home_verification':
+            if not isinstance(result,dict) or set(result)!={'stage'} or result['stage'] not in ('search','detail'):raise ValueError('Invalid verification watch')
+            return {'accepted':True,'watch':result}
         if operation=='binding_status':
             if not isinstance(result,dict): raise ValueError('Invalid binding status')
             return {'accepted':True,'binding':result}
@@ -156,7 +186,7 @@ class ReturnBridge:
         return {'accepted':True}
 
 
-def build_bridge(request_id, client, store, journal):
+def build_bridge(request_id, client, store, journal, *, ledger_path_override=None):
     from .host_session import worker_records, fence
     from .collector_cli import bind_plan, import_evidence, reconcile_evidence
     from .candidate_image_upload import bind_gallery, send, finish, reconcile
@@ -165,11 +195,51 @@ def build_bridge(request_id, client, store, journal):
     from .tab_receipt_supervisor import NativeSupervisor,CardPageSupervisor
     from .native_collector_host import trace_supervisor
     private = Path(__file__).resolve().parents[3] / '.local/optimization-codex-worker'
-    ledger_path = private / 'collector-bindings.sqlite'
+    ledger_path = Path(ledger_path_override) if ledger_path_override is not None else private / 'collector-bindings.sqlite'
     socket_path = private / 'collector-native.sock'
     supervisor = None
     last_progress = None
     def renew(): fence(client,journal,request_id)
+    def prepare_suggestions(c,data):
+        from .home_suggestion_bootstrap import bind_bootstrap
+        record=store.inspect(request_id)
+        config=record.get('context',{}).get('snapshot',{}).get('payload',{}).get('collection_config',{})
+        if not isinstance(config,dict) or config.get('strategy')!='card-home-v4':
+            raise ValueError('Homepage suggestion strategy required')
+        bind_bootstrap(store,request_id,c,data['source_artifact_id'],data['viewed_source_sha256'],
+                       data['category'],data['anchor'],fence=lambda:(renew() or True))
+    def seal_suggestions(c,data):
+        from contextlib import closing
+        import sqlite3
+        from .home_suggestion_bootstrap import seal_suggestion_plan
+        from .home_suggestion_checkpoint import initialize
+        with closing(sqlite3.connect(str(ledger_path))) as db,db:
+            initialize(db)
+            selected=seal_suggestion_plan(store,request_id,c,db,data['profile'],fence=lambda:(renew() or True))
+        return {'queries':selected}
+    def suggestions_unavailable(c,data):
+        from .home_suggestion_bootstrap import mark_suggestions_unavailable
+        mark_suggestions_unavailable(store,request_id,c,data['reason'],fence=lambda:(renew() or True))
+    def record_suggestions(c,data):
+        from contextlib import closing
+        import sqlite3
+        from .home_suggestion_bootstrap import validate_bootstrap
+        from .home_suggestion_checkpoint import initialize,reads
+        from .home_suggestion_ingest import ingest
+        record=store.inspect(request_id);draft=record.get('suggestion_bootstrap')
+        if record.get('state')!='prepared' or record.get('retired') or not validate_bootstrap(draft,c,request_id):
+            raise ValueError('Current suggestion bootstrap required')
+        if data.get('state')=='blocked':raise ValueError('Blocked page evidence must not be stored as suggestions')
+        raw=Path(data['screenshot']).read_bytes();sha=hashlib.sha256(raw).hexdigest()
+        stored=Path(store._file(raw))
+        body={k:v for k,v in data.items() if k!='screenshot'}
+        with closing(sqlite3.connect(str(ledger_path))) as db,db:
+            initialize(db)
+            scope=(request_id,draft['digest'],c['lease_epoch'])
+            previous=next((row for row in reads(db,scope) if row['prefix']==body.get('prefix')),None)
+            stamp=previous['observed_at'] if previous and previous['evidence_sha256']==sha else datetime.now(timezone.utc).isoformat()
+            ingest(db,scope,body,sha,stamp,
+                   fence=lambda:(renew() or True),verify=lambda digest:digest==sha and stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest()==digest)
     def claim():
         rows=[r for r in worker_records(journal) if r.get('request_id')==request_id and not r.get('done')]
         if len(rows)!=1: raise ValueError('Active lease required')
@@ -189,6 +259,29 @@ def build_bridge(request_id, client, store, journal):
         staged=plan.get('strategy')=='staged-v1'
         visual=plan.get('strategy')=='visual-v2'
         card_v3=plan.get('strategy')=='card-visual-v3'
+        card_home=plan.get('strategy')=='card-home-v4'
+        if card_home and not direct_gallery:
+            ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+            def home_page_state():
+                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+                if state['next_page'] is None and not ledger.current_binding(request_id):return (len(state['queries'])-1,0)
+                return state['next_page']
+            def home_rebind_step():
+                state=ledger.card_home_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
+                return (len(state['queries'])-1,0)
+            def home_retry(index,clear=False):
+                import sqlite3
+                from contextlib import closing
+                from .home_retry_checkpoint import initialize,reserve_retry,clear_retry
+                with closing(sqlite3.connect(str(ledger_path))) as db,db:
+                    db.execute('BEGIN IMMEDIATE');initialize(db)
+                    scope=(request_id,binding['digest'],current['lease_epoch'])
+                    return (clear_retry if clear else reserve_retry)(db,scope,index,fence=lambda:(renew() or True))
+            supervisor=CardPageSupervisor(lambda number,rebind=False,watch_only=False:build_native_broker(socket_path,ledger_path,request_id,number,store,client,journal,rebind=rebind,watch_only=watch_only,dedicated_required=True),home_page_state,
+                diagnostic=lambda phase,code,exception:trace_supervisor(private/'collector-window-trace.jsonl',request_id,phase,code,exception),homepage=True,rebind_step=home_rebind_step,
+                reserve_retry=lambda index:home_retry(index),clear_retry=lambda index:home_retry(index,clear=True))
+            supervisor.start()
+            return
         if card_v3 and not direct_gallery:
             ledger.card_v3_state(request_id,binding['digest'],current['lease_epoch'],plan['queries'],lambda:(renew() or True))
             def page_state():
@@ -234,7 +327,7 @@ def build_bridge(request_id, client, store, journal):
         receipts = TabReceiptStore(str(ledger_path))
         binding = store.inspect(request_id).get('collector_plan') or {}
         strategy=(binding.get('plan') or {}).get('strategy')
-        if strategy not in ('visual-v2','card-visual-v3'):
+        if strategy not in ('visual-v2','card-visual-v3','card-home-v4'):
             receipts.require_checkpoint_evidence(request_id, binding.get('digest'), c['lease_epoch'], data['evidence'],staged=strategy=='staged-v1')
         if store.inspect(request_id).get('state')=='candidate_images_pending':
             raise ValueError('Research evidence is already archived for this request')
@@ -264,6 +357,57 @@ def build_bridge(request_id, client, store, journal):
         event=dict(operation='seal_expansion',request_id=request_id,window_id=broker.window,
                    session_id=broker.session,tab_id=broker.tab,native_origin=broker.anchor_origin,queries=data['queries'])
         return handle_progress(broker,event)
+    def home_expansion_options(c,data):
+        broker=supervisor.active_broker if supervisor else None
+        if not broker or not broker.watch_only or not supervisor.fresh_confirmation() or not callable(getattr(broker,'home_expansion_candidates',None)):
+            raise ValueError('Current homepage browser session required')
+        record=store.inspect(request_id);binding=record.get('collector_plan') or {};plan=binding.get('plan') or {}
+        if plan.get('strategy')!='card-home-v4':raise ValueError('Homepage strategy required')
+        state=TabReceiptStore(str(ledger_path)).card_home_state(request_id,binding['digest'],c['lease_epoch'],plan['queries'],lambda:(renew() or True))
+        if state['next_page'] is not None or state['known_products']>=100 or len(state['queries'])>=9:
+            raise ValueError('Expansion not needed or not ready')
+        return {'queries':broker.home_expansion_candidates(state['queries'])[:min(3,9-len(state['queries']))]}
+    def reserve_captcha_attempt(c,data):
+        from contextlib import closing
+        import sqlite3
+        from .captcha_attempt_checkpoint import initialize,reserve_attempt
+        record=store.inspect(request_id);config=record.get('context',{}).get('snapshot',{}).get('payload',{}).get('collection_config',{})
+        if (record.get('retired') or record.get('state') not in ('prepared','candidate_images_pending')
+                or not isinstance(config,dict) or config.get('strategy')!='card-home-v4'
+                or data['stage'] not in ('suggestions','search','detail','visual','gallery')):
+            raise ValueError('Active homepage verification required')
+        task=(c['company_id'],c['id'],c['snapshot_id'])
+        # A stable task-wide budget also prevents a changed reported stage from resetting attempts.
+        challenge=hashlib.sha256(('home-captcha:'+':'.join(map(str,task))).encode()).hexdigest()
+        with closing(sqlite3.connect(str(ledger_path))) as db,db:
+            db.execute('BEGIN IMMEDIATE');initialize(db)
+            attempt=reserve_attempt(db,task,challenge,data['action_id'],fence=lambda:(renew() or True))
+        return {'attempt':attempt}
+    def arm_home_verification(c,data):
+        import sqlite3
+        from contextlib import closing
+        from .home_verification_watch import initialize,arm
+        broker=supervisor.active_broker if supervisor else None
+        stage=data['stage']
+        if (stage not in ('search','detail') or not broker or broker.challenge.get('version')!=5
+                or not broker.anchor_guard_alive() or broker.fence() is not True):raise ValueError('Current homepage browser required')
+        if stage=='search':
+            if not broker.query_verified or broker.watch_only:raise ValueError('Verified current search required')
+            expected={'query':broker.challenge['query']}
+        else:
+            from .collector_progress import handle_progress
+            if not broker.watch_only or not broker.guard_alive(broker.session):raise ValueError('Verified current detail required')
+            result=handle_progress(broker,dict(operation='next_candidate',request_id=request_id,window_id=broker.window,
+                session_id=broker.session,tab_id=broker.tab,native_origin=broker.anchor_origin))
+            candidate=result.get('candidate') or {};identity=candidate.get('identity')
+            if result.get('stage') not in ('detail','visual') or not isinstance(identity,str) or not identity.startswith('mercado-libre-mx:'):
+                raise ValueError('Verified current detail required')
+            expected={'product_id':identity.split(':',1)[1]}
+        task=(c['company_id'],c['id'],c['snapshot_id'],c['lease_epoch'])
+        browser={'tab_id':broker.tab,'window_id':broker.window,'session_id':broker.session}
+        with closing(sqlite3.connect(str(ledger_path))) as db,db:
+            db.execute('BEGIN IMMEDIATE');initialize(db);arm(db,request_id,task,stage,expected,browser,fence=lambda:(renew() or True))
+        return {'stage':stage}
     def binding_status(c,data):
         nonlocal last_progress
         current_record = store.inspect(request_id)
@@ -273,8 +417,14 @@ def build_bridge(request_id, client, store, journal):
         staged=plan.get('strategy')=='staged-v1'
         visual=plan.get('strategy')=='visual-v2'
         card_v3=plan.get('strategy')=='card-visual-v3'
+        card_home=plan.get('strategy')=='card-home-v4'
         card_state=None
-        if card_v3 and isinstance(queries,list) and len(queries)==3:
+        if card_home and isinstance(queries,list) and len(queries)==3:
+            card_state=ledger.card_home_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
+            queries=card_state['queries'];completed=sum(card_state['progress']['completed_pages'])
+            card_state['resume_step']=card_state['next_page'] or ((len(queries)-1,0) if not binding else None)
+            card_state['resume_url']=None
+        elif card_v3 and isinstance(queries,list) and len(queries)==3:
             card_state=ledger.card_v3_state(request_id,item['digest'],c['lease_epoch'],queries,lambda:(renew() or True))
             queries=card_state['queries']
             completed=ledger.resume_index(request_id,item['digest'],queries,c['lease_epoch'],card_v3=True)
@@ -301,7 +451,7 @@ def build_bridge(request_id, client, store, journal):
             gallery_step['save_path'] = str(gallery_save_path(bridge.save_directory, gallery_step))
         collection_stage=None
         active=supervisor.active_broker if supervisor else None
-        if (staged or visual or card_v3) and active and active.watch_only and supervisor.fresh_confirmation():
+        if (staged or visual or card_v3 or card_home) and active and active.watch_only and supervisor.fresh_confirmation():
             from .collector_progress import handle_progress, CollectorProgressError
             try:
                 progress=handle_progress(active,dict(operation='next_candidate',request_id=request_id,
@@ -331,11 +481,22 @@ def build_bridge(request_id, client, store, journal):
             stage='finished' if stage=='finished' else 'visual' if stage in ('visual','detail') else 'search'
             keys=('known_products','completed_pages','selected_per_query','threshold_met','supplemental','excluded','visual_required','visual_done','visual_threshold_passed','visual_supplemental_passed')
             progress=dict(stage=stage,queries=saved_groups,reviewed=cp['detail_count'],qualified=min(cp['visual_threshold_passed'],plan['result_limit']),target=plan['result_limit'],card_v3={k:cp[k] for k in keys})
+            if card_home:
+                selected=(current_record.get('suggestion_selection') or {}).get('queries')
+                if (not isinstance(selected,list) or len(selected)!=3 or any(not isinstance(row,dict) for row in selected)
+                        or [row.get('text') for row in selected]!=plan['queries']
+                        or any(row.get('source') not in ('category_anchor','platform_suggestion','image_fallback') for row in selected)):
+                    raise ValueError('Original search sources required')
+                progress['strategy']='card-home-v4'
+                progress['end_reason']=card_state['end_reason']
+                progress['search_terms']=[{'text':row['text'],'source':row['source']} for row in selected]
+                progress['search_terms'] += [{'text':term,'source':'platform_suggestion'} for term in queries[3:]]
             if progress!=last_progress:
                 try:
                     client.research_progress(c,request_id,progress);last_progress=progress
                 except Exception:
                     pass
+        failure=getattr(supervisor,'failure_code',None) if supervisor else None
         return {'tab_id':binding.get('tab_id') if matches else None,'window_id':binding.get('window_id') if matches else None,
                 'binding_matches_plan':matches,'completed_queries':completed,'queries':queries if isinstance(queries,list) else [],
                 'window_selection':selection,
@@ -343,7 +504,8 @@ def build_bridge(request_id, client, store, journal):
                 'gallery_step': gallery_step,
                 'details': details,
                 'saved_query_groups': saved_groups,'card_v3':card_state,
-                'guard_active':bool(supervisor and supervisor.fresh_confirmation()),'collection_stage':collection_stage}
+                'guard_active':bool(supervisor and supervisor.fresh_confirmation()),'collection_stage':collection_stage,
+                'failure_code':failure if failure=='browser_unavailable' else None}
     def after_reconcile():
         nonlocal supervisor
         if not callable(getattr(store,'inspect',None)): return
@@ -411,6 +573,9 @@ def build_bridge(request_id, client, store, journal):
             if any(upload.get('state') != 'confirmed' for upload in pending.get('candidate_uploads', {}).values()):
                 raise ValueError('Pending image receipt requires reconciliation')
             record.update(state='waiting', reason=data['code'], resume_state=state)
+            record['page_block_diagnostic']={'timestamp':datetime.now(timezone.utc).isoformat(),
+                'reported':data.get('diagnostic'), 'prior_state':state,
+                'plan_bound':bool(record.get('collector_plan')), 'source':'host_report'}
             store._put(db, record)
 
     def require_gallery_identity(data):
@@ -447,7 +612,7 @@ def build_bridge(request_id, client, store, journal):
         return review.status(store,bridge.save_directory)
 
     handlers={
-        'window_blocked':window_blocked, 'page_blocked': page_blocked,
+        'prepare_suggestions':prepare_suggestions, 'record_suggestions':record_suggestions, 'suggestions_unavailable':suggestions_unavailable, 'seal_suggestions':seal_suggestions, 'home_expansion_options':home_expansion_options, 'reserve_captcha_attempt':reserve_captcha_attempt, 'arm_home_verification':arm_home_verification, 'window_blocked':window_blocked, 'page_blocked': page_blocked,
         'binding_status':binding_status,
         'seal_expansion':seal_expansion,
         'visual_candidate_status':visual,

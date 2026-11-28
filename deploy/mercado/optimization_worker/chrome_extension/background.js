@@ -7,6 +7,7 @@ importScripts('task_tab_create.js');
 importScripts('anchor_guard.js');
 importScripts('peer_binding.js');
 importScripts('anchor_reconnect.js');
+importScripts('home_verification_watcher.js');
 // Observe native UI-created tabs. This cannot distinguish the user from CUA;
 // the broker must reject ambiguous candidates and fence the original lease.
 const HOST='local.odoo.collector_binding';
@@ -103,8 +104,16 @@ function recoverTaskAnchor(message, peerId) {
   if (peerId && bound.request_id===request_id && !bound.ok) bound=await nativeStatus(anchor);
   if (bound.request_id!==request_id || bound.anchor_active!==true || bound.ok!==true) return {error:'anchor_rebind_pending'};
   if (Number.isSafeInteger(bound.bound_tab_id) && bound.bound_tab_id>0) {
-   const tab=await TaskTabCreate.verifyBoundTab(chrome,bound.bound_tab_id,anchor.window_id,before.platform);
-   return {ok:true,request_id,...tab};
+   try {
+    const tab=await TaskTabCreate.verifyBoundTab(chrome,bound.bound_tab_id,anchor.window_id,before.platform);
+    return {ok:true,request_id,...tab};
+   } catch(error) {
+    if(!peerId && error?.message==='task_tab_missing') {
+     const response=await chrome.runtime.sendNativeMessage(HOST,{operation:'home_tab_missing',request_id,tab_id:bound.bound_tab_id,window_id:anchor.window_id,session_id});
+     if(response?.ok===true)return {error:'anchor_broker_rotating'};
+    }
+    throw error;
+   }
   }
   if(bound.bound_tab_id!=null) return {error:'anchor_binding_invalid'};
   const task=await getOrCreateTaskTab(request_id,anchor);
@@ -142,6 +151,13 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   return true;
  }
  const ownControl=sender.id===chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('collector.html')) || sender.url?.startsWith(chrome.runtime.getURL('dedicated-window.html')));
+ if (message?.type==='home_verification_watch_start' && ownControl) {
+  (async()=>{
+   const session=await sessionId(),tab=await chrome.tabs.get(message.tab_id);
+   if(session!==message.session_id || tab.id!==message.tab_id || tab.windowId!==message.window_id)return {ok:false};
+   return {ok:await HomeVerificationWatcher.startWatch(chrome,HOST,{request_id:message.request_id,tab_id:tab.id,window_id:tab.windowId,session_id:session})};
+  })().then(respond,()=>respond({ok:false}));return true;
+ }
  if (message?.type==='dedicated_current_request' && ownControl && sender.tab?.id>0) {
   (async()=>{const session=await sessionId(),tab=await chrome.tabs.get(sender.tab.id);await CollectorTrace.append('native_binding_status','sent');const result=await chrome.runtime.sendNativeMessage(HOST,{operation:'binding_status',tab_id:tab.id,window_id:tab.windowId,session_id:session});await CollectorTrace.append('native_binding_status',typeof result?.request_id==='string'?'request_received':'request_unavailable');return result;})().then(respond,async()=>{await CollectorTrace.append('native_binding_status','transport_error');respond({error:'unavailable'})});return true;
  }
@@ -168,6 +184,10 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  }
  if (message?.type!=='collector_session_id' || sender.id!==chrome.runtime.id) return false;
  sessionId().then(id=>respond({session_id:id}),()=>respond({error:'session_unavailable'}));return true;
+});
+if(chrome.alarms?.onAlarm)chrome.alarms.onAlarm.addListener(alarm=>{
+ if(typeof alarm?.name==='string' && alarm.name.startsWith(HomeVerificationWatcher.HOME_VERIFY_PREFIX))
+  void HomeVerificationWatcher.checkWatch(chrome,HOST,alarm.name.slice(HomeVerificationWatcher.HOME_VERIFY_PREFIX.length));
 });
 chrome.tabs.onCreated.addListener(async tab=>{
  if (!Number.isSafeInteger(tab.id) || tab.id<=0 || !Number.isSafeInteger(tab.windowId) || tab.windowId<=0) return;

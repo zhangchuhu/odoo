@@ -14,6 +14,13 @@ function collector(scopes, bodyText = '') {
   return context.__MERCADO_COLLECTOR_TEST__;
 }
 
+test('only an unambiguous current offer produces a price', () => {
+  const api = collector([]);
+  assert.equal(api.parseCurrentPrice(['178.78']), 178.78);
+  assert.equal(api.parseCurrentPrice(['178.78', '298']), null);
+  assert.equal(api.parseCurrentPrice(['not a price']), null);
+});
+
 test('visual search refuses missing or ambiguous results containers', () => {
   assert.match(collector([]).extractSearch('dress', [], 100, true).error, /搜索结果区域/);
   assert.match(collector([{}, {}]).extractSearch('dress', [], 100, true).error, /搜索结果区域/);
@@ -49,6 +56,9 @@ test('card sales reads only an unambiguous visible product-sales label', () => {
     getBoundingClientRect:()=>({width:10,height:10,bottom:10,right:10,top:0,left:0})});
   const extract=context.__MERCADO_COLLECTOR_TEST__.cardSales;
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos')]}).text,'+500 vendidos');
+  assert.equal(extract({querySelectorAll:()=>[node('| +1000 vendidos')]}).text,'+1000 vendidos');
+  assert.equal(extract({querySelectorAll:()=>[node('4.6 | +1000 vendidos')]}).status,'missing');
+  assert.equal(extract({querySelectorAll:()=>[node('| +1000 vendidos',true)]}).status,'missing');
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos',true)]}).status,'missing');
   assert.equal(extract({querySelectorAll:()=>[node('+500 vendidos'),node('+100 vendidos')]}).status,'ambiguous');
 });

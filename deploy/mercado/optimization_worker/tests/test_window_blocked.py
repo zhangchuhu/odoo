@@ -60,6 +60,64 @@ class TestBlocked(unittest.TestCase):
   self.assertFalse(supervisor.closed)
 
 class BrowserBlockerTest(unittest.TestCase):
+    def test_browser_unavailable_has_a_safe_waiting_reason(self):
+        from optimization_worker.host_session import SessionBlocked
+        blocked=SessionBlocked('browser_unavailable')
+        self.assertEqual(blocked.code,'browser_unavailable')
+        self.assertIn('浏览器',blocked.message)
+    def test_captcha_wait_stops_lease_heartbeat_and_releases_queue_slot(self):
+        import tempfile,time
+        from pathlib import Path
+        from unittest.mock import Mock,patch
+        from optimization_worker.host_session import SessionBlocked
+        from optimization_worker.journal import Journal
+        from optimization_worker.runtime import Worker
+        class Provider:
+            def run(self,*args):
+                time.sleep(.05)
+                raise SessionBlocked('captcha_required')
+        client=Mock(identity='fixture',timeout=.2)
+        client.submit.side_effect=lambda claim,op,env:{'state':'waiting' if op=='wait' else 'running'}
+        claim={'id':42,'task_type':'research.bestseller','payload':{},'lease_token':'token','lease_epoch':1,'heartbeat_seconds':.01}
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'journal';journal=Journal(path,client.identity)
+            record={'claim':claim,'request_id':'req','phase':'host_pending','sequence':1,'context':{}}
+            journal.save(record)
+            result=Worker(client,path,providers={'research.bestseller':Provider()},capabilities=('research.bestseller',))._run(journal,record)
+            self.assertEqual(result,'waiting');self.assertEqual(journal.active(),[])
+            count=client.heartbeat.call_count;time.sleep(.06)
+            self.assertEqual(client.heartbeat.call_count,count)
+            journal.close()
+            next_claim={'id':43,'task_type':'research.bestseller','payload':{},'input_hash':'next',
+                        'lease_token':'next-token','lease_epoch':1,'heartbeat_seconds':30}
+            client.claim.return_value=next_claim
+            worker=Worker(client,path,capabilities=('research.bestseller',),single_active=True)
+            with patch.object(worker,'_run',return_value='host_pending') as run:
+                self.assertEqual(worker.once(),'host_pending')
+            self.assertEqual(run.call_args.args[1]['claim']['id'],43)
+
+    def test_captcha_attempt_limit_is_task_scoped_and_cannot_reset_by_stage(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from optimization_worker.host_session import SessionStore
+        from optimization_worker.research_return_bridge import build_bridge
+        request='12345678-1234-4234-8234-123456789abc'
+        claim={'id':8,'company_id':2,'snapshot_id':3,'task_type':'research.bestseller','lease_epoch':1}
+        with tempfile.TemporaryDirectory() as tmp:
+            store=SessionStore(Path(tmp)/'host','fixture')
+            with store._db() as db:
+                store._put(db,{'request_id':request,'task_type':'research.bestseller','state':'prepared',
+                    'context':{'snapshot':{'payload':{'collection_config':{'strategy':'card-home-v4'}}}}})
+            with patch('optimization_worker.host_session.worker_records',return_value=[{'request_id':request,'claim':claim}]),patch('optimization_worker.host_session.fence'):
+                bridge=build_bridge(request,object(),store,'journal',ledger_path_override=Path(tmp)/'ledger')
+                first={'stage':'search','action_id':'first'}
+                self.assertEqual(bridge.call(request,'reserve_captcha_attempt',first)['captcha']['attempt'],1)
+                self.assertEqual(bridge.call(request,'reserve_captcha_attempt',first)['captcha']['attempt'],1)
+                self.assertEqual(bridge.call(request,'reserve_captcha_attempt',{'stage':'detail','action_id':'second'})['captcha']['attempt'],2)
+                with self.assertRaises(ValueError):bridge.call(request,'reserve_captcha_attempt',{'stage':'gallery','action_id':'third'})
+                bridge.close()
+
     def test_page_block_preserves_partial_receipts_and_waits_for_operator(self):
         import tempfile
         from pathlib import Path

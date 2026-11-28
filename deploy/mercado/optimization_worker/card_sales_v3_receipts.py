@@ -52,13 +52,14 @@ class PageReceiptGuard:
 
     def issue_for_page(self,binding,page,*,fence):
         keys=('request_id','plan_digest','lease_epoch','query_index','query','tab_id','window_id','session_id','url')
-        if (not isinstance(binding,dict) or binding.get('version')!=4 or binding.get('platform')!='mercado-libre-mx' or any(k not in binding for k in keys) or type(page) is not int or not 1<=page<=3
+        if (not isinstance(binding,dict) or binding.get('version') not in (4,5) or binding.get('platform')!='mercado-libre-mx' or any(k not in binding for k in keys) or type(page) is not int or not 1<=page<=3
+                or (binding.get('version')==5 and page!=1)
                 or not callable(fence) or fence() is not True):raise ValueError('Current query binding required')
         scope=(binding['request_id'],binding['plan_digest'],binding['lease_epoch'])
         query=self.db.execute('SELECT query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=?',(*scope,binding['query_index'])).fetchone()
         if not query or query[0]!=binding['query']:raise ValueError('Unsealed search query')
         receipts=[json.loads(row[0]) for row in self.db.execute('SELECT body FROM accepted_receipts WHERE request_id=?',(scope[0],))]
-        if not any(r.get('version')==4 and r.get('platform')=='mercado-libre-mx' and all(r.get(k)==binding[k] for k in keys) for r in receipts):raise ValueError('Current query receipt required')
+        if not any(r.get('version')==binding['version'] and r.get('platform')=='mercado-libre-mx' and all(r.get(k)==binding[k] for k in keys) for r in receipts):raise ValueError('Current query receipt required')
         url=binding['url']
         if page>1:
             previous=self.db.execute('SELECT next_url FROM card_v3_navigation WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? AND page=?',(*scope,binding['query_index'],page-1)).fetchone()

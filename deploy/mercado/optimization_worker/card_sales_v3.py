@@ -21,12 +21,13 @@ def parse_sales(text):
     except (InvalidOperation,ValueError):return None
 
 
-def resolve_sales(labels):
+def resolve_sales(labels, *, include_plus_hundred=False):
     if not isinstance(labels,list):raise ValueError('Sales observations required')
     intervals=[]
     for text in labels:
         value=parse_sales(text)
         if value is None:continue
+        if include_plus_hundred and value==100 and is_plus_hundred(text):value=101
         lower_bound_only=text.lstrip().startswith('+') or bool(re.search(r'\bmil\b',text,re.IGNORECASE))
         intervals.append((value,None if lower_bound_only else value))
     if not intervals:return {'status':'missing','lower_bound':None}
@@ -36,7 +37,11 @@ def resolve_sales(labels):
     return {'status':'known','lower_bound':intervals[-1][0]}
 
 
-def rank_per_query(observations, limit=30):
+def is_plus_hundred(text):
+    return isinstance(text,str) and bool(re.fullmatch(r'\s*\+\s*100\s+vendidos?\s*',text,re.IGNORECASE))
+
+
+def rank_per_query(observations, limit=30, *, include_plus_hundred=False):
     if not isinstance(observations,list) or type(limit) is not int or not 1<=limit<=30:
         raise ValueError('Invalid observed candidates')
     unique={}
@@ -48,7 +53,7 @@ def rank_per_query(observations, limit=30):
         previous=unique.get(item['product_id'])
         if previous is None or _later(item,previous):
             unique[item['product_id']]=dict(item,first_seen=min(item['first_seen'],previous['first_seen']) if previous else item['first_seen'])
-    return sorted((v for v in unique.values() if v['sales_lower_bound']>100),key=lambda x:(-x['sales_lower_bound'],x['first_seen'],x['product_id']))[:limit]
+    return sorted((v for v in unique.values() if v['sales_lower_bound']>100 or (include_plus_hundred and v['sales_lower_bound']==100 and is_plus_hundred(v.get('sales_text')))),key=lambda x:(-x['sales_lower_bound'],x['first_seen'],x['product_id']))[:limit]
 
 
 def merge_candidates(query_results):
@@ -71,10 +76,12 @@ def _later(current, previous):
     return current.get('observed_at','')>previous.get('observed_at','')
 
 
-def classify_detail(sales_lower_bound, threshold):
+def classify_detail(sales_lower_bound, threshold, *, sales_text=None, include_plus_hundred=False):
     if type(threshold) is not int or threshold<0:raise ValueError('Invalid task threshold')
-    if type(sales_lower_bound) is not int or sales_lower_bound<=100:return 'exclude'
-    return 'threshold_met' if sales_lower_bound>=threshold else 'supplemental'
+    plus_hundred=include_plus_hundred and sales_lower_bound==100 and is_plus_hundred(sales_text)
+    if type(sales_lower_bound) is not int or (sales_lower_bound<=100 and not plus_hundred):return 'exclude'
+    effective=101 if plus_hundred else sales_lower_bound
+    return 'threshold_met' if effective>=threshold else 'supplemental'
 
 
 def assess_visual(source, candidate, source_secondary, candidate_secondary, source_style, candidate_style):

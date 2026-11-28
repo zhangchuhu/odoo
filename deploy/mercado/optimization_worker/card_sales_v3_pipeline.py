@@ -28,16 +28,20 @@ def _fence(fence):
 def _body(value):return json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
 
 
-def freeze_queue(db,scope,*,plan_exhausted,fence):
+def freeze_queue(db,scope,*,plan_exhausted,fence,homepage_only=False):
     _fence(fence)
-    if type(plan_exhausted) is not bool:raise ValueError('Plan status required')
+    if type(plan_exhausted) is not bool or type(homepage_only) is not bool:raise ValueError('Plan status required')
     existing=db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope).fetchall()
     frozen=db.execute('SELECT 1 FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
     if frozen:return [row[0] for row in existing]
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if len(queries)<3 or len(queries)>9 or [x[0] for x in queries]!=list(range(len(queries))):raise ValueError('Invalid search plan')
-    if known_count(db,scope)<100 and len(queries)<9 and not plan_exhausted:raise ValueError('Search expansion required')
-    merged=merge_candidates([(q,query_candidates(db,scope,i)) for i,q in queries])
+    if known_count(db,scope,include_plus_hundred=homepage_only)<100 and len(queries)<9 and not plan_exhausted:raise ValueError('Search expansion required')
+    if homepage_only:
+        from .home_collection_policy import home_query_candidates
+        reader=home_query_candidates
+    else:reader=query_candidates
+    merged=merge_candidates([(q,reader(db,scope,i)) for i,q in queries])
     db.execute('SAVEPOINT card_v3_freeze')
     try:
         _fence(fence)
@@ -51,14 +55,14 @@ def freeze_queue(db,scope,*,plan_exhausted,fence):
     return [row['product_id'] for row in merged]
 
 
-def record_detail(db,scope,index,identity,sales_text,threshold,*,fence):
+def record_detail(db,scope,index,identity,sales_text,threshold,*,fence,homepage_only=False):
     _fence(fence)
     meta=db.execute('SELECT threshold FROM card_v3_meta WHERE request_id=? AND plan_digest=? AND lease_epoch=?',scope).fetchone()
     if not meta or type(index) is not int or index<0 or type(threshold) is not int or threshold<0:raise ValueError('Frozen task threshold required')
     if meta[0] is not None and meta[0]!=threshold:raise ValueError('Task threshold changed')
     queue=db.execute('SELECT product_id FROM card_v3_queue WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND ordinal=?',(*scope,index)).fetchone()
     if not queue or queue[0]!=identity:raise ValueError('Wrong candidate')
-    value=parse_sales(sales_text);status=classify_detail(value,threshold)
+    value=parse_sales(sales_text);status=classify_detail(value,threshold,sales_text=sales_text,include_plus_hundred=homepage_only)
     body=_body(dict(identity=identity,sales_text=sales_text,sales_lower_bound=value,status=status))
     rows=db.execute('SELECT ordinal,body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope).fetchall()
     if index<len(rows):
@@ -150,15 +154,20 @@ def selection(db,scope,result_limit):
             'review':[r for r in ranked if r['level']=='review']}
 
 
-def progress(db,scope):
+def progress(db,scope,*,homepage_only=False):
     """Derive counts from confirmed checkpoints, never from browser claims."""
     queries=db.execute('SELECT query_index,query FROM card_v3_queries WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY query_index',scope).fetchall()
     if [index for index,_ in queries]!=list(range(len(queries))):raise ValueError('Invalid query history')
+    if type(homepage_only) is not bool:raise ValueError('Invalid collection strategy')
+    if homepage_only:
+        from .home_collection_policy import home_query_candidates
+        reader=home_query_candidates
+    else:reader=query_candidates
     selected=[];pages=[]
     for index,_ in queries:
         history=db.execute('SELECT page,status FROM card_v3_pages WHERE request_id=? AND plan_digest=? AND lease_epoch=? AND query_index=? ORDER BY page',(*scope,index)).fetchall()
         pages.append(len(history))
-        try:selected.append(len(query_candidates(db,scope,index)))
+        try:selected.append(len(reader(db,scope,index)))
         except ValueError:selected.append(None)
     details=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details WHERE request_id=? AND plan_digest=? AND lease_epoch=? ORDER BY ordinal',scope)]
     statuses=[item['status'] for item in details]
@@ -169,7 +178,7 @@ def progress(db,scope):
     passed={'threshold_met':0,'supplemental':0}
     for detail,decision in zip(eligible,decisions):
         if decision.get('level') in ('highly_similar','competitor','broad_competitor'):passed[detail['status']]+=1
-    return dict(known_products=known_count(db,scope),selected_per_query=selected,completed_pages=pages,
+    return dict(known_products=known_count(db,scope,include_plus_hundred=homepage_only),selected_per_query=selected,completed_pages=pages,
                 detail_count=len(details),threshold_met=statuses.count('threshold_met'),supplemental=statuses.count('supplemental'),
                 excluded=statuses.count('exclude'),visual_required=statuses.count('threshold_met')+statuses.count('supplemental'),visual_done=visual_done,
                 visual_threshold_passed=passed['threshold_met'],visual_supplemental_passed=passed['supplemental'])

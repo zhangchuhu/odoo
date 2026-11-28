@@ -195,6 +195,18 @@ class OptimizationAPI(http.Controller):
             return reply(task.retry_expired_unknown_research(data['lease_token'],data['lease_epoch'],data['request_id']))
         return operation(run)
 
+    @http.route('/internal/meli-optimization/research-verified-captcha-resume', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
+    def research_verified_captcha_resume(self):
+        def run():
+            data = body()
+            if set(data) != {'task_id', 'lease_epoch', 'request_id'} or type(data['task_id']) is not int:
+                raise ValueError('Original request required')
+            task = request.env[PREFIX + 'task'].browse(data['task_id']).exists()
+            if not task:
+                raise ValueError('Task unavailable')
+            return reply(task.resume_after_verified_captcha(data['request_id'], data['lease_epoch']))
+        return operation(run)
+
     @http.route('/internal/meli-optimization/retry-unknown-tasks', type='http', auth='meli_optimization', methods=['POST'], csrf=False)
     def retry_unknown_tasks(self):
         def run():

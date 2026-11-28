@@ -1,6 +1,6 @@
 """One-click collection behavior in the disposable test database only."""
 import copy
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import TransactionCase, tagged
 
 IMAGE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGgAAACEAIHJde6SAAAAAElFTkSuQmCC'
@@ -459,7 +459,7 @@ class CollectionStartCase(TransactionCase):
         event = self.env['meli.optimization.event'].search([('task_id', '=', task.id), ('kind', '=', 'unknown_research_retry')])
         self.assertEqual(event.worker_uid, worker)
 
-    def test_page_blocked_task_only_restarts_on_operator_resume(self):
+    def test_page_blocked_task_only_restarts_on_operator_resume(self, verified=False):
         detail = self.collection()
         self.succeed(self.task(detail, 'product.facts'))
         self.start(detail)
@@ -479,7 +479,13 @@ class CollectionStartCase(TransactionCase):
         self.assertEqual(self.start(detail)['code'], 'captcha_required')
         self.assertEqual(task.state, 'waiting')
         self.assertFalse(task.request_ids.retry_superseded)
-        self.assertEqual(task.resume()['task_id'], task.id)
+        if verified:
+            with self.assertRaises(ValidationError):scoped.resume_after_verified_captcha('other',epoch)
+            with self.assertRaises(ValidationError):scoped.resume_after_verified_captcha('paused-original',epoch+1)
+            self.assertEqual(scoped.resume_after_verified_captcha('paused-original',epoch)['task_id'],task.id)
+            self.assertEqual(scoped.resume_after_verified_captcha('paused-original',epoch)['state'],'queued')
+            with self.assertRaises(AccessError):scoped.resume_after_verified_captcha('other',epoch)
+        else:self.assertEqual(task.resume()['task_id'], task.id)
         self.assertEqual(task.state, 'queued')
         self.assertTrue(task.request_ids.retry_superseded)
         next_claim = scoped.claim(['research.bestseller'])
@@ -490,6 +496,9 @@ class CollectionStartCase(TransactionCase):
         with self.assertRaisesRegex(ValidationError, 'Active or succeeded request'):
             scoped.seal_scoped_manifest(next_claim['lease_token'], next_claim['lease_epoch'],
                                         'paused-original', ['late-image'])
+
+    def test_captcha_verified_resume_is_scoped_to_original_request(self):
+        self.test_page_blocked_task_only_restarts_on_operator_resume(verified=True)
 
     def test_manual_reconciliation_of_interrupted_read_only_research(self):
         detail = self.collection()
@@ -581,6 +590,16 @@ class CollectionStartCase(TransactionCase):
             response = self.ui.workbench_collection_start(case.id, snap.id, case.revision)
             self.assertEqual(response['code'], 'collection_data_missing')
             self.assertEqual(len(self.tasks.search([('case_id', '=', case.id)])), 1)
+
+    def test_homepage_strategy_is_versioned_and_rejects_three_page_config(self):
+        from types import SimpleNamespace
+        detail=self.collection()
+        case=self.ui.browse(detail['id'])
+        payload=copy.deepcopy(detail['snapshot']['payload'])
+        payload['collection_config'].update(strategy='card-home-v4',max_pages_per_query=1)
+        self.assertNotIn('collection_config',case._collection_start_missing(SimpleNamespace(payload=payload)))
+        payload['collection_config']['max_pages_per_query']=3
+        self.assertIn('collection_config',case._collection_start_missing(SimpleNamespace(payload=payload)))
 
     def test_running_waiting_failed_cancelled_are_reused_without_resume(self):
         for state in ('running', 'waiting', 'failed', 'cancelled'):
