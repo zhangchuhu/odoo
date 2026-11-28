@@ -6,3 +6,8 @@ test('reads only unique visible nonempty search input',()=>{
 test('ambiguous, absent and blank search boxes fail closed',()=>{
  for(const elems of [[],[{value:'',visible:true}],[{value:'a',visible:true},{value:'b',visible:true}]]) assert.equal(visibleSearch({querySelectorAll:()=>elems},x=>x.visible),null);
 });
+test('accepts the unique visible result heading only when it matches the expected query',()=>{
+ const doc={querySelectorAll:s=>s==='h1' ? [{textContent:'Search results for"Skirt Set"',visible:true}] : [{value:'',visible:true}]};
+ assert.equal(visibleSearch(doc,x=>x.visible,'skirt set'),'skirt set');
+ assert.equal(visibleSearch(doc,x=>x.visible,'dress'),null);
+});

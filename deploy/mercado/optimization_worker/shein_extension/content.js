@@ -152,7 +152,7 @@
     if (blockingError) return {error: blockingError};
     if (homeSales && SheinHomeSales.noSearchResults(document,isVisible,query)) {
       if (prior.length) return {error:'home_no_results_conflict'};
-      return {page_url:location.href,search_query:SheinVisibleSearch.visibleSearch(document,isVisible),observations:[],no_results:true};
+      return {page_url:location.href,search_query:SheinVisibleSearch.visibleSearch(document,isVisible,query),observations:[],no_results:true};
     }
     const viewport = {width: innerWidth, height: innerHeight, scale: devicePixelRatio || 1};
     const visible = [];
@@ -189,7 +189,7 @@
     }
     try {
       const observations = mergeFirstVisible(visible, prior).slice(0, limit);
-      return {page_url: location.href, search_query: SheinVisibleSearch.visibleSearch(document, isVisible), observations};
+      return {page_url: location.href, search_query: SheinVisibleSearch.visibleSearch(document, isVisible, query), observations};
     } catch (error) {
       return {error: `Collection stopped: ${error.message}.`};
     }
