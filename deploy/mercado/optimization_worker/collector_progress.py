@@ -67,13 +67,16 @@ def handle_progress(broker, event):
     platform = broker.challenge['platform']
     origin = broker.anchor_origin if platform == 'mercado-libre-mx' else broker.peer_origin
     shein_home=platform=='shein-us' and broker.progress_plan and broker.progress_plan[0].get('strategy')=='shein-home-v1'
-    if (set(event) != expected or (sales_only and (event['sales_only'] is not True or (platform != 'mercado-libre-mx' and not shein_home)))
-            or not origin or event['native_origin'] != origin or event['request_id'] != key[0]
-            or type(event['tab_id']) is not int or event['tab_id'] != broker.tab
-            or type(event['window_id']) is not int or event['window_id'] != broker.window
-            or not broker.session or event['session_id'] != broker.session
-            or (broker.progress_plan is None and not (op=='gallery_capture' and getattr(broker,'gallery_binding',None)))):
-        raise CollectorProgressError('checkpoint_binding_invalid', '当前任务、租约或浏览器绑定已失效')
+    reason = None
+    if set(event) != expected or (sales_only and (event['sales_only'] is not True or (platform != 'mercado-libre-mx' and not shein_home))): reason = '请求字段不一致'
+    elif not origin or event['native_origin'] != origin: reason = '采集扩展身份不一致'
+    elif event['request_id'] != key[0]: reason = '任务请求不一致'
+    elif type(event['tab_id']) is not int or event['tab_id'] != broker.tab: reason = '任务标签不一致'
+    elif type(event['window_id']) is not int or event['window_id'] != broker.window: reason = '任务窗口不一致'
+    elif not broker.session or event['session_id'] != broker.session: reason = '浏览器会话不一致'
+    elif broker.progress_plan is None and not (op=='gallery_capture' and getattr(broker,'gallery_binding',None)): reason = '采集计划未就绪'
+    if reason:
+        raise CollectorProgressError('checkpoint_binding_invalid', reason)
     binding = dict(request_id=key[0], plan_digest=key[1], lease_epoch=key[2],
                    window_id=broker.window, tab_id=broker.tab, session_id=broker.session)
     guarded_read = op == 'collector_progress' and 'expected_binding' in event
@@ -97,8 +100,10 @@ def handle_progress(broker, event):
         if not callable(broker.gallery_capture):
             raise CollectorProgressError('gallery_capture_unavailable', '宿主未接通图库回传')
         return broker.gallery_capture(event, ensure_current)
-    if not guarded_read and (not broker.fence() or not broker.anchor_guard_alive()):
-        raise CollectorProgressError('checkpoint_binding_invalid', '当前任务、租约或浏览器绑定已失效')
+    if not guarded_read and not broker.fence():
+        raise CollectorProgressError('checkpoint_binding_invalid', '任务租约已失效')
+    if not guarded_read and not broker.anchor_guard_alive():
+        raise CollectorProgressError('checkpoint_binding_invalid', '任务窗口连接不可用')
     plan, config = broker.progress_plan
     task = collector_id(key[0])
     params = dict(platform=platform, queries=plan['queries'], category=plan['category'],

@@ -14,6 +14,15 @@ from optimization_worker.tests.test_collector_import import fixture
 
 
 class CandidateCheckpointTests(unittest.TestCase):
+    def test_binding_diagnostics_distinguish_extension_and_anchor(self):
+        event=dict(self.event,operation='collector_progress',query_index=0)
+        with self.assertRaises(CollectorProgressError) as error:
+            handle_progress(self.broker,dict(event,native_origin='incorrect'))
+        self.assertIn('采集扩展身份',str(error.exception))
+        self.broker.anchor_guard_alive=lambda:False
+        with self.assertRaises(CollectorProgressError) as error:
+            handle_progress(self.broker,event)
+        self.assertIn('任务窗口连接',str(error.exception))
     def test_shein_home_guard_accepts_extended_query_indices(self):
         from optimization_worker.collector_progress import guarded_query_index_allowed
         self.assertTrue(guarded_query_index_allowed(6, 5))
