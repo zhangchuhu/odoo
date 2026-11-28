@@ -97,6 +97,8 @@ def research_prompt(action):
     if supplied.get('strategy')=='shein-home-v1' or (isinstance(config,dict) and config.get('strategy')=='shein-home-v1'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
         preparation = ('已有已锁定搜索计划，直接恢复现有计划和检查点，不要重新调用 prepare_suggestions、seal_suggestions 或重复绑定计划。'
+                       '先检查 binding_status.card_v3.resume_step；若需要重新绑定，在专用任务标签打开对应搜索词的首页并完成扩展核验，'
+                       '等待守卫确认和 watch-only 阶段后再请求扩展词，不要重复写入已完成的首页。'
                        if supplied else
                        '分析源图，使用英文品类核心词，调用 prepare_suggestions 登记源图并读取 SHEIN 搜索框实际联想词；'
                        '读取失败时如实登记原因并使用图片回退词。调用 seal_suggestions 绑定初始词和来源，再绑定计划。')
@@ -108,6 +110,7 @@ def research_prompt(action):
                 '扩展尚未封存时不要打开下一候选，也不要重复采集已完成的首页。'
                 '以任务设置的销量门槛区分正式和补充结果，100+ sold 可作为补充；销量缺失不得推测。'
                 '详情页确认商品身份及评论数，评论数必须达到任务门槛；缺失或不足时排除。'
+                '若电脑工具无法枚举应用窗口，先用 cua.getApp("com.google.Chrome") 直接打开 Chrome；不要仅凭枚举失败认定网页不可读。'
                 '价格和评分仅记录当前商品的可见信息，上架日期无法确认时保留未知。最多 30 个进入视觉判断并按相似度排序。'
                 '完成图库回传后结束；遇到验证码或连接失败保留已确认进度，按桥文档如实回传原因，不编造证据。'
                 '任务数据：\n'+json.dumps(action,ensure_ascii=False))
