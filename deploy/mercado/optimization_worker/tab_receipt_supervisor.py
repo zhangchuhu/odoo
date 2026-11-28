@@ -1,6 +1,11 @@
 """Bounded per-request broker lifecycle; exceptions stop future challenges."""
 import threading
 import time
+from .client import APIError
+
+def _record_api_failure(diagnostic, exc):
+    if isinstance(exc, APIError) and type(exc.status) is int and (exc.status == 0 or 100 <= exc.status <= 599):
+        diagnostic('supervisor', 'broker_api_status', exc.status)
 
 class NativeSupervisor:
     def __init__(self, factory, start_index=0, diagnostic=None, expansion_state=None, max_queries=6):
@@ -49,6 +54,7 @@ class NativeSupervisor:
             self.active_broker=None
             self.error=type(exc).__name__
             self.diagnostic('supervisor','broker_exception',self.error)
+            _record_api_failure(self.diagnostic, exc)
     def close(self):
         self.stop.set()
         if self.thread: self.thread.join(10)
@@ -145,3 +151,4 @@ class CardPageSupervisor(NativeSupervisor):
             self.active_broker=None;self.error=type(exc).__name__
             if self.homepage and str(exc)=='browser_unavailable':self.failure_code='browser_unavailable'
             self.diagnostic('supervisor','broker_exception',self.error)
+            _record_api_failure(self.diagnostic, exc)

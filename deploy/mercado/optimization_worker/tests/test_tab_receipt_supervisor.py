@@ -172,6 +172,14 @@ class SupervisorTest(unittest.TestCase):
         self.assertEqual(s.error, 'RuntimeError')
         self.assertIn(('supervisor','broker_exception','RuntimeError'),events)
         self.assertNotIn('secret credentials',str(events))
+    def test_broker_api_failure_records_http_status(self):
+        from optimization_worker.client import APIError
+        events=[]
+        class Broken(FakeBroker):
+            def serve_once(self): raise APIError(409)
+        s=NativeSupervisor(lambda *a, **k: Broken(), diagnostic=lambda *a: events.append(a))
+        s.start();s.thread.join(2)
+        self.assertIn(('supervisor','broker_api_status',409),events)
     def test_window_selection_report_requires_live_fenced_broker(self):
         s=NativeSupervisor(lambda *args, **kwargs: None)
         class Broker:

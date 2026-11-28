@@ -45,11 +45,14 @@ def trace_native(path, operation, stage, request_id=None, unused=None, *, code='
 MAX_FRAME=1024*1024
 
 def trace_supervisor(path, request_id, phase, code, exception_type=None):
-    if phase != 'supervisor' or code not in {'started','broker_ready','broker_exception'}: return
+    if phase != 'supervisor' or code not in {'started','broker_ready','broker_exception','broker_api_status'}: return
+    status = exception_type if code == 'broker_api_status' and type(exception_type) is int and (exception_type == 0 or 100 <= exception_type <= 599) else None
+    if code == 'broker_api_status' and status is None: return
     exception_type = exception_type if isinstance(exception_type,str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,79}',exception_type) else None
     row={'timestamp':datetime.now(timezone.utc).isoformat(),'stage':phase,'code':code,
          'request_id':request_id if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',request_id) else None,
          'exception_type':exception_type,'message':'Broker supervisor stopped after an exception' if code=='broker_exception' else ''}
+    if status is not None: row['http_status'] = status
     try:
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'a') as out: out.write(json.dumps(row,separators=(',',':'))+'\n')

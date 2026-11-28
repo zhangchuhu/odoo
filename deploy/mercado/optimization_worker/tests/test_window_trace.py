@@ -1,9 +1,13 @@
 import json, tempfile, unittest
 import errno, io, socket, threading
 from pathlib import Path
-from optimization_worker.native_collector_host import trace_native, forward_guard, read_message, write_message
+from optimization_worker.native_collector_host import trace_native, trace_supervisor, forward_guard, read_message, write_message
 
 class WindowTraceTests(unittest.TestCase):
+ def test_supervisor_http_status_is_bounded_and_no_response_is_recorded(self):
+  with tempfile.TemporaryDirectory() as t:
+   p=Path(t)/'trace.log';trace_supervisor(p,'req-123','supervisor','broker_api_status',409)
+   row=json.loads(p.read_text());self.assertEqual(row['http_status'],409)
  def test_activation_trace_records_fixed_failure_without_payload(self):
   with tempfile.TemporaryDirectory() as t:
    p=Path(t)/'trace.log';trace_native(p,'activation_confirm','broker_result','req-123',{'token':'secret'},code='rejected')
