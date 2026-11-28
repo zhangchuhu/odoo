@@ -112,7 +112,10 @@ def research_prompt(action):
                 '详情页确认商品身份及评论数，评论数必须达到任务门槛；缺失或不足时排除。'
                 '若电脑工具无法枚举应用窗口，先用 cua.getApp("com.google.Chrome") 直接打开 Chrome；不要仅凭枚举失败认定网页不可读。'
                 '价格和评分仅记录当前商品的可见信息，上架日期无法确认时保留未知。最多 30 个进入视觉判断并按相似度排序。'
-                '完成图库回传后结束；遇到验证码或连接失败保留已确认进度，按桥文档如实回传原因，不编造证据。'
+                '完成图库回传后结束；遇到验证码先等待其自动完成，若验证码自行消失则继续；'
+                '若仍需操作且页面允许，先按桥文档调用 reserve_captcha_attempt，再控制浏览器尝试验证；'
+                '只在需要短信或邮箱码、尝试次数用尽或无法完成时才上报 captcha_required。'
+                '连接失败时保留已确认进度，按桥文档如实回传原因，不编造证据。'
                 '任务数据：\n'+json.dumps(action,ensure_ascii=False))
     if supplied.get('strategy')=='card-home-v4' or (isinstance(config,dict) and config.get('strategy')=='card-home-v4'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')

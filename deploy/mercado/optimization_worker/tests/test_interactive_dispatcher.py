@@ -71,6 +71,11 @@ class DispatcherTests(unittest.TestCase):
         from optimization_worker.interactive_dispatcher import research_prompt
         prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'shein-home-v1','queries':['skirt set']}})
         self.assertIn('不要重新调用 prepare_suggestions',prompt)
+    def test_shein_prompt_attempts_visible_verification(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'shein-home-v1'}})
+        self.assertIn('reserve_captcha_attempt',prompt)
+        self.assertIn('验证码自行消失',prompt)
     def test_card_v3_progress_preserves_page_checkpoint_count(self):
         store=Store();dispatcher=Dispatcher('unused',store,progress_probe=lambda _:(1,0,0,8,4))
         self.assertEqual(dispatcher._verified_progress('r'),(1,0,0,8,4))
