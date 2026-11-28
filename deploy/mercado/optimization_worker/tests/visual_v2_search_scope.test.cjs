@@ -14,6 +14,13 @@ function collector(scopes, bodyText = '') {
   return context.__MERCADO_COLLECTOR_TEST__;
 }
 
+test('only an unambiguous current offer produces a price', () => {
+  const api = collector([]);
+  assert.equal(api.parseCurrentPrice(['178.78']), 178.78);
+  assert.equal(api.parseCurrentPrice(['178.78', '298']), null);
+  assert.equal(api.parseCurrentPrice(['not a price']), null);
+});
+
 test('visual search refuses missing or ambiguous results containers', () => {
   assert.match(collector([]).extractSearch('dress', [], 100, true).error, /搜索结果区域/);
   assert.match(collector([{}, {}]).extractSearch('dress', [], 100, true).error, /搜索结果区域/);

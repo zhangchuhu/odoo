@@ -659,6 +659,7 @@
             const identity=next.candidate.identity,visible=await sendToPage({type:'MERCADO_COLLECTOR_EXTRACT_DETAIL',identity});
             if(visible.blocked || visible.identity_matches!==true || visible.identity!==identity)throw Error('商品详情身份无法核验');
             const detail=detailOutcomePlan(identity,visible,{status:'rejected',reason:'threshold_failure'});
+            detail.price_observation=visible.price_observation || null;
             const receipt=await globalThis.collectorCheckpoint('checkpoint_detail',{detail_index:next.detail_index,detail,sales_only:true});
             if(!['threshold_met','supplemental','exclude'].includes(receipt.sales_screen))throw Error('销量筛选回执未确认');
             setStatus(receipt.sales_screen==='exclude'?'销量不足或不明确，已排除该商品。':receipt.sales_screen==='supplemental'?'已记录补充候选，请核验原图。':'销量达标，请核验原图。');return;

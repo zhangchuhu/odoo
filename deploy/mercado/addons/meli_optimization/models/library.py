@@ -14,6 +14,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
 from .optimization import PREFIX, ExactJson, bounded, MAX_BINARY
 from ..domain import canonical_hash, validate_gallery, validate_result, card_v3_tier_valid
+from ..domain.historical_rating import historical_rating
 
 
 def _visible_review_lower_bound(value):
@@ -1138,6 +1139,39 @@ class CollectionWorkbench(models.Model):
                     and entry.company_id == original.company_id and entry.name == original.name):
                 superseded.add(original.id)
         rows = []
+        historical_evidence = {}
+
+        def verified_historical_rating(entry, candidate):
+            task = entry.task_id
+            if task.task_type != 'research.bestseller' or task.state != 'succeeded':
+                return None
+            platform, item = candidate.get('platform'), candidate.get('item_id')
+            if not isinstance(platform, str) or not isinstance(item, str):
+                return None
+            result = task.result or {}
+            matches = [c for c in (result.get('candidates') or []) + (result.get('supplemental_candidates') or [])
+                       if c.get('platform') == platform and c.get('item_id') == item]
+            if len(matches) != 1 or matches[0].get('rating') is not None:
+                return None
+            if task.id not in historical_evidence:
+                evidence = [x for x in result.get('evidence', []) if x.get('id') == 'collector']
+                source = evidence[0].get('source', '') if len(evidence) == 1 else ''
+                match = re.fullmatch(r'odoo-artifact:(\d+):sha256:([0-9a-f]{64})', source)
+                value = None
+                if match:
+                    artifact = self.env[PREFIX + 'artifact'].browse(int(match.group(1))).exists()
+                    if artifact and artifact.case_id == entry.case_id and artifact.company_id == entry.company_id and artifact.digest == match.group(2) and artifact.data:
+                        try:
+                            value = (base64.b64decode(artifact.data, validate=True), match.group(2), evidence[0].get('observed_at'))
+                        except (ValueError, TypeError):
+                            pass
+                historical_evidence[task.id] = value
+            evidence = historical_evidence[task.id]
+            if not evidence:
+                return None
+            rating = historical_rating(evidence[0], evidence[1], platform, item)
+            return (rating, evidence[2]) if rating is not None else None
+
         for e in entries:
             if e.id in superseded:
                 continue
@@ -1154,6 +1188,7 @@ class CollectionWorkbench(models.Model):
                     if candidate.get(key) is not None:
                         return candidate[key]
                 return False
+            restored_rating = verified_historical_rating(e, candidate) if value('rating_display', 'rating') is False else None
             rows.append({'id': e.id, 'name': e.name, 'site_id': e.site_id, 'result_hash': e.result_hash,
                 'payload': payload, 'company_id': e.company_id.id,
                 'research_metadata_origin': origin,
@@ -1162,7 +1197,11 @@ class CollectionWorkbench(models.Model):
                 'price': value('price_display', 'price'), 'listed_at': value('listed_at', 'listing_date'),
                 'platform': value('platform'), 'title': value('title'), 'url': value('url'),
                 'sales_text': value('sold_display'), 'reviews_text': value('reviews_display', 'review_count'),
-                'rating_text': value('rating_display', 'rating'), 'visual_features': value('visual_features', 'visual_category')})
+                'rating_text': restored_rating[0] if restored_rating else value('rating_display', 'rating'),
+                'rating_observed_at': restored_rating[1] if restored_rating else candidate.get('rating_observed_at') or candidate.get('observed_at'),
+                'price_observed_at': candidate.get('price_observed_at'),
+                'rating_source': 'verified_historical_evidence' if restored_rating else candidate.get('rating_source'),
+                'visual_features': value('visual_features', 'visual_category')})
         if filters is None:
             return {'rows': rows}
         filters = filters if isinstance(filters, dict) else {}

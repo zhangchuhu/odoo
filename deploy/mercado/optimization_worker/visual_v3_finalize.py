@@ -2,6 +2,7 @@
 import hashlib
 import json
 import io
+import re
 from datetime import datetime
 from PIL import Image
 from .card_sales_v3_pipeline import selection
@@ -89,14 +90,25 @@ def build_result(db,key,photo_scope,plan,config,observed_at,verify_photo):
     def candidate(row):
         observed,card,detail=qualified[row['identity']];pid=row['identity'];sold=detail['sales_lower_bound']
         canonical=_identity(observed['detail_url'],plan['platform'])[1]
-        return {'platform':plan['platform'],'item_id':pid,'title':observed['title'],'url':canonical,
+        rating_text = observed.get('rating_display')
+        rating = float(rating_text.replace(',', '.')) if isinstance(rating_text, str) and re.fullmatch(r'[0-5](?:[.,]\d{1,2})?', rating_text.strip()) else None
+        if rating is not None and rating > 5: rating = None
+        if 'price_observation' not in observed: rating = None  # Preserve the original result of older checkpoints.
+        price = observed.get('price_observation') or {}
+        result = {'platform':plan['platform'],'item_id':pid,'title':observed['title'],'url':canonical,
           'raw_url':observed['detail_url'],'query':card['query'],'position':card['rank'],'is_ad':card.get('is_ad'),
           'sold_display':detail['sales_text'],'sold_lower_bound':sold,'sold_upper_bound':None,'review_count':None,
-          'reviews_display':observed.get('reviews_display'),'rating':None,'image_url':card.get('thumbnail_url'),
+          'reviews_display':observed.get('reviews_display'),'rating':rating,'image_url':card.get('thumbnail_url'),
           'visual_category':plan['category'],'visual_features':'；'.join(row['visual_comparison']['matches']),
           'observed_at':observed_at,'observation_time_scope':'batch','selection_reason':row['level'],
           'evidence_ids':['collector'],'design_comparison':row['visual_comparison'],'search_sources':card.get('search_sources',[]),
           'sales_tier':detail['status']}
+        if 'price_observation' in observed:
+            result.update(price_display='MXN ' + price['amount'] if price else None,
+                price=price.get('amount'), currency=price.get('currency'), price_source=price.get('source'),
+                price_observed_at=(observed.get('observed_at') or observed_at) if price else None,
+                rating_source='product_detail' if rating is not None else None, listed_at=None)
+        return result
     candidates=[candidate(row) for row in selected['threshold_met']]
     supplemental=[candidate(row) for row in selected['supplemental']]
     digest=hashlib.sha256(json.dumps({'details':details,'selected':selected},sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()

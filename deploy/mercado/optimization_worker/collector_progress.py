@@ -191,7 +191,7 @@ def handle_progress(broker, event):
             raise CollectorProgressError('checkpoint_guard_pending', '三组卡片及当前标签须先全部确认')
         if plan.get('strategy') in ('card-visual-v3','card-home-v4') and op in ('next_candidate','checkpoint_detail'):
             from .card_sales_v3_pipeline import record_detail
-            from .collector_import import _DETAIL
+            from .collector_import import _DETAIL, valid_detail_fields
             queue=[(row[0],json.loads(row[1])) for row in db.execute('SELECT product_id,body FROM card_v3_queue'+where+' ORDER BY ordinal',key)]
             frozen=db.execute('SELECT 1 FROM card_v3_meta'+where,key).fetchone()
             details=[json.loads(row[0]) for row in db.execute('SELECT body FROM card_v3_details'+where+' ORDER BY ordinal',key)]
@@ -221,7 +221,7 @@ def handle_progress(broker, event):
             try:
                 pid,_=_identity(detail['detail_url'],platform)
                 valid=(type(index) is int and 0<=index<len(queue) and pid==queue[index][0]
-                       and isinstance(detail,dict) and set(detail) in (_DETAIL,_DETAIL|{'observed_at'})
+                       and valid_detail_fields(detail,allow_observed_at=True)
                        and detail.get('product_id')==pid and detail.get('identity')==platform+':'+pid
                        and isinstance(detail.get('title'),str) and bool(detail['title'].strip())
                        and (detail.get('sold_display') is None or isinstance(detail['sold_display'],str)))

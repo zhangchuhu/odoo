@@ -767,6 +767,7 @@ class LibraryCase(TransactionCase):
         self.assertEqual(row['source_image_artifact_ids'], [])
         self.assertFalse(row['price'])
         self.assertFalse(row['title'])
+
         page = self.ui.workbench_library('', '', {'query': 'absent'}, 0)
         self.assertEqual(page['total'], 0)
         self.assertEqual(page['rows'], [])
@@ -780,6 +781,22 @@ class LibraryCase(TransactionCase):
         self.assertEqual(row['payload']['images'][0]['sha256'], artifact.digest)
         with self.assertRaises(AccessError):
             self.env['meli.optimization.library'].browse(entry).write({'name': 'tampered'})
+
+    def test_library_restores_rating_only_from_verified_evidence(self):
+        detail = self.collection()
+        task, _ = self.gallery(detail)
+        entry = self.env['meli.optimization.library'].search([('task_id', '=', task.id)], limit=1)
+        candidate = {'platform':'mercado-libre-mx', 'item_id':'MLM1', 'rating':None}
+        raw = json.dumps({'platform':'mercado-libre-mx', 'details':[{'identity':'mercado-libre-mx:MLM1', 'product_id':'MLM1', 'rating_display':'4.7'}]}).encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        artifact = self.env['meli.optimization.artifact']._append({'company_id':entry.company_id.id,'case_id':entry.case_id.id,'data':base64.b64encode(raw),'digest':digest,'mime_type':'application/json'})
+        evidence = [{'id':'collector','source':f'odoo-artifact:{artifact.id}:sha256:{digest}','observed_at':'2026-11-27T22:32:53Z'}]
+        task._set({'task_type':'research.bestseller','state':'succeeded','result':{'candidates':[candidate],'evidence':evidence}})
+        entry._set({'payload':dict(entry.payload, research_candidate=candidate)})
+        row = next(r for r in self.ui.workbench_library()['rows'] if r['id'] == entry.id)
+        self.assertEqual(row['rating_text'], 4.7)
+        self.assertEqual(row['rating_source'], 'verified_historical_evidence')
+        self.assertIsNone(entry.payload['research_candidate']['rating'])
 
     def test_import_rejects_wrong_hash_stale_missing_and_wrong_sku(self):
         detail = self.collection()

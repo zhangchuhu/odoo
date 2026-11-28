@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .collector_cli import collector_id
-from .collector_import import _DETAIL, _identity, _number, validate_evidence_prefix
+from .collector_import import _DETAIL, _identity, _number, validate_evidence_prefix, valid_detail_fields
 from .collector_progress import _candidate_order, CollectorProgressError
 from .domain import canonical_hash
 
@@ -89,7 +89,7 @@ class VisualCandidate:
             ordinal, identity = self.current(db)
             if start:
                 detail, source, variant, photo = (event[k] for k in ('detail','source','variant','photo'))
-                if (not isinstance(detail,dict) or set(detail) != _DETAIL or not self.valid_detail(detail,identity)
+                if (not valid_detail_fields(detail) or not self.valid_detail(detail,identity)
                         or not supported_url(source,self.plan['platform'])):
                     fail('visual_photo_candidate_invalid','商品身份、销量或图片来源未通过核验')
                 if type(photo) is not int or not 1 <= photo <= 100 or not isinstance(variant,str) or not 1 <= len(variant) <= 3500:

@@ -278,6 +278,12 @@
     return [left, top, right - left, bottom - top];
   }
 
+  function parseCurrentPrice(values) {
+    if (!values.length || values.some(v => typeof v !== 'string' || !/^\d{1,10}(?:\.\d{1,2})?$/.test(v))) return null;
+    const found = [...new Set(values.map(Number))];
+    return found.length === 1 && Number.isFinite(found[0]) ? found[0] : null;
+  }
+
   function extractVisibleMetrics(entries) {
     const found = {sold: new Set(), reviews: new Set(), rating: new Set()};
     for (const entry of entries) {
@@ -322,6 +328,10 @@
       }
     }
     const metrics = extractVisibleMetrics(metricEntries);
+    const offerPrices = [...document.querySelectorAll('.ui-pdp-price__second-line [itemprop="offers"]')]
+      .filter(isVisible).map(offer => /\bpesos?\b/i.test(offer.getAttribute('aria-label') || '')
+        ? offer.querySelector('meta[itemprop="price"]')?.getAttribute('content') : null);
+    const amount = parseCurrentPrice(offerPrices);
     const visualBox = imageElement ? normalizeBox(imageElement.getBoundingClientRect(), viewport) : null;
     const accessBox = titleElement
       ? normalizeBox(titleElement.getBoundingClientRect(), viewport)
@@ -336,6 +346,7 @@
       sold_display: metrics.sold_display,
       reviews_display: metrics.reviews_display,
       rating_display: metrics.rating_display,
+      price_observation: amount === null ? null : {amount: amount.toFixed(2), currency: 'MXN', source: 'product_detail'},
       visual_bbox: visualBox,
       metrics_bbox: metrics.metrics_bbox,
       access_bbox: accessBox,
@@ -394,6 +405,7 @@
       classifyVisibleAd,
       mergeFirstVisible,
       extractVisibleMetrics,
+      parseCurrentPrice,
       extractSearch,
       cardSales,
       observedNextPage,
