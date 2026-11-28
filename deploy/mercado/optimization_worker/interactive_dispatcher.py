@@ -96,9 +96,12 @@ def research_prompt(action):
     config=snapshot.get('payload',{}).get('collection_config',{}) if isinstance(snapshot,dict) else {}
     if supplied.get('strategy')=='shein-home-v1' or (isinstance(config,dict) and config.get('strategy')=='shein-home-v1'):
         bridge=Path(__file__).with_name('RESEARCH_BRIDGE.md')
+        preparation = ('已有已锁定搜索计划，直接恢复现有计划和检查点，不要重新调用 prepare_suggestions、seal_suggestions 或重复绑定计划。'
+                       if supplied else
+                       '分析源图，使用英文品类核心词，调用 prepare_suggestions 登记源图并读取 SHEIN 搜索框实际联想词；'
+                       '读取失败时如实登记原因并使用图片回退词。调用 seal_suggestions 绑定初始词和来源，再绑定计划。')
         return ('执行 SHEIN US shein-home-v1 采集，仅记录当前任务的真实可见证据。先阅读 '+str(bridge)+'。'
-                '分析源图，使用英文品类核心词，调用 prepare_suggestions 登记源图并读取 SHEIN 搜索框实际联想词；'
-                '读取失败时如实登记原因并使用图片回退词。调用 seal_suggestions 绑定初始词和来源，再绑定计划。'
+                + preparation +
                 '只采集首页，按后台检查点和浏览器绑定执行；每组按搜索卡片中该商品明确销量排序，最多 30 个，'
                 '按商品 ID 去重，保留来源；搜索词不足时使用 home_expansion_options 和 seal_expansion，最多九组。'
                 '以任务设置的销量门槛区分正式和补充结果，100+ sold 可作为补充；销量缺失不得推测。'

@@ -67,6 +67,10 @@ class DispatcherTests(unittest.TestCase):
         prompt=research_prompt({'action':'browse_research','context':{'snapshot':{'payload':{'collection_config':{'strategy':'shein-home-v1'}}}}})
         for text in ('SHEIN US','shein-home-v1','搜索卡片','评论数','只采集首页','最多 30'):
             self.assertIn(text,prompt)
+    def test_shein_resume_uses_existing_plan(self):
+        from optimization_worker.interactive_dispatcher import research_prompt
+        prompt=research_prompt({'action':'browse_research','collector_plan':{'strategy':'shein-home-v1','queries':['skirt set']}})
+        self.assertIn('不要重新调用 prepare_suggestions',prompt)
     def test_card_v3_progress_preserves_page_checkpoint_count(self):
         store=Store();dispatcher=Dispatcher('unused',store,progress_probe=lambda _:(1,0,0,8,4))
         self.assertEqual(dispatcher._verified_progress('r'),(1,0,0,8,4))
