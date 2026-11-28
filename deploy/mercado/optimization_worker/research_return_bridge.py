@@ -14,6 +14,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+def expansion_progress_event(broker, request_id, queries):
+    origin = broker.peer_origin if broker.challenge['platform'] == 'shein-us' else broker.anchor_origin
+    return dict(operation='seal_expansion',request_id=request_id,window_id=broker.window,
+                session_id=broker.session,tab_id=broker.tab,native_origin=origin,queries=queries)
+
 _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 _FIELDS = {'prepare_suggestions': {'source_artifact_id','viewed_source_sha256','category','anchor'}, 'record_suggestions': {'page_url','prefix','visible_input','state','suggestions','screenshot'}, 'suggestions_unavailable': {'reason'}, 'seal_suggestions': {'profile'}, 'home_expansion_options': set(), 'reserve_captcha_attempt': {'stage','action_id'}, 'arm_home_verification': {'stage'}, 'visual_candidate_status': set(), 'submit_visual_verdict': {'submission_id','receipts','status','reason','category','match_level','features'}, 'page_blocked': {'code'}, 'window_blocked': {'code'}, 'binding_status': set(), 'seal_expansion': {'queries'}, 'prior_lease_status': {'request_id'}, 'plan': None, 'submit': None, 'submit_staged': {'observed_at'}, 'manifest': {'identity','manifest','screenshot'},
            'image_saved': {'identity','order'}, 'image': {'identity','file','screenshot','source','order'}, 'finish': set(),
@@ -358,8 +363,7 @@ def build_bridge(request_id, client, store, journal, *, ledger_path_override=Non
         broker=supervisor.active_broker if supervisor else None
         if not broker or not broker.watch_only or not supervisor.fresh_confirmation():
             raise ValueError('Current browser session requires fresh verification')
-        event=dict(operation='seal_expansion',request_id=request_id,window_id=broker.window,
-                   session_id=broker.session,tab_id=broker.tab,native_origin=broker.anchor_origin,queries=data['queries'])
+        event=expansion_progress_event(broker,request_id,data['queries'])
         return handle_progress(broker,event)
     def home_expansion_options(c,data):
         broker=supervisor.active_broker if supervisor else None

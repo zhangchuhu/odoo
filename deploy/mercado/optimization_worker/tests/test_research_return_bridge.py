@@ -21,6 +21,13 @@ class Tests(unittest.TestCase):
         bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:None,
                             {'home_expansion_options':lambda c,d:{'queries':['conjunto mujer falda blusa']}})
         self.assertEqual(bridge.call(ID,'home_expansion_options',{}),{'accepted':True,'expansion':{'queries':['conjunto mujer falda blusa']}})
+    def test_shein_expansion_uses_peer_extension_origin(self):
+        from types import SimpleNamespace
+        from optimization_worker.research_return_bridge import expansion_progress_event
+        broker=SimpleNamespace(challenge={'platform':'shein-us'},anchor_origin='anchor',peer_origin='peer',window=1,session='s',tab=2)
+        self.assertEqual(expansion_progress_event(broker,ID,[])['native_origin'],'peer')
+        broker.challenge['platform']='mercado-libre-mx'
+        self.assertEqual(expansion_progress_event(broker,ID,[])['native_origin'],'anchor')
     def test_suggestion_bootstrap_requires_exact_fields_and_scoped_fence(self):
         calls=[]
         bridge=ReturnBridge(ID,lambda:{'task_type':'research.bestseller'},lambda:calls.append('fence'),
