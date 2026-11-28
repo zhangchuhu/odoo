@@ -24,10 +24,12 @@ test('identifies known connection failures without persisting arbitrary error te
  const t=ctx.globalThis.CollectorTrace;
  await t.appendError('binding_session',new Error('session_timeout'));
  await t.appendError('binding_select',new Error('anchor_select_pending'));
+ await t.appendError('query_page_extract',new Error('Could not establish connection. Receiving end does not exist.'));
  await t.appendError('collector_action',new Error('private token https://private.example'));
  assert.equal(store.collector_trace_v1[0].code,'session_timeout');
  assert.equal(store.collector_trace_v1[1].code,'anchor_select_pending');
- assert.equal(store.collector_trace_v1[2].message,'[message redacted]');
+ assert.equal(store.collector_trace_v1[2].code,'content_receiver_missing');
+ assert.equal(store.collector_trace_v1[3].message,'[message redacted]');
  assert.ok(!JSON.stringify(store).includes('private.example'));
 });
 test('records a bounded sanitized exception message with its fixed error code',async()=>{

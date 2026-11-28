@@ -26,7 +26,7 @@ _PAGE_DIAGNOSTIC = {
 }
 _EXTENSION_DIAGNOSTIC = {
     'extension_stage': {'binding_tab','binding_session','binding_status','binding_anchor','binding_select','binding_confirm','binding_guard','binding_wait','binding_activate','binding_window','binding_task_tab','query_challenge','query_tab_get','query_page_extract','query_receipt','query_submit','collector_action','unknown'},
-    'extension_code': {'session_timeout','status_timeout','select_timeout','anchor_recovery_timeout','anchor_recovery_unavailable','anchor_rebind_pending','anchor_select_pending','broker_identity_unavailable','window_timeout','tab_timeout','session_changed_reopen','task_tab_landing_timeout','guard_ack_timeout','guard_binding_changed','receipt_query_mismatch','receipt_page_url_mismatch','receipt_page_extract_error','evidence_not_staged','error','type_error','other_error','unknown'},
+    'extension_code': {'session_timeout','status_timeout','select_timeout','anchor_recovery_timeout','anchor_recovery_unavailable','anchor_rebind_pending','anchor_select_pending','broker_identity_unavailable','window_timeout','tab_timeout','session_changed_reopen','task_tab_landing_timeout','guard_ack_timeout','guard_binding_changed','receipt_query_mismatch','receipt_page_url_mismatch','receipt_page_extract_error','content_receiver_missing','evidence_not_staged','error','type_error','other_error','unknown'},
 }
 
 def window_blocker_safe(supervisor, broker=None):
